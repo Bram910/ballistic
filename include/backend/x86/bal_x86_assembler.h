@@ -970,6 +970,19 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_cmc(bal_x86_assembler_t *assembler);
 
+    /// Emits a full memory fence, ordering every earlier load and store before every later one.
+    ///
+    /// Assembly equivalent: `mfence`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_mfence(bal_x86_assembler_t *assembler);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

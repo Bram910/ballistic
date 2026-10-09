@@ -39,6 +39,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "JMP_REGISTER",
     "JMP_RELATIVE",
     "LOAD",
+    "MFENCE",
     "MOV_REGISTER_IMMEDIATE",
     "MOV_REGISTER_REGISTER",
     "MOV_REGISTER_REGISTER_32",
@@ -508,6 +509,9 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_MUL_WIDENING:
             bal_x86_emit_mul_r64(assembler, source);
+            break;
+        case BAL_X86_MACRO_MFENCE:
+            bal_x86_emit_mfence(assembler);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

@@ -1270,6 +1270,34 @@ bal_x86_emit_imul_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t s
 }
 
 void
+bal_x86_emit_mfence(bal_x86_assembler_t *assembler)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] mfence", assembler->offset);
+    emit8(assembler->buffer, &assembler->offset, 0x0F);
+    emit8(assembler->buffer, &assembler->offset, 0xAE);
+    emit8(assembler->buffer, &assembler->offset, 0xF0);
+}
+
+void
 bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

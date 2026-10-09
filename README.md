@@ -136,3 +136,16 @@ bal_engine_destroy(&engine);
 bal_flat_translation_interface_destroy(&allocator, &memory_interface);
 allocator.free(allocator.context, guest_memory, guest_memory_size);
 ```
+
+<!-- BALLISTIC-STATUS:BEGIN -->
+## Status
+
+![integer](docs/status/badge_integer.svg) ![all](docs/status/badge_all.svg)
+
+![Status](docs/status/status.svg)
+
+Each of the 3496 reachable A64 encodings in the decoder table is tested with random operands against Unicorn: 130 verified, 4 translated but not checkable (Unicorn rejects the random branch targets), 0 wrong and 3362 not started. Integer and branch instructions: 55.1%.
+
+Regenerate with `python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage`
+after a debug build.
+<!-- BALLISTIC-STATUS:END -->

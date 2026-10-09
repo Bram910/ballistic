@@ -18,12 +18,16 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "AND_REGISTER_REGISTER_32",
     "CMOV_REGISTER_REGISTER",
     "CMOV_REGISTER_REGISTER_32",
+    "IMUL_REGISTER_REGISTER",
+    "IMUL_REGISTER_REGISTER_32",
     "JCC_RELATIVE",
     "JMP_REGISTER",
     "JMP_RELATIVE",
     "LOAD",
     "MOV_REGISTER_IMMEDIATE",
     "MOV_REGISTER_REGISTER",
+    "MOV_REGISTER_REGISTER_32",
+    "MOVSXD_REGISTER_REGISTER",
     "NEG_REGISTER",
     "NEG_REGISTER_32",
     "NOT_REGISTER",
@@ -259,6 +263,12 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_CMOV_REGISTER_REGISTER_32:
             bal_x86_emit_cmov_r32_r32(assembler, macro->condition, destination, source);
             break;
+        case BAL_X86_MACRO_IMUL_REGISTER_REGISTER:
+            bal_x86_emit_imul_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_IMUL_REGISTER_REGISTER_32:
+            bal_x86_emit_imul_r32_r32(assembler, destination, source);
+            break;
         case BAL_X86_MACRO_JCC_RELATIVE:
             if (BAL_LIKELY(immediate_or_offset <= INT32_MAX))
             {
@@ -303,6 +313,12 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_MOV_REGISTER_REGISTER:
             bal_x86_emit_mov_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_MOV_REGISTER_REGISTER_32:
+            bal_x86_emit_mov_r32_r32(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_MOVSXD_REGISTER_REGISTER:
+            bal_x86_emit_movsxd_r64_r32(assembler, destination, source);
             break;
         case BAL_X86_MACRO_NEG_REGISTER:
             bal_x86_emit_neg_r64(assembler, destination);

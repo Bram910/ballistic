@@ -545,6 +545,69 @@ extern "C"
                                    bal_x86_register_t   destination,
                                    bal_x86_register_t   source);
 
+    /// Emits a 64-bit signed multiply keeping the low 64 bits of the product, which are the same
+    /// for unsigned operands.
+    ///
+    /// Assembly equivalent: `imul destination, source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_imul_r64_r64(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   bal_x86_register_t   source);
+
+    /// Emits a 32-bit multiply keeping the low 32 bits of the product. The upper 32 bits of
+    /// `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `imul destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_imul_r32_r32(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   bal_x86_register_t   source);
+
+    /// Emits a sign extension of the low 32 bits of `source` into the 64-bit `destination`.
+    ///
+    /// Assembly equivalent: `movsxd destination, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_movsxd_r64_r32(bal_x86_assembler_t *assembler,
+                                     bal_x86_register_t   destination,
+                                     bal_x86_register_t   source);
+
+    /// Emits a 32-bit register move, which zero-extends the low 32 bits of `source` into
+    /// `destination`.
+    ///
+    /// Assembly equivalent: `mov destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_mov_r32_r32(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

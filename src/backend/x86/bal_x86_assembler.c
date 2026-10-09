@@ -1057,6 +1057,46 @@ bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
 }
 
 void
+bal_x86_emit_imul_r64_r64(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0xAF;
+    const bool    is_64bit = true;
+    emit_register_register_0f(assembler, opcode, is_64bit, destination, source, "imul");
+}
+
+void
+bal_x86_emit_imul_r32_r32(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0xAF;
+    const bool    is_64bit = false;
+    emit_register_register_0f(assembler, opcode, is_64bit, destination, source, "imul");
+}
+
+void
+bal_x86_emit_movsxd_r64_r32(bal_x86_assembler_t     *assembler,
+                            const bal_x86_register_t destination,
+                            const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x63;
+    const bool    is_64bit = true;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "movsxd");
+}
+
+void
+bal_x86_emit_mov_r32_r32(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x8B;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "mov");
+}
+
+void
 bal_x86_emit_cmov_r32_r32(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

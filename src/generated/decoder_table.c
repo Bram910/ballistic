@@ -1022,7 +1022,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC0FC00,
           0x13007C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -1034,7 +1034,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC0FC00,
           0x9340FC00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1478,7 +1478,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC003E0,
           0x330003E0,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1490,7 +1490,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC003E0,
           0xB34003E0,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1730,7 +1730,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC0007C,
           0x3300007C,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -1742,7 +1742,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC0007C,
           0xB340007C,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1754,7 +1754,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC00000,
           0x33000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -1766,7 +1766,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC00000,
           0xB3400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -2690,7 +2690,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC00000,
           0x33000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -2702,7 +2702,7 @@ const bal_decoder_instruction_metadata_t
         { "BFM",
           0xFFC00000,
           0xB3400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -7166,7 +7166,7 @@ const bal_decoder_instruction_metadata_t
         { "EXTR",
           0xFFE00000,
           0x93C00000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -7178,7 +7178,7 @@ const bal_decoder_instruction_metadata_t
         { "EXTR",
           0xFFE08000,
           0x13800000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -23810,7 +23810,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00F80,
           0x53000F80,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -23822,7 +23822,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00F80,
           0xD3400F80,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23954,7 +23954,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC0FC00,
           0x53007C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -23966,7 +23966,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC0FC00,
           0xD340FC00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28706,7 +28706,7 @@ const bal_decoder_instruction_metadata_t
         { "EXTR",
           0xFFE00000,
           0x93C00000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28718,7 +28718,7 @@ const bal_decoder_instruction_metadata_t
         { "EXTR",
           0xFFE08000,
           0x13800000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29210,7 +29210,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x13000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29222,7 +29222,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x93400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29234,7 +29234,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x13000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29246,7 +29246,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x93400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29258,7 +29258,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x13000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29270,7 +29270,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFC00000,
           0x93400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40646,7 +40646,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFFFFC00,
           0x13001C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -40658,7 +40658,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFFFFC00,
           0x93401C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -40706,7 +40706,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFFFFC00,
           0x13003C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -40718,7 +40718,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFFFFC00,
           0x93403C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -40742,7 +40742,7 @@ const bal_decoder_instruction_metadata_t
         { "SBFM",
           0xFFFFFC00,
           0x93407C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41462,7 +41462,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0x53000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41474,7 +41474,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0xD3400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41486,7 +41486,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0x53000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41498,7 +41498,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0xD3400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41510,7 +41510,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0x53000000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41522,7 +41522,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFC00000,
           0xD3400000,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -45290,7 +45290,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFFFFC00,
           0x53001C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -45338,7 +45338,7 @@ const bal_decoder_instruction_metadata_t
         { "UBFM",
           0xFFFFFC00,
           0x53003C00,
-          OPCODE_TRAP,
+          OPCODE_SHIFT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },

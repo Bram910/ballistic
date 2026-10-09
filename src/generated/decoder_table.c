@@ -3902,7 +3902,7 @@ const bal_decoder_instruction_metadata_t
         { "CLREX",
           0xFFFFF0FF,
           0xD503305F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6686,7 +6686,7 @@ const bal_decoder_instruction_metadata_t
         { "DMB",
           0xFFFFF0FF,
           0xD50330BF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6710,7 +6710,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFF0FF,
           0xD503309F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6722,7 +6722,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFF3FF,
           0xD503323F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -15410,7 +15410,7 @@ const bal_decoder_instruction_metadata_t
         { "ISB",
           0xFFFFF0FF,
           0xD50330DF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -27494,7 +27494,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFFFFF,
           0xD503349F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -29162,7 +29162,7 @@ const bal_decoder_instruction_metadata_t
         { "SB",
           0xFFFFFFFF,
           0xD50330FF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -34514,7 +34514,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFFFFF,
           0xD503309F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

@@ -72,6 +72,11 @@ local function derive_opcode(mnemonic)
         return "OPCODE_NOP"
     end
 
+    -- Barriers. Tier 1 emits a fence for DMB and DSB; the rest need no code.
+    if m == "DMB" or m == "DSB" or m == "ISB" or m == "SB" or m == "CLREX" then
+        return "OPCODE_NOP"
+    end
+
     if m == "ORR" then
         return "OPCODE_OR"
     end

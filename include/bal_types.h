@@ -31,6 +31,7 @@ extern "C"
         OPCODE_DIV,
         OPCODE_AND,
         OPCODE_XOR,
+        OPCODE_OR,
         OPCODE_OR_NOT,
         OPCODE_SHIFT,
         OPCODE_LOAD,

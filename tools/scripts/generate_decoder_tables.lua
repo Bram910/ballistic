@@ -58,8 +58,12 @@ end
 local function derive_opcode(mnemonic)
     local m = mnemonic:upper()
 
-    if m == "MOVZ" or m == "MOVN" or m == "MOVK" or m == "ORR" or m == "MOV" then
+    if m == "MOVZ" or m == "MOVN" or m == "MOVK" or m == "MOV" then
         return "OPCODE_MOV"
+    end
+
+    if m == "ORR" then
+        return "OPCODE_OR"
     end
 
     if m:sub(1, 3) == "ADD" then

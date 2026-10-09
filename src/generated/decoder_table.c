@@ -24986,7 +24986,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFE0FC00,
           0x0EA01C00,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24998,7 +24998,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFF8003E0,
           0xB20003E0,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 10, 6 },
@@ -25010,7 +25010,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFFC003E0,
           0x320003E0,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 10, 6 },
@@ -25022,7 +25022,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFFE0FFE0,
           0x2A0003E0,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -25034,7 +25034,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFFE0FFE0,
           0xAA0003E0,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -26486,7 +26486,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFF89C00,
           0x0F001400,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26498,7 +26498,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFF8DC00,
           0x0F009400,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26510,7 +26510,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFE0FC00,
           0x0EA01C00,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26522,7 +26522,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFF800000,
           0xB2000000,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26534,7 +26534,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFFC00000,
           0x32000000,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -26546,7 +26546,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFF200000,
           0x2A000000,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -26558,7 +26558,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xFF200000,
           0xAA000000,
-          OPCODE_MOV,
+          OPCODE_OR,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

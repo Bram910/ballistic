@@ -93,6 +93,17 @@ static void translate_add_sub_shifted(bal_tier1_compiler_t *compiler, uint32_t i
 
 static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void push_shift(bal_tier1_compiler_t  *compiler,
+                       bal_x86_macro_opcode_t opcode_64,
+                       bal_x86_macro_opcode_t opcode_32,
+                       bool                   is_32bit,
+                       bal_x86_register_t     x86_register,
+                       uint32_t               amount);
+
+static void translate_bitfield(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_extract(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_b_cond(bal_tier1_compiler_t *compiler,
                              uint32_t              instruction,
                              bal_guest_address_t   guest_address);
@@ -495,6 +506,29 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     bal_sliding_window_flush_all(&compiler->window);
 
                     bal_sliding_window_push(&compiler->window, ud2_macro);
+                    compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_SHIFT:
+                    // Bitfield (SBFM, BFM, UBFM): bits 28:23 = 100110.
+                    if (0x26U == ((instruction >> 23U) & 0x3FU))
+                    {
+                        translate_bitfield(compiler, instruction);
+                        break;
+                    }
+
+                    // Extract (EXTR): bits 28:23 = 100111.
+                    if (0x27U == ((instruction >> 23U) & 0x3FU))
+                    {
+                        translate_extract(compiler, instruction);
+                        break;
+                    }
+
+                    BAL_LOG_ERROR(&bal_thread_logger,
+                                  "Aborting function: Tier 1 unsupported shift instruction "
+                                  "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     is_block_terminated = true;
                     break;
@@ -1916,4 +1950,287 @@ write_link_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     };
     bal_sliding_window_push(&compiler->window, mov_macro);
     compiler->is_dirty |= 1U << link_register;
+}
+
+/// Pushes `x86_register <<= amount` (or >>=, depending on the opcodes) in the 64-bit or 32-bit
+/// form. A zero amount emits nothing.
+static void
+push_shift(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+           const bal_x86_macro_opcode_t       opcode_64,
+           const bal_x86_macro_opcode_t       opcode_32,
+           const bool                         is_32bit,
+           const bal_x86_register_t           x86_register,
+           const uint32_t                     amount)
+{
+    if (0U == amount)
+    {
+        return;
+    }
+
+    const bal_x86_macro_t shift_macro = {
+        .opcode              = true == is_32bit ? opcode_32 : opcode_64,
+        .destination         = x86_register,
+        .immediate_or_offset = amount,
+    };
+    bal_sliding_window_push(&compiler->window, shift_macro);
+}
+
+/// Translates SBFM, BFM and UBFM, and with them the LSL, LSR and ASR (immediate), SXTB/SXTH/SXTW,
+/// UXTB/UXTH, SBFX/UBFX, SBFIZ/UBFIZ, BFI and BFXIL aliases.
+///
+/// The field is built in BAL_X86_REGISTER_ZERO with two shifts: a left shift that moves bit imms
+/// of Rn to the top of the register, and a right shift (arithmetic for SBFM) that moves the field
+/// to its destination. When imms >= immr the field is bits imms:immr of Rn extracted to bit 0,
+/// otherwise it is bits imms:0 of Rn inserted at bit datasize - immr. SBFM and UBFM write this to
+/// Rd; BFM merges it into Rd under the field mask.
+void
+translate_bitfield(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd       = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn       = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t imms     = (instruction >> 10U) & 0x3FU;
+    const uint32_t immr     = (instruction >> 16U) & 0x3FU;
+    const uint32_t n        = (instruction >> 22U) & 1U;
+    const uint32_t opc      = (instruction >> 29U) & 0x3U;
+    const uint32_t sf       = instruction >> 31U;
+    const bool     is_32bit = 0U == sf;
+    const uint32_t width    = true == is_32bit ? 32U : 64U;
+
+    if (BAL_UNLIKELY(3U == opc) || BAL_UNLIKELY(n != sf)
+        || BAL_UNLIKELY(true == is_32bit && (imms > 31U || immr > 31U)))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: reserved bitfield encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    // Register 31 is the zero register for both operands.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bool               is_signed = 0U == opc;
+    const bal_x86_register_t field     = BAL_X86_REGISTER_ZERO;
+
+    if (31U == rn)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = field,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bool               skip_load  = false;
+        const bal_x86_register_t x86_rn     = allocate_x86_register(compiler, rn, skip_load);
+        const bal_x86_macro_t    copy_macro = {
+               .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+               .destination = field,
+               .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    const uint32_t left_shift  = width - 1U - imms;
+    const uint32_t right_shift = imms >= immr ? left_shift + immr : immr - imms - 1U;
+    push_shift(compiler,
+               BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+               BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE_32,
+               is_32bit,
+               field,
+               left_shift);
+
+    if (true == is_signed)
+    {
+        push_shift(compiler,
+                   BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE,
+                   BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE_32,
+                   is_32bit,
+                   field,
+                   right_shift);
+    }
+    else
+    {
+        push_shift(compiler,
+                   BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                   BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE_32,
+                   is_32bit,
+                   field,
+                   right_shift);
+    }
+
+    // A 32-bit field with no shift still holds the upper half of Xn. Clear it the way a write to a
+    // W register would.
+    if (true == is_32bit && 0U == left_shift && 0U == right_shift)
+    {
+        const bal_x86_macro_t truncate_macro = {
+            .opcode      = BAL_X86_MACRO_AND_REGISTER_REGISTER_32,
+            .destination = field,
+            .source      = field,
+        };
+        bal_sliding_window_push(&compiler->window, truncate_macro);
+    }
+
+    if (1U == opc)
+    {
+        // BFM keeps the bits of Rd outside the field.
+        const uint32_t field_width    = imms >= immr ? imms - immr + 1U : imms + 1U;
+        const uint32_t field_position = imms >= immr ? 0U : width - immr;
+        const uint64_t field_ones
+            = 64U == field_width ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << field_width) - 1ULL;
+        const uint64_t width_mask       = true == is_32bit ? 0xFFFFFFFFULL : 0xFFFFFFFFFFFFFFFFULL;
+        const uint64_t keep_mask        = ~(field_ones << field_position) & width_mask;
+        const bool     skip_load_rd     = false;
+        const bal_x86_register_t x86_rd = allocate_x86_register(compiler, rd, skip_load_rd);
+
+        const bal_x86_macro_t clear_macro = {
+            .opcode              = BAL_X86_MACRO_AND_REGISTER_IMMEDIATE,
+            .destination         = x86_rd,
+            .immediate_or_offset = keep_mask,
+        };
+        bal_sliding_window_push(&compiler->window, clear_macro);
+
+        const bal_x86_macro_t insert_macro = {
+            .opcode      = BAL_X86_MACRO_OR_REGISTER_REGISTER,
+            .destination = x86_rd,
+            .source      = field,
+        };
+        bal_sliding_window_push(&compiler->window, insert_macro);
+    }
+    else
+    {
+        const bool               skip_load_rd = true;
+        const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+        const bal_x86_macro_t    move_macro   = {
+                 .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+                 .destination = x86_rd,
+                 .source      = field,
+        };
+        bal_sliding_window_push(&compiler->window, move_macro);
+    }
+
+    compiler->is_dirty |= 1U << rd;
+}
+
+/// Translates EXTR and its ROR (immediate) alias: Rd is bits lsb + datasize - 1:lsb of the
+/// concatenation Rn:Rm. The low part is built in BAL_X86_REGISTER_ZERO and the high part in the
+/// discard register before they are combined.
+void
+translate_extract(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd       = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn       = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t lsb      = (instruction >> 10U) & 0x3FU;
+    const uint8_t  rm       = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t n        = (instruction >> 22U) & 1U;
+    const uint32_t sf       = instruction >> 31U;
+    const bool     is_32bit = 0U == sf;
+    const uint32_t width    = true == is_32bit ? 32U : 64U;
+
+    // Bits 30:29 and 21 must be zero; N must match sf.
+    if (BAL_UNLIKELY(0U != ((instruction >> 29U) & 0x3U))
+        || BAL_UNLIKELY(0U != ((instruction >> 21U) & 1U)) || BAL_UNLIKELY(n != sf)
+        || BAL_UNLIKELY(lsb >= width))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: reserved EXTR encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bal_x86_register_t low       = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t high      = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bool               skip_load = false;
+
+    // Copy both sources before any of them can be overwritten. Register 31 reads as zero.
+    if (31U == rm)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = low,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rm     = allocate_x86_register(compiler, rm, skip_load);
+        const bal_x86_macro_t    copy_macro = {
+               .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+               .destination = low,
+               .source      = x86_rm,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    if (lsb != 0U)
+    {
+        if (31U == rn)
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = high,
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+        else
+        {
+            const bal_x86_register_t x86_rn     = allocate_x86_register(compiler, rn, skip_load);
+            const bal_x86_macro_t    copy_macro = {
+                   .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+                   .destination = high,
+                   .source      = x86_rn,
+            };
+            bal_sliding_window_push(&compiler->window, copy_macro);
+        }
+
+        push_shift(compiler,
+                   BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                   BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE_32,
+                   is_32bit,
+                   low,
+                   lsb);
+        push_shift(compiler,
+                   BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                   BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE_32,
+                   is_32bit,
+                   high,
+                   width - lsb);
+
+        const bal_x86_macro_t combine_macro = {
+            .opcode      = BAL_X86_MACRO_OR_REGISTER_REGISTER,
+            .destination = low,
+            .source      = high,
+        };
+        bal_sliding_window_push(&compiler->window, combine_macro);
+    }
+    else if (true == is_32bit)
+    {
+        const bal_x86_macro_t truncate_macro = {
+            .opcode      = BAL_X86_MACRO_AND_REGISTER_REGISTER_32,
+            .destination = low,
+            .source      = low,
+        };
+        bal_sliding_window_push(&compiler->window, truncate_macro);
+    }
+
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+    const bal_x86_macro_t    move_macro   = {
+             .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+             .destination = x86_rd,
+             .source      = low,
+    };
+    bal_sliding_window_push(&compiler->window, move_macro);
+    compiler->is_dirty |= 1U << rd;
 }

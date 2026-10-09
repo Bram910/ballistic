@@ -237,6 +237,10 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
     bool   is_pc_dynamic         = false;
     size_t arm_instruction_count = 0;
 
+    // Set by unconditional branches, whose target replaces the address following the block.
+    bool                has_branch_target = false;
+    bal_guest_address_t branch_target_pc  = 0;
+
     while (false == is_block_terminated)
     {
         size_t          max_readable_instructions_bytes = 0;
@@ -409,10 +413,10 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     is_block_terminated = true;
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     break;
-                case OPCODE_JUMP:;
-                    bal_guest_address_t target_pc = 0;
-                    translate_jump(compiler, metadata, instruction, guest_address, &target_pc);
-                    guest_address       = target_pc;
+                case OPCODE_JUMP:
+                    translate_jump(
+                        compiler, metadata, instruction, guest_address, &branch_target_pc);
+                    has_branch_target   = true;
                     is_block_terminated = true;
                     break;
                 case OPCODE_BRANCH_ZERO:
@@ -533,7 +537,9 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
         }
     }
 
-    terminate_block(compiler, guest_address, is_pc_dynamic, arm_instruction_count, engine_flags);
+    const bal_guest_address_t next_pc
+        = true == has_branch_target ? branch_target_pc : guest_address;
+    terminate_block(compiler, next_pc, is_pc_dynamic, arm_instruction_count, engine_flags);
 
     if (BAL_UNLIKELY(compiler->status != BAL_SUCCESS || compiler->assembler.status != BAL_SUCCESS))
     {

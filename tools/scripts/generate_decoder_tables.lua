@@ -83,6 +83,18 @@ local function derive_opcode(mnemonic)
         return "OPCODE_SHIFT"
     end
 
+    if m == "LSLV" or m == "LSRV" or m == "ASRV" or m == "RORV" then
+        return "OPCODE_SHIFT"
+    end
+
+    if m == "ADC" or m == "ADCS" then
+        return "OPCODE_ADD"
+    end
+
+    if m == "SBC" or m == "SBCS" then
+        return "OPCODE_SUB"
+    end
+
     if m == "CSEL" or m == "CSINC" or m == "CSINV" or m == "CSNEG" then
         return "OPCODE_CONDITIONAL_SELECT"
     end

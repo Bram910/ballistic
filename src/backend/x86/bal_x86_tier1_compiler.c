@@ -101,6 +101,8 @@ static void translate_divide(bal_tier1_compiler_t *compiler, uint32_t instructio
 
 static void translate_conditional_compare(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_multiply_high(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void push_macro(bal_tier1_compiler_t  *compiler,
                        bal_x86_macro_opcode_t opcode,
                        bal_x86_register_t     destination,
@@ -2586,9 +2588,15 @@ translate_multiply_add(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     const uint32_t op31           = (instruction >> 21U) & 0x7U;
     const bool     is_64bit       = 1U == (instruction >> 31U);
 
-    // op31 = 000 is MADD/MSUB, 001 SMADDL/SMSUBL and 101 UMADDL/UMSUBL. The widening forms only
-    // exist with sf = 1. SMULH and UMULH (010 and 110) are not supported yet.
+    // op31 = 000 is MADD/MSUB, 001 SMADDL/SMSUBL, 101 UMADDL/UMSUBL, 010 SMULH and 110 UMULH. All
+    // but MADD/MSUB only exist with sf = 1.
     const bool is_widening = 1U == op31 || 5U == op31;
+
+    if ((2U == op31 || 6U == op31) && true == is_64bit && false == is_subtraction)
+    {
+        translate_multiply_high(compiler, instruction);
+        return;
+    }
 
     if (BAL_UNLIKELY(op31 != 0U && false == is_widening)
         || BAL_UNLIKELY(true == is_widening && false == is_64bit))
@@ -3419,4 +3427,65 @@ translate_conditional_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
     };
     bal_sliding_window_push(&compiler->window, store_flags_macro);
+}
+
+/// Translates SMULH and UMULH, the upper 64 bits of the 128-bit product of Xn and Xm.
+///
+/// The one-operand x86 multiply leaves that half in RDX, so RAX and RDX are saved on the stack
+/// around it, as for the division. The operands are copied out first so they may live in RAX or
+/// RDX.
+void
+translate_multiply_high(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t rd        = (uint8_t)(instruction & 0x1FU);
+    const uint8_t rn        = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t rm        = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const bool    is_signed = 0U == ((instruction >> 23U) & 1U);
+
+    // Every register operand treats 31 as the zero register.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bal_x86_register_t multiplicand    = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t multiplier      = BAL_X86_REGISTER_DISCARD_RESULT;
+    const uint8_t            operands[2]     = { rn, rm };
+    const bal_x86_register_t destinations[2] = { multiplicand, multiplier };
+    const bool               skip_load       = false;
+
+    for (size_t i = 0U; i < 2U; ++i)
+    {
+        if (31U == operands[i])
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = destinations[i],
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+        else
+        {
+            const bal_x86_register_t x86_operand
+                = allocate_x86_register(compiler, operands[i], skip_load);
+            push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, destinations[i], x86_operand);
+        }
+    }
+
+    push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, BAL_X86_RAX);
+    push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, BAL_X86_RDX);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_RAX, multiplicand);
+    push_macro(compiler,
+               true == is_signed ? BAL_X86_MACRO_IMUL_WIDENING : BAL_X86_MACRO_MUL_WIDENING,
+               BAL_X86_INVALID,
+               multiplier);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, multiplicand, BAL_X86_RDX);
+    push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, BAL_X86_RDX, BAL_X86_INVALID);
+    push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, BAL_X86_RAX, BAL_X86_INVALID);
+
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rd, multiplicand);
+    compiler->is_dirty |= 1U << rd;
 }

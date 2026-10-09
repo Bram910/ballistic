@@ -1169,6 +1169,125 @@ bal_x86_emit_ror_r32_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t
 }
 
 void
+bal_x86_emit_adc_r64_r64(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x13;
+    const bool    is_64bit = true;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "adc");
+}
+
+void
+bal_x86_emit_adc_r32_r32(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x13;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "adc");
+}
+
+void
+bal_x86_emit_sbb_r64_r64(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x1B;
+    const bool    is_64bit = true;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "sbb");
+}
+
+void
+bal_x86_emit_sbb_r32_r32(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x1B;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "sbb");
+}
+
+void
+bal_x86_emit_bt_r64_imm8(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const uint8_t            bit)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)) || BAL_UNLIKELY(bit > 63U))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Invalid bt operands: r%d, %u", destination, (unsigned)bit);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 5;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(
+        &bal_thread_logger, "[+0x%04zx] bt r%d, %u", assembler->offset, destination, (unsigned)bit);
+
+    const uint8_t w          = 1U;
+    const uint8_t r          = 0U;
+    const uint8_t b          = (uint8_t)destination >> 3U;
+    const uint8_t extension  = 4U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x0F);
+    emit8(assembler->buffer, &assembler->offset, 0xBA);
+    emit_modrm_register(assembler->buffer, &assembler->offset, (int)extension, destination);
+    emit8(assembler->buffer, &assembler->offset, bit);
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+bal_x86_emit_cmc(bal_x86_assembler_t *assembler)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 1;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] cmc", assembler->offset);
+    emit8(assembler->buffer, &assembler->offset, 0xF5);
+}
+
+void
 bal_x86_emit_cmov_r32_r32(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

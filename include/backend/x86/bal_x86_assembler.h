@@ -715,6 +715,95 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_ror_r32_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
 
+    /// Emits a 64-bit add with carry: `destination` + `source` and CF.
+    ///
+    /// Assembly equivalent: `adc destination, source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_adc_r64_r64(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a 32-bit add with carry. The upper 32 bits of `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `adc destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_adc_r32_r32(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a 64-bit subtract with borrow: `destination` - `source` and CF.
+    ///
+    /// Assembly equivalent: `sbb destination, source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_sbb_r64_r64(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a 32-bit subtract with borrow. The upper 32 bits of `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `sbb destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_sbb_r32_r32(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a bit test, copying bit `bit` of `destination` into CF.
+    ///
+    /// Assembly equivalent: `bt destination, bit`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `bit` is greater than 63.
+    void bal_x86_emit_bt_r64_imm8(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  uint8_t              bit);
+
+    /// Emits a complement of the carry flag.
+    ///
+    /// Assembly equivalent: `cmc`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_cmc(bal_x86_assembler_t *assembler);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

@@ -13,9 +13,13 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "ADD_REGISTER_IMMEDIATE_32",
     "ADD_REGISTER_REGISTER",
     "ADD_REGISTER_REGISTER_32",
+    "ADC_REGISTER_REGISTER",
+    "ADC_REGISTER_REGISTER_32",
     "AND_REGISTER_IMMEDIATE",
     "AND_REGISTER_REGISTER",
     "AND_REGISTER_REGISTER_32",
+    "BT_REGISTER_IMMEDIATE",
+    "CMC",
     "CMOV_REGISTER_REGISTER",
     "CMOV_REGISTER_REGISTER_32",
     "IMUL_REGISTER_REGISTER",
@@ -44,6 +48,8 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "SAR_REGISTER_IMMEDIATE_32",
     "SAR_REGISTER_CL",
     "SAR_REGISTER_CL_32",
+    "SBB_REGISTER_REGISTER",
+    "SBB_REGISTER_REGISTER_32",
     "SETCC",
     "SHL_REGISTER_IMMEDIATE",
     "SHL_REGISTER_IMMEDIATE_32",
@@ -405,6 +411,18 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_TEST_REGISTER_REGISTER_32:
             bal_x86_emit_test_r32_r32(assembler, destination, source);
             break;
+        case BAL_X86_MACRO_ADC_REGISTER_REGISTER:
+            bal_x86_emit_adc_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_ADC_REGISTER_REGISTER_32:
+            bal_x86_emit_adc_r32_r32(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_BT_REGISTER_IMMEDIATE:
+            bal_x86_emit_bt_r64_imm8(assembler, destination, (uint8_t)immediate_or_offset);
+            break;
+        case BAL_X86_MACRO_CMC:
+            bal_x86_emit_cmc(assembler);
+            break;
         case BAL_X86_MACRO_ROR_REGISTER_CL:
             bal_x86_emit_ror_r64_cl(assembler, destination);
             break;
@@ -416,6 +434,12 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_SAR_REGISTER_CL_32:
             bal_x86_emit_sar_r32_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SBB_REGISTER_REGISTER:
+            bal_x86_emit_sbb_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_SBB_REGISTER_REGISTER_32:
+            bal_x86_emit_sbb_r32_r32(assembler, destination, source);
             break;
         case BAL_X86_MACRO_SHL_REGISTER_CL:
             bal_x86_emit_shl_r64_cl(assembler, destination);

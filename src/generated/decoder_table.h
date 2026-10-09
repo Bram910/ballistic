@@ -13,7 +13,7 @@ extern "C"
 {
 #endif /* __cplusplus */
 
-#define BAL_DECODER_ARM64_INSTRUCTIONS_SIZE 3856
+#define BAL_DECODER_ARM64_INSTRUCTIONS_SIZE 3859
 
     typedef struct
     {

@@ -461,14 +461,22 @@ local function process_box(box, mask, value)
         return nil, nil
     end
 
+    -- Each <c> cell covers `colspan` bits, one by default. A cell fixes its bits when it holds
+    -- exactly that many 0/1 digits. Should-be bits, written "(0)" and "(1)", take their canonical
+    -- value: other values are CONSTRAINED UNPREDICTABLE and never emitted by assemblers. Anything
+    -- else ("x", empty cells, constraints such as "!= 1111") leaves the bits variable.
     local content = ""
 
     for _, c in ipairs(box.children) do
         if c.tag == "c" then
+            local span = tonumber(c.attrs.colspan) or 1
             local text = get_text(c)
+            local should_be = text:match("^%(([01])%)$")
 
-            if text == "" then
-                text = "x"
+            if should_be ~= nil and span == 1 then
+                text = should_be
+            elseif #text ~= span or not text:match("^[01]+$") then
+                text = string.rep("x", span)
             end
 
             content = content .. text

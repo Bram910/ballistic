@@ -12,6 +12,15 @@ extern "C"
 {
 #endif // __cplusplus
 
+    /// Guest exceptions reported through [`bal_cpu_t::exception`].
+    typedef enum
+    {
+        BAL_EXCEPTION_NONE = 0,
+
+        /// A load or store accessed an address the memory interface does not translate.
+        BAL_EXCEPTION_DATA_ABORT = 1,
+    } bal_exception_t;
+
     BAL_ALIGNED(64) typedef struct
     {
         uint64_t                 x[32];
@@ -20,11 +29,16 @@ extern "C"
 
         // ARM's Carry flag is inverted compared to x86's Carry during subtraction operations.
         // Compiler's must handle this.
-        uint8_t  flag_c; // ARM C -> x86 CF
-        uint8_t  flag_z; // ARM Z -> x86 ZF
-        uint8_t  flag_n; // ARM N -> x86 SF
-        uint8_t  flag_v; // ARM V -> x86 OF
-        uint32_t _pad_flags;
+        uint8_t flag_c; // ARM C -> x86 CF
+        uint8_t flag_z; // ARM Z -> x86 ZF
+        uint8_t flag_n; // ARM N -> x86 SF
+        uint8_t flag_v; // ARM V -> x86 OF
+
+        /// Non-zero when the last block stopped on a guest exception instead of finishing, see
+        /// [`bal_exception_t`]. `pc` then holds the address of the instruction that raised it. It
+        /// is zero while a block runs, which translators rely on when they store the flags as one
+        /// 64-bit word, and the host must clear it before resuming execution.
+        uint32_t exception;
 
         /// Tracks executed guest instructions.
         ///

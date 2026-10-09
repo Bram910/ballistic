@@ -3354,8 +3354,8 @@ translate_divide(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
 ///
 /// The condition is evaluated on the old flags first. The comparison then runs in
 /// BAL_X86_REGISTER_ZERO and its flags are stored as usual. Finally the four flag bytes are loaded
-/// as one word, together with the padding after them, and replaced by the immediate flags with a
-/// `cmov` when the condition failed. AL and NV always compare.
+/// as one word, together with the exception field after them, and replaced by the immediate flags
+/// with a `cmov` when the condition failed. AL and NV always compare.
 void
 translate_conditional_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                               const uint32_t                     instruction)
@@ -3439,8 +3439,8 @@ translate_conditional_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         return;
     }
 
-    // flag_c, flag_z, flag_n and flag_v are consecutive bytes followed by four bytes of padding,
-    // so one 64-bit load and store covers exactly them.
+    // flag_c, flag_z, flag_n and flag_v are consecutive bytes followed by the 32-bit exception
+    // field, which is zero while a block runs, so one 64-bit load and store covers exactly them.
     const uint64_t immediate_flags
         = (uint64_t)((nzcv >> 1U) & 1U) | ((uint64_t)((nzcv >> 2U) & 1U) << 8U)
           | ((uint64_t)((nzcv >> 3U) & 1U) << 16U) | ((uint64_t)(nzcv & 1U) << 24U);
@@ -3925,7 +3925,8 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
     if (SYSTEM_REGISTER_NZCV == system_register)
     {
         // Build the flag word in the discard register from the copy of Xt in the zero register.
-        // flag_c to flag_v are followed by four bytes of padding, so a 64-bit store covers them.
+        // flag_c to flag_v are followed by the exception field, which is zero while a block runs,
+        // so a 64-bit store of the flags with zero above them covers exactly them.
         const bal_x86_register_t flags      = scratch;
         const bal_x86_macro_t    zero_macro = {
                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,

@@ -1054,6 +1054,94 @@ bal_x86_emit_neg_r32(bal_x86_assembler_t *assembler, const bal_x86_register_t de
 }
 
 void
+bal_x86_emit_div_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 6;
+    const bool    is_64bit         = true;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "div");
+}
+
+void
+bal_x86_emit_div_r32(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 6;
+    const bool    is_64bit         = false;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "div");
+}
+
+void
+bal_x86_emit_idiv_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 7;
+    const bool    is_64bit         = true;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "idiv");
+}
+
+void
+bal_x86_emit_idiv_r32(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 7;
+    const bool    is_64bit         = false;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "idiv");
+}
+
+void
+bal_x86_emit_cqo(bal_x86_assembler_t *assembler)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 2;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] cqo", assembler->offset);
+    const uint8_t w = 1U;
+    const uint8_t r = 0U;
+    const uint8_t b = 0U;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x99);
+}
+
+void
+bal_x86_emit_cdq(bal_x86_assembler_t *assembler)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 1;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] cdq", assembler->offset);
+    emit8(assembler->buffer, &assembler->offset, 0x99);
+}
+
+void
 bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

@@ -512,6 +512,88 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_neg_r32(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
 
+    /// Emits a 64-bit unsigned division of RDX:RAX by `source`, leaving the quotient in RAX and the
+    /// remainder in RDX. The CPU raises #DE when `source` is zero or the quotient overflows.
+    ///
+    /// Assembly equivalent: `div source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_div_r64(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
+    /// Emits a 32-bit unsigned division of EDX:EAX by `source`. The CPU raises #DE when `source` is
+    /// zero or the quotient overflows.
+    ///
+    /// Assembly equivalent: `div source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_div_r32(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
+    /// Emits a 64-bit signed division of RDX:RAX by `source`, leaving the quotient in RAX and the
+    /// remainder in RDX. The CPU raises #DE when `source` is zero or the quotient overflows.
+    ///
+    /// Assembly equivalent: `idiv source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_idiv_r64(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
+    /// Emits a 32-bit signed division of EDX:EAX by `source`. The CPU raises #DE when `source` is
+    /// zero or the quotient overflows.
+    ///
+    /// Assembly equivalent: `idiv source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_idiv_r32(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
+    /// Emits a sign extension of RAX into RDX:RAX.
+    ///
+    /// Assembly equivalent: `cqo`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_cqo(bal_x86_assembler_t *assembler);
+
+    /// Emits a sign extension of EAX into EDX:EAX.
+    ///
+    /// Assembly equivalent: `cdq`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_cdq(bal_x86_assembler_t *assembler);
+
     /// Emits a 64-bit conditional move: `destination` = `source` when `condition` holds.
     ///
     /// Assembly equivalent: `cmov<condition> destination, source`

@@ -18,10 +18,16 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "AND_REGISTER_IMMEDIATE",
     "AND_REGISTER_REGISTER",
     "AND_REGISTER_REGISTER_32",
+    "CDQ",
     "BT_REGISTER_IMMEDIATE",
     "CMC",
     "CMOV_REGISTER_REGISTER",
     "CMOV_REGISTER_REGISTER_32",
+    "CQO",
+    "DIV_REGISTER",
+    "DIV_REGISTER_32",
+    "IDIV_REGISTER",
+    "IDIV_REGISTER_32",
     "IMUL_REGISTER_REGISTER",
     "IMUL_REGISTER_REGISTER_32",
     "JCC_RELATIVE",
@@ -39,6 +45,8 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "OR_REGISTER_IMMEDIATE",
     "OR_REGISTER_REGISTER",
     "OR_REGISTER_REGISTER_32",
+    "POP_REGISTER",
+    "PUSH_REGISTER",
     "RET",
     "ROR_REGISTER_IMMEDIATE",
     "ROR_REGISTER_IMMEDIATE_32",
@@ -452,6 +460,30 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_SHR_REGISTER_CL_32:
             bal_x86_emit_shr_r32_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_CDQ:
+            bal_x86_emit_cdq(assembler);
+            break;
+        case BAL_X86_MACRO_CQO:
+            bal_x86_emit_cqo(assembler);
+            break;
+        case BAL_X86_MACRO_DIV_REGISTER:
+            bal_x86_emit_div_r64(assembler, source);
+            break;
+        case BAL_X86_MACRO_DIV_REGISTER_32:
+            bal_x86_emit_div_r32(assembler, source);
+            break;
+        case BAL_X86_MACRO_IDIV_REGISTER:
+            bal_x86_emit_idiv_r64(assembler, source);
+            break;
+        case BAL_X86_MACRO_IDIV_REGISTER_32:
+            bal_x86_emit_idiv_r32(assembler, source);
+            break;
+        case BAL_X86_MACRO_POP_REGISTER:
+            bal_x86_emit_pop_r64(assembler, destination);
+            break;
+        case BAL_X86_MACRO_PUSH_REGISTER:
+            bal_x86_emit_push_r64(assembler, source);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

@@ -15,6 +15,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "ADD_REGISTER_REGISTER_32",
     "AND_REGISTER_IMMEDIATE",
     "AND_REGISTER_REGISTER",
+    "AND_REGISTER_REGISTER_32",
     "JCC_RELATIVE",
     "JMP_REGISTER",
     "JMP_RELATIVE",
@@ -235,6 +236,9 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_AND_REGISTER_REGISTER:
             bal_x86_emit_and_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_AND_REGISTER_REGISTER_32:
+            bal_x86_emit_and_r32_r32(assembler, destination, source);
             break;
         case BAL_X86_MACRO_JCC_RELATIVE:
             if (BAL_LIKELY(immediate_or_offset <= INT32_MAX))

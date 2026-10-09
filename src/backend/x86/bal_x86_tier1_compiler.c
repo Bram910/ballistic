@@ -1375,8 +1375,11 @@ translate_and_reg(bal_tier1_compiler_t *BAL_RESTRICT                     compile
         bal_sliding_window_push(&compiler->window, mov_macro);
     }
 
+    // The 32-bit form zeroes the upper half of the destination, like writes to W registers.
+    const bool            is_32bit  = BAL_OPERAND_TYPE_REGISTER_32 == operands[0].type;
     const bal_x86_macro_t and_macro = {
-        .opcode      = BAL_X86_MACRO_AND_REGISTER_REGISTER,
+        .opcode      = true == is_32bit ? BAL_X86_MACRO_AND_REGISTER_REGISTER_32
+                                        : BAL_X86_MACRO_AND_REGISTER_REGISTER,
         .destination = x86_rd,
         .source      = x86_and_source,
     };

@@ -99,6 +99,16 @@ static void translate_b_cond(bal_tier1_compiler_t *compiler,
 
 static void emit_compound_condition(bal_tier1_compiler_t *compiler, uint32_t condition);
 
+static void translate_branch_register(bal_tier1_compiler_t *compiler,
+                                      uint32_t              instruction,
+                                      bal_guest_address_t   guest_address);
+
+static void translate_test_bit_branch(bal_tier1_compiler_t *compiler,
+                                      uint32_t              instruction,
+                                      bal_guest_address_t   guest_address);
+
+static void write_link_register(bal_tier1_compiler_t *compiler, bal_guest_address_t return_address);
+
 static void translate_cbz_cbnz(bal_tier1_compiler_t                     *compiler,
                                const bal_decoder_instruction_metadata_t *metadata,
                                uint32_t                                  instruction,
@@ -416,9 +426,41 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     break;
                 case OPCODE_JUMP:
-                    translate_jump(
-                        compiler, metadata, instruction, guest_address, &branch_target_pc);
-                    has_branch_target   = true;
+                    // BR Xn.
+                    if (0xD61F0000U == (instruction & 0xFFFFFC1FU))
+                    {
+                        translate_branch_register(compiler, instruction, guest_address);
+                        is_pc_dynamic = true;
+                    }
+                    else
+                    {
+                        translate_jump(
+                            compiler, metadata, instruction, guest_address, &branch_target_pc);
+                        has_branch_target = true;
+                    }
+
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_CALL_HOST:
+                    // BLR Xn.
+                    if (0xD63F0000U == (instruction & 0xFFFFFC1FU))
+                    {
+                        translate_branch_register(compiler, instruction, guest_address);
+                        is_pc_dynamic = true;
+                    }
+                    else
+                    {
+                        // BL: branch like B and leave the return address in X30.
+                        translate_jump(
+                            compiler, metadata, instruction, guest_address, &branch_target_pc);
+                        write_link_register(compiler, guest_address + 4U);
+                        has_branch_target = true;
+                    }
+
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_TEST_BIT_ZERO:
+                    translate_test_bit_branch(compiler, instruction, guest_address);
                     is_block_terminated = true;
                     break;
                 case OPCODE_BRANCH_ZERO:
@@ -436,18 +478,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_RETURN:
                     BAL_LOG_DEBUG(&bal_thread_logger, "Block terminated by RET");
-                    const uint8_t rn
-                        = (uint8_t)extract_operand_value(instruction, &metadata->operands[0]);
-                    const bool               skip_load_instruction = false;
-                    const bal_x86_register_t x86_rn
-                        = allocate_x86_register(compiler, rn, skip_load_instruction);
-
-                    const bal_x86_macro_t store_pc_macro
-                        = { .opcode              = BAL_X86_MACRO_STORE,
-                            .source              = x86_rn,
-                            .immediate_or_offset = offsetof(bal_cpu_t, pc) };
-                    bal_sliding_window_push(&compiler->window, store_pc_macro);
-
+                    translate_branch_register(compiler, instruction, guest_address);
                     is_pc_dynamic       = true;
                     is_block_terminated = true;
                     break;
@@ -1776,4 +1807,101 @@ decode_bit_masks(const uint32_t         n,
 
     *mask = true == is_32bit ? result & 0xFFFFFFFFULL : result;
     return true;
+}
+
+/// Translates BR, BLR and RET, which branch to the address held in Xn. BLR also leaves the return
+/// address in X30. The target is stored to the guest PC before X30 is written, so BLR X30 branches
+/// to the old value of X30.
+static void
+translate_branch_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                          const uint32_t                     instruction,
+                          const bal_guest_address_t          guest_address)
+{
+    const uint8_t            rn      = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const bool               is_link = 1U == ((instruction >> 21U) & 0x3U);
+    const bal_x86_register_t x86_rn  = read_zero_or_register(compiler, rn);
+
+    const bal_x86_macro_t store_pc_macro = {
+        .opcode              = BAL_X86_MACRO_STORE,
+        .source              = x86_rn,
+        .immediate_or_offset = offsetof(bal_cpu_t, pc),
+    };
+    bal_sliding_window_push(&compiler->window, store_pc_macro);
+
+    if (true == is_link)
+    {
+        write_link_register(compiler, guest_address + 4U);
+    }
+}
+
+/// Translates TBZ and TBNZ, which branch when bit b5:b40 of Rt is zero or non-zero.
+static void
+translate_test_bit_branch(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                          const uint32_t                     instruction,
+                          const bal_guest_address_t          guest_address)
+{
+    const uint8_t  rt         = (uint8_t)(instruction & 0x1FU);
+    const uint32_t imm14      = (instruction >> 5U) & 0x3FFFU;
+    const uint32_t bit_number = ((instruction >> 31U) << 5U) | ((instruction >> 19U) & 0x1FU);
+    const bool     is_tbnz    = 1U == ((instruction >> 24U) & 1U);
+
+    // WARNING: Shifting the 14-bit field to the top and back sign-extends it.
+    const int32_t             signed_immediate = (int32_t)(imm14 << 18U) >> 18U;
+    const bal_guest_address_t taken_pc = guest_address + (uint64_t)((int64_t)signed_immediate * 4);
+    const bal_guest_address_t fallthrough_pc = guest_address + 4U;
+
+    // Isolate the bit in BAL_X86_REGISTER_ZERO so the guest register keeps its value.
+    const bal_x86_register_t x86_rt     = read_zero_or_register(compiler, rt);
+    const bal_x86_macro_t    copy_macro = {
+           .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+           .destination = BAL_X86_REGISTER_ZERO,
+           .source      = x86_rt,
+    };
+    bal_sliding_window_push(&compiler->window, copy_macro);
+
+    if (bit_number != 0U)
+    {
+        const bal_x86_macro_t shift_macro = {
+            .opcode              = BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = bit_number,
+        };
+        bal_sliding_window_push(&compiler->window, shift_macro);
+    }
+
+    const bal_x86_macro_t mask_macro = {
+        .opcode              = BAL_X86_MACRO_AND_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_REGISTER_ZERO,
+        .immediate_or_offset = 1U,
+    };
+    bal_sliding_window_push(&compiler->window, mask_macro);
+
+    const bal_x86_macro_t test_macro = {
+        .opcode      = BAL_X86_MACRO_TEST_REGISTER_REGISTER,
+        .destination = BAL_X86_REGISTER_ZERO,
+        .source      = BAL_X86_REGISTER_ZERO,
+    };
+    bal_sliding_window_push(&compiler->window, test_macro);
+
+    terminate_block_conditional(
+        compiler, true == is_tbnz ? BAL_X86_COND_NE : BAL_X86_COND_E, fallthrough_pc, taken_pc);
+}
+
+/// Writes the return address of BL and BLR to X30.
+static void
+write_link_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                    const bal_guest_address_t          return_address)
+{
+    const uint8_t            link_register = 30U;
+    const bool               skip_load     = true;
+    const bal_x86_register_t x86_link_register
+        = allocate_x86_register(compiler, link_register, skip_load);
+
+    const bal_x86_macro_t mov_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = x86_link_register,
+        .immediate_or_offset = return_address,
+    };
+    bal_sliding_window_push(&compiler->window, mov_macro);
+    compiler->is_dirty |= 1U << link_register;
 }

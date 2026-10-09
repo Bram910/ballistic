@@ -2906,7 +2906,7 @@ const bal_decoder_instruction_metadata_t
         { "BLR",
           0xFFFFFC1F,
           0xD63F0000,
-          OPCODE_TRAP,
+          OPCODE_CALL_HOST,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -2990,7 +2990,7 @@ const bal_decoder_instruction_metadata_t
         { "BR",
           0xFFFFFC1F,
           0xD61F0000,
-          OPCODE_TRAP,
+          OPCODE_JUMP,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -3554,7 +3554,7 @@ const bal_decoder_instruction_metadata_t
         { "CBNZ",
           0xFF000000,
           0x35000000,
-          OPCODE_TRAP,
+          OPCODE_BRANCH_NOT_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -3566,7 +3566,7 @@ const bal_decoder_instruction_metadata_t
         { "CBNZ",
           0xFF000000,
           0xB5000000,
-          OPCODE_TRAP,
+          OPCODE_BRANCH_NOT_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -3578,7 +3578,7 @@ const bal_decoder_instruction_metadata_t
         { "CBZ",
           0xFF000000,
           0x34000000,
-          OPCODE_TRAP,
+          OPCODE_BRANCH_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -3590,7 +3590,7 @@ const bal_decoder_instruction_metadata_t
         { "CBZ",
           0xFF000000,
           0xB4000000,
-          OPCODE_TRAP,
+          OPCODE_BRANCH_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -40874,7 +40874,7 @@ const bal_decoder_instruction_metadata_t
         { "TBNZ",
           0x7F000000,
           0x37000000,
-          OPCODE_TRAP,
+          OPCODE_TEST_BIT_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 14 },
@@ -40958,7 +40958,7 @@ const bal_decoder_instruction_metadata_t
         { "TBZ",
           0x7F000000,
           0x36000000,
-          OPCODE_TRAP,
+          OPCODE_TEST_BIT_ZERO,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 14 },

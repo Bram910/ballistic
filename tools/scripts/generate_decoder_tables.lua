@@ -127,6 +127,26 @@ local function derive_opcode(mnemonic)
         return "OPCODE_RETURN"
     end
 
+    if m == "BR" then
+        return "OPCODE_JUMP"
+    end
+
+    if m == "BLR" then
+        return "OPCODE_CALL_HOST"
+    end
+
+    if m == "CBZ" then
+        return "OPCODE_BRANCH_ZERO"
+    end
+
+    if m == "CBNZ" then
+        return "OPCODE_BRANCH_NOT_ZERO"
+    end
+
+    if m == "TBZ" or m == "TBNZ" then
+        return "OPCODE_TEST_BIT_ZERO"
+    end
+
     if m:sub(1, 3) == "CMP" then
         return "OPCODE_CMP"
     end

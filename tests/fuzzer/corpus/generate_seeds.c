@@ -39,18 +39,6 @@ main(void)
         const bal_decoder_instruction_metadata_t *BAL_RESTRICT decoded_instruction_metadata
             = bal_decode_arm64(seed);
 
-        // The fuzzer tests one instruction at a time so branch instructions will cause a
-        // infinite loop.
-        if (metadata_cursor->ir_opcode == OPCODE_JUMP
-            || metadata_cursor->ir_opcode == OPCODE_BRANCH_CONDITIONAL
-            || metadata_cursor->ir_opcode == OPCODE_BRANCH_ZERO
-            || metadata_cursor->ir_opcode == OPCODE_BRANCH_NOT_ZERO
-            || metadata_cursor->ir_opcode == OPCODE_RETURN
-            || metadata_cursor->ir_opcode == OPCODE_CALL_HOST)
-        {
-            continue;
-        }
-
         if (decoded_instruction_metadata != NULL)
         {
             (void)fwrite(&seed, sizeof(seed), 1U, seeds_file);

@@ -93,6 +93,8 @@ static void translate_add_sub_shifted(bal_tier1_compiler_t *compiler, uint32_t i
 
 static void translate_add_sub_extended(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_add_sub_carry(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void push_shift(bal_tier1_compiler_t  *compiler,
@@ -425,6 +427,14 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         && 0U == ((instruction >> 21U) & 1U))
                     {
                         translate_add_sub_shifted(compiler, instruction);
+                        break;
+                    }
+
+                    // ADC/SBC: bits 28:21 = 11010000 and bits 15:10 = 000000.
+                    if (0xD0U == ((instruction >> 21U) & 0xFFU)
+                        && 0U == ((instruction >> 10U) & 0x3FU))
+                    {
+                        translate_add_sub_carry(compiler, instruction);
                         break;
                     }
 
@@ -2748,6 +2758,139 @@ translate_add_sub_extended(bal_tier1_compiler_t *BAL_RESTRICT compiler, const ui
     const bool is_commutative = false == is_sub;
     emit_binary_operation(
         compiler, opcode, is_commutative, x86_result, is_rn_zero, x86_rn, operand2);
+
+    if (true == is_setting_flags)
+    {
+        capture_nzcv(compiler, true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B);
+    }
+
+    if (false == is_discarded_result)
+    {
+        compiler->is_dirty |= 1U << rd;
+    }
+}
+
+/// Translates ADC, ADCS, SBC and SBCS, and so NGC and NGCS: Rd = Rn + Rm + C, or Rn - Rm - NOT(C).
+///
+/// The guest carry is moved into the x86 carry first, with `bt` on the flag byte, and inverted for
+/// the subtractions since x86 SBB subtracts the borrow. The operands are then set up with moves,
+/// which leave the x86 flags alone, so ADC or SBB consumes the guest carry.
+void
+translate_add_sub_carry(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t rd               = (uint8_t)(instruction & 0x1FU);
+    const uint8_t rn               = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t rm               = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const bool    is_setting_flags = 1U == ((instruction >> 29U) & 1U);
+    const bool    is_sub           = 1U == ((instruction >> 30U) & 1U);
+    const bool    is_32bit         = 0U == (instruction >> 31U);
+
+    // Every register operand treats 31 as the zero register.
+    const bool is_discarded_result = 31U == rd;
+
+    if (true == is_discarded_result && false == is_setting_flags)
+    {
+        return;
+    }
+
+    const bal_x86_register_t operand2 = BAL_X86_REGISTER_ZERO;
+
+    const bal_x86_macro_t load_carry_macro = {
+        .opcode              = BAL_X86_MACRO_LOAD,
+        .destination         = operand2,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+    };
+    bal_sliding_window_push(&compiler->window, load_carry_macro);
+
+    const bal_x86_macro_t carry_macro = {
+        .opcode              = BAL_X86_MACRO_BT_REGISTER_IMMEDIATE,
+        .destination         = operand2,
+        .immediate_or_offset = 0U,
+    };
+    bal_sliding_window_push(&compiler->window, carry_macro);
+
+    if (true == is_sub)
+    {
+        const bal_x86_macro_t invert_macro = {
+            .opcode = BAL_X86_MACRO_CMC,
+        };
+        bal_sliding_window_push(&compiler->window, invert_macro);
+    }
+
+    // Only moves from here to the ADC/SBB so the carry survives. Rm is copied first so Rd may
+    // alias it.
+    const bool skip_load = false;
+
+    if (31U == rm)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = operand2,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rm     = allocate_x86_register(compiler, rm, skip_load);
+        const bal_x86_macro_t    copy_macro = {
+               .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+               .destination = operand2,
+               .source      = x86_rm,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    const bool               is_rn_zero = 31U == rn;
+    const bal_x86_register_t x86_rn     = true == is_rn_zero
+                                              ? BAL_X86_REGISTER_ZERO
+                                              : allocate_x86_register(compiler, rn, skip_load);
+    bal_x86_register_t       x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (false == is_discarded_result)
+    {
+        const bool skip_load_rd = true;
+        x86_result              = allocate_x86_register(compiler, rd, skip_load_rd);
+    }
+
+    if (true == is_rn_zero)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = x86_result,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_macro_t copy_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = x86_result,
+            .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    bal_x86_macro_opcode_t opcode;
+
+    if (true == is_sub)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_SBB_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_SBB_REGISTER_REGISTER;
+    }
+    else
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_ADC_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_ADC_REGISTER_REGISTER;
+    }
+
+    const bal_x86_macro_t operation_macro = {
+        .opcode      = opcode,
+        .destination = x86_result,
+        .source      = operand2,
+    };
+    bal_sliding_window_push(&compiler->window, operation_macro);
 
     if (true == is_setting_flags)
     {

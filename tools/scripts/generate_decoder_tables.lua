@@ -62,6 +62,16 @@ local function derive_opcode(mnemonic)
         return "OPCODE_MOV"
     end
 
+    -- ADR and ADRP move an address computed at translation time.
+    if m == "ADR" or m == "ADRP" then
+        return "OPCODE_MOV"
+    end
+
+    -- Hints the engine does not implement execute as NOP, as the architecture requires.
+    if m == "NOP" or m == "HINT" then
+        return "OPCODE_NOP"
+    end
+
     if m == "ORR" then
         return "OPCODE_OR"
     end

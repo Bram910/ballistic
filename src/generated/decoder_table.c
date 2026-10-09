@@ -650,7 +650,7 @@ const bal_decoder_instruction_metadata_t
         { "ADR",
           0x9F000000,
           0x10000000,
-          OPCODE_TRAP,
+          OPCODE_MOV,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -698,7 +698,7 @@ const bal_decoder_instruction_metadata_t
         { "ADRP",
           0x9F000000,
           0x90000000,
-          OPCODE_TRAP,
+          OPCODE_MOV,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -15170,7 +15170,7 @@ const bal_decoder_instruction_metadata_t
         { "HINT",
           0xFFFFF01F,
           0xD503201F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
@@ -26318,7 +26318,7 @@ const bal_decoder_instruction_metadata_t
         { "NOP",
           0xFFFFFFFF,
           0xD503201F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

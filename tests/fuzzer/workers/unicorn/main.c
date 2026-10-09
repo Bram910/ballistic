@@ -49,8 +49,7 @@ main(void)
             continue;
         }
 
-        unicorn_error = uc_mem_map(
-            engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE, UC_PROT_READ | UC_PROT_EXEC);
+        unicorn_error = uc_mem_map(engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE, UC_PROT_ALL);
 
         if (unicorn_error != UC_ERR_OK)
         {
@@ -62,6 +61,17 @@ main(void)
         const uint64_t code_buffer_size_bytes = input.instruction_count * 4ULL;
         unicorn_error
             = uc_mem_write(engine, GUEST_BASE_ADDRESS, input.instructions, code_buffer_size_bytes);
+
+        // Mirror the Ballistic worker's guest memory: writable, with a RET after the
+        // instructions, so loads and stores see the same bytes in both engines.
+        if (UC_ERR_OK == unicorn_error)
+        {
+            const uint32_t return_encoding = 0xD65F03C0U;
+            unicorn_error                  = uc_mem_write(engine,
+                                         GUEST_BASE_ADDRESS + code_buffer_size_bytes,
+                                         &return_encoding,
+                                         sizeof(return_encoding));
+        }
 
         if (unicorn_error != UC_ERR_OK)
         {
@@ -152,7 +162,12 @@ main(void)
         }
 
         unicorn_error = uc_emu_start(engine, GUEST_BASE_ADDRESS, x30, 0U, input.instruction_count);
-        if (unicorn_error != UC_ERR_OK)
+        if (UC_ERR_READ_UNMAPPED == unicorn_error || UC_ERR_WRITE_UNMAPPED == unicorn_error
+            || UC_ERR_WRITE_PROT == unicorn_error)
+        {
+            response.status = BAL_FUZZER_WORKER_MEMORY_FAULT;
+        }
+        else if (unicorn_error != UC_ERR_OK)
         {
             response.status = BAL_FUZZER_WORKER_ERROR_COMPILE_FAILED;
         }

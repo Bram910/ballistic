@@ -30,6 +30,10 @@ typedef enum
     BAL_FUZZER_WORKER_ERROR_TIMEOUT,
     BAl_FUZZER_WORKER_ERROR_CRASHED,
     BAL_FUZZER_WORKER_ERROR_UNKNOWN_INSTRUCTION,
+
+    /// The instruction accessed memory the worker does not map. The final state is still sent so
+    /// it can be compared with the other engine.
+    BAL_FUZZER_WORKER_MEMORY_FAULT,
     BAL_FUZZER_WORKER_ERROR_END
 } bal_fuzzer_worker_status_t;
 

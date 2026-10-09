@@ -151,6 +151,30 @@ main(const int argc, const char **argv)
             ++seeds_skipped;
             continue;
         }
+
+        // A memory fault is a valid outcome when both engines raise it; their final states are
+        // then compared like any other. A fault in only one of them is a mismatch.
+        const bool is_ballistic_fault = BAL_FUZZER_WORKER_MEMORY_FAULT == ballistic_response.status;
+        const bool is_unicorn_fault   = BAL_FUZZER_WORKER_MEMORY_FAULT == unicorn_response.status;
+
+        if (is_ballistic_fault != is_unicorn_fault)
+        {
+            BAL_LOG_ERROR(&bal_thread_logger,
+                          "Memory fault mismatch for seed 0x%08X: Ballistic %s, Unicorn %s.",
+                          *seed_cursor,
+                          true == is_ballistic_fault ? "faulted" : "did not fault",
+                          true == is_unicorn_fault ? "faulted" : "did not fault");
+            ++seeds_failed;
+            ++seed_cursor;
+            continue;
+        }
+
+        if (true == is_ballistic_fault)
+        {
+            ballistic_response.status = BAL_FUZZER_WORKER_OK;
+            unicorn_response.status   = BAL_FUZZER_WORKER_OK;
+        }
+
         if (ballistic_response.status != BAL_FUZZER_WORKER_OK)
         {
             BAL_LOG_ERROR(&bal_thread_logger,

@@ -995,6 +995,16 @@ bal_x86_emit_xor_r32_r32(bal_x86_assembler_t     *assembler,
 }
 
 void
+bal_x86_emit_test_r32_r32(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x85;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "test");
+}
+
+void
 bal_x86_emit_not_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
 {
     const uint8_t opcode_extension = 2;

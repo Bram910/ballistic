@@ -43,6 +43,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "SUB_REGISTER_REGISTER",
     "SUB_REGISTER_REGISTER_32",
     "TEST_REGISTER_REGISTER",
+    "TEST_REGISTER_REGISTER_32",
     "UD2",
     "XOR_REGISTER_REGISTER",
     "XOR_REGISTER_REGISTER_32",
@@ -360,6 +361,9 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_TEST_REGISTER_REGISTER:
             bal_x86_emit_test_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_TEST_REGISTER_REGISTER_32:
+            bal_x86_emit_test_r32_r32(assembler, destination, source);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

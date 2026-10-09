@@ -701,6 +701,22 @@ extern "C"
                                    bal_x86_register_t   destination,
                                    bal_x86_register_t   source);
 
+    /// Emits a bitwise AND test between two 32-bit registers, setting the flags without storing
+    /// the result.
+    ///
+    /// Assembly equivalent: `test destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_test_r32_r32(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   bal_x86_register_t   source);
+
     /// Emits a bitwise XOR instruction between two 64-bit registers.
     ///
     /// Assembly equivalent: `xor destination, source`.

@@ -9,6 +9,19 @@
 #define GUEST_BASE_ADDRESS 0x0
 #define GUEST_MEMORY_SIZE  0X1000ULL // 4 KiB, one page.
 
+// QEMU's exception number for a data abort, which Unicorn raises for misaligned exclusive and
+// atomic accesses.
+#define UNICORN_EXCEPTION_DATA_ABORT 4U
+#define UNICORN_EXCEPTION_NONE       0xFFFFFFFFU
+
+/// Records the exception the guest raised and stops emulation at the faulting instruction.
+static void
+on_exception(uc_engine *engine, uint32_t exception_number, void *user_data)
+{
+    *(uint32_t *)user_data = exception_number;
+    (void)uc_emu_stop(engine);
+}
+
 int
 main(void)
 {
@@ -28,6 +41,17 @@ main(void)
     if (unicorn_error != UC_ERR_OK)
     {
         (void)fprintf(stderr, "uc_ctl_set_cpu_model failed: %s\n", uc_strerror(unicorn_error));
+        return 1;
+    }
+
+    uint32_t exception_number = UNICORN_EXCEPTION_NONE;
+    uc_hook  exception_hook   = 0U;
+    unicorn_error             = uc_hook_add(
+        engine, &exception_hook, UC_HOOK_INTR, (void *)on_exception, &exception_number, 1U, 0U);
+
+    if (unicorn_error != UC_ERR_OK)
+    {
+        (void)fprintf(stderr, "uc_hook_add failed: %s\n", uc_strerror(unicorn_error));
         return 1;
     }
 
@@ -161,13 +185,15 @@ main(void)
             continue;
         }
 
+        exception_number = UNICORN_EXCEPTION_NONE;
         unicorn_error = uc_emu_start(engine, GUEST_BASE_ADDRESS, x30, 0U, input.instruction_count);
         if (UC_ERR_READ_UNMAPPED == unicorn_error || UC_ERR_WRITE_UNMAPPED == unicorn_error
-            || UC_ERR_WRITE_PROT == unicorn_error)
+            || UC_ERR_WRITE_PROT == unicorn_error
+            || UNICORN_EXCEPTION_DATA_ABORT == exception_number)
         {
             response.status = BAL_FUZZER_WORKER_MEMORY_FAULT;
         }
-        else if (unicorn_error != UC_ERR_OK)
+        else if (unicorn_error != UC_ERR_OK || exception_number != UNICORN_EXCEPTION_NONE)
         {
             response.status = BAL_FUZZER_WORKER_ERROR_COMPILE_FAILED;
         }

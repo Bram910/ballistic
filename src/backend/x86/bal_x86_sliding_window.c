@@ -22,14 +22,21 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "LOAD",
     "MOV_REGISTER_IMMEDIATE",
     "MOV_REGISTER_REGISTER",
+    "NOT_REGISTER",
+    "NOT_REGISTER_32",
     "OR_REGISTER_IMMEDIATE",
     "OR_REGISTER_REGISTER",
+    "OR_REGISTER_REGISTER_32",
     "RET",
     "ROR_REGISTER_IMMEDIATE",
+    "ROR_REGISTER_IMMEDIATE_32",
     "SAR_REGISTER_IMMEDIATE",
+    "SAR_REGISTER_IMMEDIATE_32",
     "SETCC",
     "SHL_REGISTER_IMMEDIATE",
+    "SHL_REGISTER_IMMEDIATE_32",
     "SHR_REGISTER_IMMEDIATE",
+    "SHR_REGISTER_IMMEDIATE_32",
     "STORE",
     "SUB_REGISTER_IMMEDIATE",
     "SUB_REGISTER_IMMEDIATE_32",
@@ -38,6 +45,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "TEST_REGISTER_REGISTER",
     "UD2",
     "XOR_REGISTER_REGISTER",
+    "XOR_REGISTER_REGISTER_32",
 };
 
 static inline const char *
@@ -285,6 +293,12 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_MOV_REGISTER_REGISTER:
             bal_x86_emit_mov_r64_r64(assembler, destination, source);
             break;
+        case BAL_X86_MACRO_NOT_REGISTER:
+            bal_x86_emit_not_r64(assembler, destination);
+            break;
+        case BAL_X86_MACRO_NOT_REGISTER_32:
+            bal_x86_emit_not_r32(assembler, destination);
+            break;
         case BAL_X86_MACRO_OR_REGISTER_IMMEDIATE:
             BAL_ASSERT_MSG(destination != ASSEMBLER_TEMPORARY_REGISTER,
                            "AND immediate destination collides with the scratch register.");
@@ -295,11 +309,20 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_OR_REGISTER_REGISTER:
             bal_x86_emit_or_r64_r64(assembler, destination, source);
             break;
+        case BAL_X86_MACRO_OR_REGISTER_REGISTER_32:
+            bal_x86_emit_or_r32_r32(assembler, destination, source);
+            break;
         case BAL_X86_MACRO_ROR_REGISTER_IMMEDIATE:
             bal_x86_emit_ror_r64_imm8(assembler, destination, (uint8_t)immediate_or_offset);
             break;
+        case BAL_X86_MACRO_ROR_REGISTER_IMMEDIATE_32:
+            bal_x86_emit_ror_r32_imm8(assembler, destination, (uint8_t)immediate_or_offset);
+            break;
         case BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE:
             bal_x86_emit_sar_r64_imm8(assembler, destination, (uint8_t)immediate_or_offset);
+            break;
+        case BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE_32:
+            bal_x86_emit_sar_r32_imm8(assembler, destination, (uint8_t)immediate_or_offset);
             break;
         case BAL_X86_MACRO_SETCC:
             bal_x86_emit_setcc_mem8_rbp_offset(
@@ -308,8 +331,14 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE:
             bal_x86_emit_shl_r64_imm8(assembler, destination, (uint8_t)immediate_or_offset);
             break;
+        case BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE_32:
+            bal_x86_emit_shl_r32_imm8(assembler, destination, (uint8_t)immediate_or_offset);
+            break;
         case BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE:
             bal_x86_emit_shr_r64_imm8(assembler, destination, (uint8_t)immediate_or_offset);
+            break;
+        case BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE_32:
+            bal_x86_emit_shr_r32_imm8(assembler, destination, (uint8_t)immediate_or_offset);
             break;
         case BAL_X86_MACRO_STORE:
             // WARNING: The displacement offset refers to the structural members within bal_cpu_t.
@@ -334,6 +363,9 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_XOR_REGISTER_REGISTER:
             bal_x86_emit_xor_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_XOR_REGISTER_REGISTER_32:
+            bal_x86_emit_xor_r32_r32(assembler, destination, source);
             break;
         default:
             BAL_LOG_ERROR(

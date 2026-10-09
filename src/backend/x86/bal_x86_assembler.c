@@ -43,12 +43,32 @@ BAL_HOT static void emit_modrm_register(uint8_t *buffer, size_t *offset, int reg
 /// Emits the ModR/M byte for Memory Addressing: [RBP + disp32].
 BAL_HOT static void emit_modrm_memory_disp32_rbp(uint8_t *buffer, size_t *offset, int reg);
 
-/// Emits `REX.W C1 /opcode_extension imm8` for 64-bit shifts and rotates.
-BAL_HOT static void emit_shift_r64_imm8(bal_x86_assembler_t *assembler,
-                                        bal_x86_register_t   destination,
-                                        uint8_t              immediate,
-                                        uint8_t              opcode_extension,
-                                        const char          *mnemonic);
+/// Emits `REX C1 /opcode_extension imm8` for shifts and rotates. REX.W is set when `is_64bit` is
+/// true, otherwise the operation is 32-bit and zeroes the upper half of `destination`.
+BAL_HOT static void emit_shift_imm8(bal_x86_assembler_t *assembler,
+                                    bal_x86_register_t   destination,
+                                    uint8_t              immediate,
+                                    uint8_t              opcode_extension,
+                                    bool                 is_64bit,
+                                    const char          *mnemonic);
+
+/// Emits `REX opcode ModR/M` for a register to register instruction in the `op reg, r/m` direction,
+/// with `destination` in the ModR/M reg field and `source` in the r/m field. REX.W is set when
+/// `is_64bit` is true.
+BAL_HOT static void emit_register_register(bal_x86_assembler_t *assembler,
+                                           uint8_t              opcode,
+                                           bool                 is_64bit,
+                                           bal_x86_register_t   destination,
+                                           bal_x86_register_t   source,
+                                           const char          *mnemonic);
+
+/// Emits `REX F7 /opcode_extension` for the single operand group 3 instructions such as NOT.
+/// REX.W is set when `is_64bit` is true.
+BAL_HOT static void emit_group3_register(bal_x86_assembler_t *assembler,
+                                         uint8_t              opcode_extension,
+                                         bool                 is_64bit,
+                                         bal_x86_register_t   destination,
+                                         const char          *mnemonic);
 
 bal_error_t
 bal_x86_assembler_init(bal_x86_assembler_t          *assembler,
@@ -880,7 +900,8 @@ bal_x86_emit_ror_r64_imm8(bal_x86_assembler_t     *assembler,
                           const uint8_t            immediate)
 {
     const uint8_t opcode_extension = 1;
-    emit_shift_r64_imm8(assembler, destination, immediate, opcode_extension, "ror");
+    const bool    is_64bit         = true;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "ror");
 }
 
 void
@@ -889,7 +910,8 @@ bal_x86_emit_sar_r64_imm8(bal_x86_assembler_t     *assembler,
                           const uint8_t            immediate)
 {
     const uint8_t opcode_extension = 7;
-    emit_shift_r64_imm8(assembler, destination, immediate, opcode_extension, "sar");
+    const bool    is_64bit         = true;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "sar");
 }
 
 void
@@ -898,7 +920,8 @@ bal_x86_emit_shl_r64_imm8(bal_x86_assembler_t     *assembler,
                           const uint8_t            immediate)
 {
     const uint8_t opcode_extension = 4;
-    emit_shift_r64_imm8(assembler, destination, immediate, opcode_extension, "shl");
+    const bool    is_64bit         = true;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "shl");
 }
 
 void
@@ -907,7 +930,84 @@ bal_x86_emit_shr_r64_imm8(bal_x86_assembler_t     *assembler,
                           const uint8_t            immediate)
 {
     const uint8_t opcode_extension = 5;
-    emit_shift_r64_imm8(assembler, destination, immediate, opcode_extension, "shr");
+    const bool    is_64bit         = true;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "shr");
+}
+
+void
+bal_x86_emit_ror_r32_imm8(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const uint8_t            immediate)
+{
+    const uint8_t opcode_extension = 1;
+    const bool    is_64bit         = false;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "ror");
+}
+
+void
+bal_x86_emit_sar_r32_imm8(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const uint8_t            immediate)
+{
+    const uint8_t opcode_extension = 7;
+    const bool    is_64bit         = false;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "sar");
+}
+
+void
+bal_x86_emit_shl_r32_imm8(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const uint8_t            immediate)
+{
+    const uint8_t opcode_extension = 4;
+    const bool    is_64bit         = false;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "shl");
+}
+
+void
+bal_x86_emit_shr_r32_imm8(bal_x86_assembler_t     *assembler,
+                          const bal_x86_register_t destination,
+                          const uint8_t            immediate)
+{
+    const uint8_t opcode_extension = 5;
+    const bool    is_64bit         = false;
+    emit_shift_imm8(assembler, destination, immediate, opcode_extension, is_64bit, "shr");
+}
+
+void
+bal_x86_emit_or_r32_r32(bal_x86_assembler_t     *assembler,
+                        const bal_x86_register_t destination,
+                        const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x0B;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "or");
+}
+
+void
+bal_x86_emit_xor_r32_r32(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0x33;
+    const bool    is_64bit = false;
+    emit_register_register(assembler, opcode, is_64bit, destination, source, "xor");
+}
+
+void
+bal_x86_emit_not_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 2;
+    const bool    is_64bit         = true;
+    emit_group3_register(assembler, opcode_extension, is_64bit, destination, "not");
+}
+
+void
+bal_x86_emit_not_r32(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 2;
+    const bool    is_64bit         = false;
+    emit_group3_register(assembler, opcode_extension, is_64bit, destination, "not");
 }
 
 void
@@ -1959,11 +2059,12 @@ emit_rex(uint8_t *BAL_RESTRICT buffer,
 }
 
 void
-emit_shift_r64_imm8(bal_x86_assembler_t *BAL_RESTRICT assembler,
-                    const bal_x86_register_t          destination,
-                    const uint8_t                     immediate,
-                    const uint8_t                     opcode_extension,
-                    const char *BAL_RESTRICT          mnemonic)
+emit_shift_imm8(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                const bal_x86_register_t          destination,
+                const uint8_t                     immediate,
+                const uint8_t                     opcode_extension,
+                const bool                        is_64bit,
+                const char *BAL_RESTRICT          mnemonic)
 {
     if (BAL_UNLIKELY(NULL == assembler))
     {
@@ -1983,10 +2084,15 @@ emit_shift_r64_imm8(bal_x86_assembler_t *BAL_RESTRICT assembler,
         return;
     }
 
-    if (BAL_UNLIKELY(immediate > 63U))
+    const uint8_t max_immediate = true == is_64bit ? 63U : 31U;
+
+    if (BAL_UNLIKELY(immediate > max_immediate))
     {
-        BAL_LOG_ERROR(
-            &bal_thread_logger, "Invalid %s immediate: %u (must be 0-63)", mnemonic, immediate);
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Invalid %s immediate: %u (must be 0-%u)",
+                      mnemonic,
+                      immediate,
+                      max_immediate);
         assembler->status = BAL_ERROR_INVALID_ARGUMENT;
         return;
     }
@@ -2010,13 +2116,14 @@ emit_shift_r64_imm8(bal_x86_assembler_t *BAL_RESTRICT assembler,
     }
 
     BAL_LOG_DEBUG(&bal_thread_logger,
-                  "[+0x%04zx] %s r%d, %u",
+                  "[+0x%04zx] %s r%d%s, %u",
                   assembler->offset,
                   mnemonic,
                   destination,
+                  true == is_64bit ? "" : "d",
                   immediate);
 
-    const uint8_t w          = 1;
+    const uint8_t w          = true == is_64bit ? 1U : 0U;
     const uint8_t r          = 0;
     const uint8_t b          = (uint8_t)destination >> 3;
     const size_t  old_offset = assembler->offset;
@@ -2024,6 +2131,127 @@ emit_shift_r64_imm8(bal_x86_assembler_t *BAL_RESTRICT assembler,
     emit8(assembler->buffer, &assembler->offset, 0xC1);
     emit_modrm_register(assembler->buffer, &assembler->offset, (int)opcode_extension, destination);
     emit8(assembler->buffer, &assembler->offset, immediate);
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+emit_register_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                       const uint8_t                     opcode,
+                       const bool                        is_64bit,
+                       const bal_x86_register_t          destination,
+                       const bal_x86_register_t          source,
+                       const char *BAL_RESTRICT          mnemonic)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid destination register: %d", destination);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(source)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid source register: %d", source);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    const char *BAL_RESTRICT width_suffix = true == is_64bit ? "" : "d";
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s r%d%s, r%d%s",
+                  assembler->offset,
+                  mnemonic,
+                  destination,
+                  width_suffix,
+                  source,
+                  width_suffix);
+
+    const uint8_t w          = true == is_64bit ? 1U : 0U;
+    const uint8_t r          = (uint8_t)destination >> 3U;
+    const uint8_t b          = (uint8_t)source >> 3U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, opcode);
+    emit_modrm_register(assembler->buffer, &assembler->offset, destination, source);
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+emit_group3_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                     const uint8_t                     opcode_extension,
+                     const bool                        is_64bit,
+                     const bal_x86_register_t          destination,
+                     const char *BAL_RESTRICT          mnemonic)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid destination register: %d", destination);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s r%d%s",
+                  assembler->offset,
+                  mnemonic,
+                  destination,
+                  true == is_64bit ? "" : "d");
+
+    const uint8_t w          = true == is_64bit ? 1U : 0U;
+    const uint8_t r          = 0U;
+    const uint8_t b          = (uint8_t)destination >> 3U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0xF7);
+    emit_modrm_register(assembler->buffer, &assembler->offset, (int)opcode_extension, destination);
 
     const size_t bytes_emitted = assembler->offset - old_offset;
     BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,

@@ -443,6 +443,48 @@ extern "C"
                                  bal_x86_register_t   destination,
                                  bal_x86_register_t   source);
 
+    /// Emits a bitwise OR between two 32-bit registers. The upper 32 bits of `destination` are
+    /// zeroed.
+    ///
+    /// Assembly equivalent: `or destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_or_r32_r32(bal_x86_assembler_t *assembler,
+                                 bal_x86_register_t   destination,
+                                 bal_x86_register_t   source);
+
+    /// Emits a bitwise NOT of a 64-bit register.
+    ///
+    /// Assembly equivalent: `not destination`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_not_r64(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a bitwise NOT of a 32-bit register. The upper 32 bits of `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `not destination_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_not_r32(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`
@@ -456,6 +498,23 @@ extern "C"
     /// - `assembler->buffer` is full.
     /// - `immediate` is greater than 63.
     void bal_x86_emit_ror_r64_imm8(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   uint8_t              immediate);
+
+    /// Emits a 32-bit rotate-right by an 8-bit immediate. The upper 32 bits of `destination` are
+    /// zeroed.
+    ///
+    /// Assembly equivalent: `ror destination_32, immediate`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `immediate` is greater than 31.
+    void bal_x86_emit_ror_r32_imm8(bal_x86_assembler_t *assembler,
                                    bal_x86_register_t   destination,
                                    uint8_t              immediate);
 
@@ -475,6 +534,23 @@ extern "C"
                                    bal_x86_register_t   destination,
                                    uint8_t              immediate);
 
+    /// Emits a 32-bit arithmetic shift-right by an 8-bit immediate. The upper 32 bits of
+    /// `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `sar destination_32, immediate`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `immediate` is greater than 31.
+    void bal_x86_emit_sar_r32_imm8(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   uint8_t              immediate);
+
     /// Emits a 64-bit logical shift-left by an 8-bit immediate.
     ///
     /// Assembly equivalent: `shl destination, immediate`
@@ -491,6 +567,23 @@ extern "C"
                                    bal_x86_register_t   destination,
                                    uint8_t              immediate);
 
+    /// Emits a 32-bit logical shift-left by an 8-bit immediate. The upper 32 bits of `destination`
+    /// are zeroed.
+    ///
+    /// Assembly equivalent: `shl destination_32, immediate`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `immediate` is greater than 31.
+    void bal_x86_emit_shl_r32_imm8(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   uint8_t              immediate);
+
     /// Emits a 64-bit logical shift-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `shr destination, immediate`
@@ -504,6 +597,23 @@ extern "C"
     /// - `assembler->buffer` is full.
     /// - `immediate` is greater than 63.
     void bal_x86_emit_shr_r64_imm8(bal_x86_assembler_t *assembler,
+                                   bal_x86_register_t   destination,
+                                   uint8_t              immediate);
+
+    /// Emits a 32-bit logical shift-right by an 8-bit immediate. The upper 32 bits of `destination`
+    /// are zeroed.
+    ///
+    /// Assembly equivalent: `shr destination_32, immediate`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `immediate` is greater than 31.
+    void bal_x86_emit_shr_r32_imm8(bal_x86_assembler_t *assembler,
                                    bal_x86_register_t   destination,
                                    uint8_t              immediate);
 
@@ -603,6 +713,22 @@ extern "C"
     /// - `assembler->status` != [`BAL_SUCCESS`]
     /// - `assembler->buffer` is full.
     void bal_x86_emit_xor_r64_r64(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a bitwise XOR between two 32-bit registers. The upper 32 bits of `destination` are
+    /// zeroed.
+    ///
+    /// Assembly equivalent: `xor destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_xor_r32_r32(bal_x86_assembler_t *assembler,
                                   bal_x86_register_t   destination,
                                   bal_x86_register_t   source);
 

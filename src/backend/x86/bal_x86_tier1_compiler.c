@@ -12,10 +12,18 @@
 #if BAL_PLATFORM_WINDOWS
 
 #define BAL_X86_ABI_ARG1 BAL_X86_RCX
+#define BAL_X86_ABI_ARG2 BAL_X86_RDX
+#define BAL_X86_ABI_ARG3 BAL_X86_R8
+
+// The Windows x64 calling convention makes the caller reserve 32 bytes of shadow space.
+#define BAL_X86_ABI_SHADOW_SPACE 32U
 
 #else
 
-#define BAL_X86_ABI_ARG1 BAL_X86_RDI
+#define BAL_X86_ABI_ARG1         BAL_X86_RDI
+#define BAL_X86_ABI_ARG2         BAL_X86_RSI
+#define BAL_X86_ABI_ARG3         BAL_X86_RDX
+#define BAL_X86_ABI_SHADOW_SPACE 0U
 
 #endif
 
@@ -104,6 +112,11 @@ static void translate_conditional_compare(bal_tier1_compiler_t *compiler, uint32
 static void translate_multiply_high(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_system_register(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_load_store(bal_tier1_compiler_t         *compiler,
+                                 const bal_memory_interface_t *memory_interface,
+                                 uint32_t                      instruction,
+                                 bal_guest_address_t           guest_address);
 
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
@@ -571,6 +584,10 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         };
                         bal_sliding_window_push(&compiler->window, fence_macro);
                     }
+                    break;
+                case OPCODE_LOAD:
+                case OPCODE_STORE:
+                    translate_load_store(compiler, memory_interface, instruction, guest_address);
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -3984,4 +4001,521 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         .immediate_or_offset = offset,
     };
     bal_sliding_window_push(&compiler->window, store_macro);
+}
+
+/// Called from translated code to turn a guest address into a host pointer. Returns the host
+/// address of `size` contiguous bytes at `guest_address`, or NULL when the memory interface does
+/// not map all of them.
+static const uint8_t *
+translate_data_address(const bal_memory_interface_t *memory_interface,
+                       const bal_guest_address_t     guest_address,
+                       const uint64_t                size)
+{
+    size_t         available_bytes = 0U;
+    const uint8_t *host_address
+        = memory_interface->translate((void *)memory_interface, guest_address, &available_bytes);
+
+    if (NULL == host_address || available_bytes < size)
+    {
+        return NULL;
+    }
+
+    return host_address;
+}
+
+/// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register,
+/// by calling translate_data_address() for `size` bytes.
+///
+/// The call may clobber every caller-saved register, so dirty guest registers are written back and
+/// the register cache is emptied first. R13 and RBP are callee-saved and survive the call. When
+/// the address is not mapped, the block stops: the guest PC is set to this instruction, the
+/// exception field to BAL_EXCEPTION_DATA_ABORT, and the block returns. The jump over that exit is
+/// patched once its size is known.
+static void
+emit_translate_data_address(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                            const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                            const uint64_t                             size,
+                            const bal_guest_address_t                  guest_address)
+{
+    const bal_x86_register_t address = BAL_X86_REGISTER_ZERO;
+
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG2, address);
+
+    const bal_x86_macro_t interface_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG1,
+        .immediate_or_offset = (uint64_t)(uintptr_t)memory_interface,
+    };
+    bal_sliding_window_push(&compiler->window, interface_macro);
+
+    const bal_x86_macro_t size_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG3,
+        .immediate_or_offset = size,
+    };
+    bal_sliding_window_push(&compiler->window, size_macro);
+
+    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
+    {
+        const bal_x86_macro_t reserve_macro = {
+            .opcode              = BAL_X86_MACRO_SUB_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RSP,
+            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
+        };
+        bal_sliding_window_push(&compiler->window, reserve_macro);
+    }
+
+    const bal_x86_macro_t function_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_RAX,
+        .immediate_or_offset = (uint64_t)(uintptr_t)&translate_data_address,
+    };
+    bal_sliding_window_push(&compiler->window, function_macro);
+    push_macro(compiler, BAL_X86_MACRO_CALL_REGISTER, BAL_X86_RAX, BAL_X86_INVALID);
+
+    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
+    {
+        const bal_x86_macro_t release_macro = {
+            .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RSP,
+            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
+        };
+        bal_sliding_window_push(&compiler->window, release_macro);
+    }
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, address, BAL_X86_RAX);
+    push_macro(compiler, BAL_X86_MACRO_TEST_REGISTER_REGISTER, address, address);
+    bal_sliding_window_flush_all(&compiler->window);
+
+    // Jump over the data abort exit when the address is mapped.
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+    const size_t                      jump_offset = assembler->offset;
+    bal_x86_emit_jcc_rel32(assembler, BAL_X86_COND_NE, 0);
+    const size_t exit_offset = assembler->offset;
+
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, guest_address);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
+    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+    emit_epilogue(assembler);
+
+    if (BAL_SUCCESS == assembler->status)
+    {
+        // The rel32 field is the last four bytes of the 6-byte jcc.
+        const uint32_t        exit_size = (uint32_t)(assembler->offset - exit_offset);
+        uint8_t *BAL_RESTRICT relative  = assembler->buffer + jump_offset + 2U;
+        relative[0]                     = (uint8_t)exit_size;
+        relative[1]                     = (uint8_t)(exit_size >> 8U);
+        relative[2]                     = (uint8_t)(exit_size >> 16U);
+        relative[3]                     = (uint8_t)(exit_size >> 24U);
+    }
+}
+
+/// Puts the address formed by a base register (the stack pointer for register 31) plus a signed
+/// offset into BAL_X86_REGISTER_ZERO.
+static void
+emit_base_plus_offset(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                      const uint8_t                      rn,
+                      const int64_t                      offset)
+{
+    const bool               skip_load = false;
+    const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_REGISTER_ZERO, x86_rn);
+
+    if (offset != 0)
+    {
+        const bal_x86_macro_t add_macro = {
+            .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = (uint64_t)offset,
+        };
+        bal_sliding_window_push(&compiler->window, add_macro);
+    }
+}
+
+/// Moves BAL_X86_REGISTER_ZERO by `bytes`, a two's complement value, between the registers of a
+/// pair.
+static void
+emit_advance_address(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t bytes)
+{
+    const bal_x86_macro_t add_macro = {
+        .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_REGISTER_ZERO,
+        .immediate_or_offset = bytes,
+    };
+    bal_sliding_window_push(&compiler->window, add_macro);
+}
+
+/// Loads or stores one register through the host pointer in BAL_X86_REGISTER_ZERO.
+///
+/// `size_log2` is the access size (0 to 3) and, for loads, `sign_extend` selects LDRSB/LDRSH/LDRSW:
+/// 0 zero-extends, 32 sign-extends into a W register, 64 into an X register. Register 31 is the
+/// zero register: loads into it are dropped and stores of it write zero.
+static void
+emit_register_access(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                     const uint8_t                      rt,
+                     const uint32_t                     size_log2,
+                     const bool                         is_load,
+                     const uint32_t                     sign_extend)
+{
+    const bal_x86_register_t pointer = BAL_X86_REGISTER_ZERO;
+
+    if (true == is_load)
+    {
+        if (31U == rt)
+        {
+            return;
+        }
+
+        static const bal_x86_macro_opcode_t ZERO_EXTEND[4] = {
+            BAL_X86_MACRO_LOAD_MEMORY_R32_MEM8,
+            BAL_X86_MACRO_LOAD_MEMORY_R32_MEM16,
+            BAL_X86_MACRO_LOAD_MEMORY_R32_MEM32,
+            BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64,
+        };
+        static const bal_x86_macro_opcode_t SIGN_EXTEND_32[4] = {
+            BAL_X86_MACRO_LOAD_MEMORY_SIGN_R32_MEM8,
+            BAL_X86_MACRO_LOAD_MEMORY_SIGN_R32_MEM16,
+            BAL_X86_MACRO_LOAD_MEMORY_R32_MEM32,
+            BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64,
+        };
+        static const bal_x86_macro_opcode_t SIGN_EXTEND_64[4] = {
+            BAL_X86_MACRO_LOAD_MEMORY_SIGN_R64_MEM8,
+            BAL_X86_MACRO_LOAD_MEMORY_SIGN_R64_MEM16,
+            BAL_X86_MACRO_LOAD_MEMORY_SIGN_R64_MEM32,
+            BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64,
+        };
+        bal_x86_macro_opcode_t opcode = ZERO_EXTEND[size_log2];
+
+        if (32U == sign_extend)
+        {
+            opcode = SIGN_EXTEND_32[size_log2];
+        }
+        else if (64U == sign_extend)
+        {
+            opcode = SIGN_EXTEND_64[size_log2];
+        }
+
+        const bool               skip_load = true;
+        const bal_x86_register_t x86_rt    = allocate_x86_register(compiler, rt, skip_load);
+        push_macro(compiler, opcode, x86_rt, pointer);
+        compiler->is_dirty |= 1U << rt;
+        return;
+    }
+
+    static const bal_x86_macro_opcode_t STORES[4] = {
+        BAL_X86_MACRO_STORE_MEMORY_MEM8_R8,
+        BAL_X86_MACRO_STORE_MEMORY_MEM16_R16,
+        BAL_X86_MACRO_STORE_MEMORY_MEM32_R32,
+        BAL_X86_MACRO_STORE_MEMORY_MEM64_R64,
+    };
+    bal_x86_register_t x86_rt = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (31U == rt)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = x86_rt,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bool skip_load = false;
+        x86_rt               = allocate_x86_register(compiler, rt, skip_load);
+    }
+
+    push_macro(compiler, STORES[size_log2], pointer, x86_rt);
+}
+
+/// Computes the written-back base (base + offset, with register 31 as the stack pointer) of the
+/// pre- and post-indexed forms and saves it on the stack. Called after the address is known to be
+/// mapped and before the access, so the access sees the original base and a faulting access
+/// leaves it unchanged.
+static void
+emit_writeback_begin(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                     const uint8_t                      rn,
+                     const int64_t                      offset)
+{
+    const bal_x86_register_t updated_base = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bool               skip_load    = false;
+    const bal_x86_register_t x86_rn       = allocate_x86_register(compiler, rn, skip_load);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, updated_base, x86_rn);
+
+    const bal_x86_macro_t add_macro = {
+        .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+        .destination         = updated_base,
+        .immediate_or_offset = (uint64_t)offset,
+    };
+    bal_sliding_window_push(&compiler->window, add_macro);
+    push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, updated_base);
+}
+
+/// Writes the base saved by emit_writeback_begin() back after the access. When the access loaded
+/// into the base register, which is CONSTRAINED UNPREDICTABLE, the written-back address wins as in
+/// Unicorn's reference model.
+static void
+emit_writeback_end(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint8_t rn)
+{
+    const bal_x86_register_t updated_base = BAL_X86_REGISTER_DISCARD_RESULT;
+    push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, updated_base, BAL_X86_INVALID);
+
+    const bool               skip_load = true;
+    const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rn, updated_base);
+    compiler->is_dirty |= 1U << rn;
+}
+
+/// Rejects a load or store encoding tier 1 does not translate.
+static void
+reject_load_store(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    BAL_LOG_ERROR(
+        &bal_thread_logger, "Aborting function: unsupported load/store encoding %08x", instruction);
+    compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+}
+
+/// Translates the general purpose loads and stores: LDR/STR and their byte, halfword and
+/// sign-extending forms with an unsigned offset, an unscaled offset (LDUR/STUR and the unprivileged
+/// LDTR/STTR, which behave the same at EL0), pre- and post-indexing, a register offset, and a
+/// PC-relative literal; LDP/STP/LDPSW and the non-temporal LDNP/STNP; and PRFM, which does
+/// nothing.
+///
+/// The address is formed in BAL_X86_REGISTER_ZERO, translated to a host pointer with
+/// emit_translate_data_address(), which ends the block with a data abort when it is not mapped,
+/// and the access goes through the pointer. Writeback happens after the access, so a faulting
+/// access leaves the base register unchanged. SIMD and floating-point accesses are not supported
+/// yet.
+void
+translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                     const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                     const uint32_t                             instruction,
+                     const bal_guest_address_t                  guest_address)
+{
+    const uint8_t rt = (uint8_t)(instruction & 0x1FU);
+    const uint8_t rn = (uint8_t)((instruction >> 5U) & 0x1FU);
+
+    // Load register (literal): opc 011 V 00 imm19 Rt.
+    if (0x18U == ((instruction >> 24U) & 0x3BU))
+    {
+        const uint32_t opc = instruction >> 30U;
+
+        if (BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)))
+        {
+            reject_load_store(compiler, instruction);
+            return;
+        }
+
+        if (3U == opc)
+        {
+            return; // PRFM (literal)
+        }
+
+        const uint32_t imm19 = (instruction >> 5U) & 0x7FFFFU;
+
+        // WARNING: Shifting the 19-bit field to the top and back sign-extends it.
+        const int32_t         offset        = (int32_t)(imm19 << 13U) >> 13U;
+        const uint64_t        address       = guest_address + (uint64_t)((int64_t)offset * 4);
+        const uint32_t        size_log2     = 0U == opc ? 2U : (1U == opc ? 3U : 2U);
+        const bal_x86_macro_t address_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = address,
+        };
+        bal_sliding_window_push(&compiler->window, address_macro);
+        emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
+        emit_register_access(compiler, rt, size_log2, true, 2U == opc ? 64U : 0U);
+        return;
+    }
+
+    // Load/store pair: opc 101 V type(2) L imm7 Rt2 Rn Rt.
+    if (0x5U == ((instruction >> 27U) & 0x7U))
+    {
+        const uint32_t opc     = instruction >> 30U;
+        const uint32_t type    = (instruction >> 23U) & 0x3U;
+        const bool     is_load = 1U == ((instruction >> 22U) & 1U);
+        const uint32_t imm7    = (instruction >> 15U) & 0x7FU;
+        const uint8_t  rt2     = (uint8_t)((instruction >> 10U) & 0x1FU);
+
+        // V = 1 is SIMD, opc 11 is unallocated, and opc 01 is LDPSW for loads but STGP for stores.
+        if (BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)) || BAL_UNLIKELY(3U == opc)
+            || BAL_UNLIKELY(1U == opc && false == is_load))
+        {
+            reject_load_store(compiler, instruction);
+            return;
+        }
+
+        const uint32_t size_log2   = 2U == opc ? 3U : 2U;
+        const int32_t  scaled      = ((int32_t)(imm7 << 25U) >> 25U) * (1 << size_log2);
+        const bool     is_post     = 1U == type;
+        const bool     is_pre      = 3U == type;
+        const uint32_t sign_extend = 1U == opc ? 64U : 0U;
+
+        emit_base_plus_offset(compiler, rn, true == is_post ? 0 : scaled);
+        emit_translate_data_address(compiler, memory_interface, 2ULL << size_log2, guest_address);
+
+        if (true == is_pre || true == is_post)
+        {
+            emit_writeback_begin(compiler, rn, scaled);
+        }
+
+        // Rt2 is accessed first so that a load with Rt == Rt2, which is CONSTRAINED
+        // UNPREDICTABLE, leaves the value from the lower address, as Unicorn's reference model
+        // does.
+        emit_advance_address(compiler, 1ULL << size_log2);
+        emit_register_access(compiler, rt2, size_log2, is_load, sign_extend);
+        emit_advance_address(compiler, (uint64_t)(-(int64_t)(1ULL << size_log2)));
+        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+
+        if (true == is_pre || true == is_post)
+        {
+            emit_writeback_end(compiler, rn);
+        }
+
+        return;
+    }
+
+    // Load/store register: size 111 V 0x opc ...
+    if (BAL_UNLIKELY(0x7U != ((instruction >> 27U) & 0x7U))
+        || BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)))
+    {
+        reject_load_store(compiler, instruction);
+        return;
+    }
+
+    const uint32_t size_log2 = instruction >> 30U;
+    const uint32_t opc       = (instruction >> 22U) & 0x3U;
+    const bool     is_load   = opc != 0U;
+
+    // The register offset form is mode 10 with a W or X index (option x1x). The pointer
+    // authentication loads and the atomics share the rest of that space.
+    const bool is_unsigned_offset = 1U == ((instruction >> 24U) & 1U);
+    const bool is_register_offset
+        = false == is_unsigned_offset && 1U == ((instruction >> 21U) & 1U);
+    const uint32_t mode   = (instruction >> 10U) & 0x3U;
+    const uint32_t option = (instruction >> 13U) & 0x7U;
+
+    if (true == is_register_offset && (mode != 2U || 0U == (option & 0x2U)))
+    {
+        reject_load_store(compiler, instruction);
+        return;
+    }
+
+    // opc 10/11 sign-extend to X/W, except for 64-bit accesses, where opc 10 is PRFM, and 32-bit
+    // ones, where only opc 10 (LDRSW) exists.
+    uint32_t sign_extend = 0U;
+
+    if (opc >= 2U)
+    {
+        if (3U == size_log2)
+        {
+            if (2U == opc)
+            {
+                return; // PRFM
+            }
+
+            reject_load_store(compiler, instruction);
+            return;
+        }
+
+        if (2U == size_log2 && 3U == opc)
+        {
+            reject_load_store(compiler, instruction);
+            return;
+        }
+
+        sign_extend = 2U == opc ? 64U : 32U;
+    }
+
+    if (true == is_unsigned_offset)
+    {
+        // Unsigned offset: imm12 scaled by the access size.
+        const int64_t offset = (int64_t)(((instruction >> 10U) & 0xFFFU) << size_log2);
+        emit_base_plus_offset(compiler, rn, offset);
+        emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
+        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+        return;
+    }
+
+    if (true == is_register_offset)
+    {
+        // Register offset: Rn + extend(Rm) << (S ? size : 0).
+        const uint8_t            rm        = (uint8_t)((instruction >> 16U) & 0x1FU);
+        const uint32_t           amount    = 1U == ((instruction >> 12U) & 1U) ? size_log2 : 0U;
+        const bool               skip_load = false;
+        const bal_x86_register_t index     = BAL_X86_REGISTER_DISCARD_RESULT;
+
+        if (31U == rm)
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = index,
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+        else
+        {
+            const bal_x86_register_t x86_rm = allocate_x86_register(compiler, rm, skip_load);
+            push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, index, x86_rm);
+        }
+
+        // option 010 UXTW and 110 SXTW take a W register; 011 LSL and 111 SXTX an X register.
+        if (0U == (option & 0x1U))
+        {
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       index,
+                       32U);
+            push_shift(compiler,
+                       4U == (option & 0x4U) ? BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE
+                                             : BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                       false,
+                       index,
+                       32U - amount);
+        }
+        else
+        {
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       index,
+                       amount);
+        }
+
+        emit_base_plus_offset(compiler, rn, 0);
+        push_macro(compiler, BAL_X86_MACRO_ADD_REGISTER_REGISTER, BAL_X86_REGISTER_ZERO, index);
+        emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
+        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+        return;
+    }
+
+    // imm9 forms: 00 unscaled (LDUR/STUR), 01 post-indexed, 10 unprivileged, 11 pre-indexed.
+    const uint32_t imm9    = (instruction >> 12U) & 0x1FFU;
+    const int64_t  offset  = (int64_t)((int32_t)(imm9 << 23U) >> 23U);
+    const bool     is_post = 1U == mode;
+    const bool     is_pre  = 3U == mode;
+
+    emit_base_plus_offset(compiler, rn, true == is_post ? 0 : offset);
+    emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
+
+    if (true == is_pre || true == is_post)
+    {
+        emit_writeback_begin(compiler, rn, offset);
+    }
+
+    emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+
+    if (true == is_pre || true == is_post)
+    {
+        emit_writeback_end(compiler, rn);
+    }
 }

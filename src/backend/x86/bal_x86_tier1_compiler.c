@@ -1047,65 +1047,41 @@ translate_add_sub_reg(bal_tier1_compiler_t *BAL_RESTRICT                     com
     const bal_x86_register_t x86_rn       = allocate_x86_register(compiler, rn, skip_load_rn);
     const bool               skip_load_rm = false;
     bal_x86_register_t       x86_rm       = allocate_x86_register(compiler, rm, skip_load_rm);
-    bal_x86_register_t       x86_rd;
+    bal_x86_register_t       x86_rd       = BAL_X86_REGISTER_DISCARD_RESULT;
 
-    if (true == is_discarded_result)
-    {
-        x86_rd                          = BAL_X86_REGISTER_DISCARD_RESULT;
-        const bal_x86_macro_t mov_macro = {
-            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-            .destination = x86_rd,
-            .source      = x86_rn,
-        };
-        bal_sliding_window_push(&compiler->window, mov_macro);
-    }
-    else
+    // The register the arithmetic is performed in. This differs from x86_rd only when rd aliases
+    // rm in a subtraction, where the result is built in the scratch register and copied to rd
+    // afterwards so rm is not overwritten before it is read.
+    bal_x86_register_t x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (false == is_discarded_result)
     {
         const bool skip_load_rd = true;
         x86_rd                  = allocate_x86_register(compiler, rd, skip_load_rd);
+        x86_result              = x86_rd;
+    }
 
-        if (x86_rd == x86_rm)
+    if (x86_result == x86_rn)
+    {
+    }
+    else if (x86_result == x86_rm && false == is_sub)
+    {
+        // Addition commutes, so add rn into rd which already holds rm.
+        x86_rm = x86_rn;
+    }
+    else
+    {
+        if (x86_result == x86_rm)
         {
-            if (true == is_sub)
-            {
-                // Subtract rd (which holds rm) from rn, then move result back.
-                const bal_x86_macro_t sub_macro = {
-                    .opcode      = BAL_X86_MACRO_SUB_REGISTER_REGISTER,
-                    .destination = x86_rn,
-                    .source      = x86_rd,
-                };
-                bal_sliding_window_push(&compiler->window, sub_macro);
+            x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
+        }
 
-                const bal_x86_macro_t mov_macro = {
-                    .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-                    .destination = x86_rd,
-                    .source      = x86_rn,
-                };
-                bal_sliding_window_push(&compiler->window, mov_macro);
-
-                // rn was clobbered so invalidate its mapping.
-                compiler->arm_to_x86[rn]     = -1;
-                compiler->x86_to_arm[x86_rn] = -1;
-                x86_rm                       = x86_rd;
-            }
-            else
-            {
-                // ADD rd, rn.
-                x86_rm = x86_rn;
-            }
-        }
-        else if (x86_rd != x86_rn)
-        {
-            const bal_x86_macro_t mov_macro = {
-                .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-                .destination = x86_rd,
-                .source      = x86_rn,
-            };
-            bal_sliding_window_push(&compiler->window, mov_macro);
-        }
-        else
-        {
-        }
+        const bal_x86_macro_t mov_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = x86_result,
+            .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, mov_macro);
     }
 
     const bool             is_32bit = BAL_OPERAND_TYPE_REGISTER_32 == operand_cursor[0].type;
@@ -1124,7 +1100,7 @@ translate_add_sub_reg(bal_tier1_compiler_t *BAL_RESTRICT                     com
 
     const bal_x86_macro_t arithmetic_macro = {
         .opcode      = arithmetic_opcode,
-        .destination = x86_rd,
+        .destination = x86_result,
         .source      = x86_rm,
     };
     bal_sliding_window_push(&compiler->window, arithmetic_macro);
@@ -1164,6 +1140,12 @@ translate_add_sub_reg(bal_tier1_compiler_t *BAL_RESTRICT                     com
 
     if (false == is_discarded_result)
     {
+        const bal_x86_macro_t mov_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = x86_rd,
+            .source      = x86_result,
+        };
+        bal_sliding_window_push(&compiler->window, mov_macro);
         compiler->is_dirty |= 1U << rd;
     }
 }

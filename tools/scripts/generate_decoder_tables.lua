@@ -125,6 +125,18 @@ local function derive_opcode(mnemonic)
         return "OPCODE_MUL"
     end
 
+    if m == "SMULH" or m == "UMULH" then
+        return "OPCODE_MUL"
+    end
+
+    if m == "RBIT" or m == "REV" or m == "REV16" or m == "REV32" then
+        return "OPCODE_REVERSE"
+    end
+
+    if m == "CLZ" or m == "CLS" then
+        return "OPCODE_COUNT_LEADING"
+    end
+
     if m:sub(1, 4) == "SDIV" or m:sub(1, 4) == "UDIV" then
         return "OPCODE_DIV"
     end

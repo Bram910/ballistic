@@ -384,7 +384,8 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
 
             if (engine_flags & BAL_ENGINE_FLAG_WFI_YIELDS_HOST)
             {
-                if (BAL_UNLIKELY(0 == strncmp(metadata->name, "WFI", 3)))
+                // WFI decodes as the generic HINT entry, so match its encoding instead.
+                if (BAL_UNLIKELY(0xD503207FU == instruction))
                 {
                     BAL_LOG_INFO(&bal_thread_logger,
                                  "WFI instruction encountered at 0x%016llX, yielding to host",

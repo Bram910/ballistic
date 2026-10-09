@@ -113,4 +113,10 @@ if (UNIX)
     message(STATUS "[Ballistic-Tests] Found Unicorn at ${UNICORN_ROOT_LINUX}.")
     message(STATUS "[Ballistic-Tests] Configuring Fuzzer...")
     add_subdirectory(fuzzer)
+
+    # Measures per instruction whether tier 1 matches Unicorn, for tools/status/generate_status.py.
+    add_executable(bal_status_coverage ${CMAKE_SOURCE_DIR}/tools/status/coverage.c)
+    target_include_directories(bal_status_coverage PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(bal_status_coverage PRIVATE Ballistic Unicorn)
+    add_sanitizers(bal_status_coverage)
 endif ()

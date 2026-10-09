@@ -3778,9 +3778,10 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define SYSTEM_REGISTER_CTR_EL0     SYSTEM_REGISTER(3U, 3U, 0U, 0U, 1U)
 #define SYSTEM_REGISTER_DCZID_EL0   SYSTEM_REGISTER(3U, 3U, 0U, 0U, 7U)
 
-/// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, Len) and FPSR (N, Z, C, V, QC and the
-/// cumulative exception flags), as implemented by Unicorn's reference model.
-#define FPCR_WRITABLE_BITS 0x07F70000ULL
+/// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, FZ16, Len) and FPSR (N, Z, C, V, QC and
+/// the cumulative exception flags), as implemented by Unicorn's reference model. FZ16 is writable
+/// because the guest CPU implements half-precision arithmetic.
+#define FPCR_WRITABLE_BITS 0x07FF0000ULL
 #define FPSR_WRITABLE_BITS 0xF800009FULL
 
 /// Cache type and DC ZVA block size of a Cortex-A57: 64-byte cache lines, a 64-byte DC ZVA block.

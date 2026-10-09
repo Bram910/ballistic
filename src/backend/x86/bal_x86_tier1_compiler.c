@@ -97,6 +97,13 @@ static void translate_add_sub_carry(bal_tier1_compiler_t *compiler, uint32_t ins
 
 static void translate_variable_shift(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_divide(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void push_macro(bal_tier1_compiler_t  *compiler,
+                       bal_x86_macro_opcode_t opcode,
+                       bal_x86_register_t     destination,
+                       bal_x86_register_t     source);
+
 static void translate_pc_relative(bal_tier1_compiler_t *compiler,
                                   uint32_t              instruction,
                                   bal_guest_address_t   guest_address);
@@ -548,6 +555,24 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     bal_sliding_window_flush_all(&compiler->window);
 
                     bal_sliding_window_push(&compiler->window, ud2_macro);
+                    compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_DIV:
+                    // UDIV and SDIV: data-processing (2 source) with bits 30:21 = 0011010110
+                    // and opcode = 00001x.
+                    if (0xD6U == ((instruction >> 21U) & 0x3FFU)
+                        && 1U == ((instruction >> 11U) & 0x1FU))
+                    {
+                        translate_divide(compiler, instruction);
+                        break;
+                    }
+
+                    BAL_LOG_ERROR(&bal_thread_logger,
+                                  "Aborting function: Tier 1 unsupported divide instruction "
+                                  "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     is_block_terminated = true;
                     break;
@@ -3082,5 +3107,174 @@ translate_pc_relative(bal_tier1_compiler_t *BAL_RESTRICT compiler,
            .immediate_or_offset = address,
     };
     bal_sliding_window_push(&compiler->window, mov_macro);
+    compiler->is_dirty |= 1U << rd;
+}
+
+/// Pushes a register to register macro. A shorthand for the long instruction sequences below.
+static void
+push_macro(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+           const bal_x86_macro_opcode_t       opcode,
+           const bal_x86_register_t           destination,
+           const bal_x86_register_t           source)
+{
+    const bal_x86_macro_t macro = {
+        .opcode      = opcode,
+        .destination = destination,
+        .source      = source,
+    };
+    bal_sliding_window_push(&compiler->window, macro);
+}
+
+/// Translates UDIV and SDIV.
+///
+/// x86 divides RDX:RAX and raises #DE on a zero divisor and on INT_MIN / -1, where A64 returns 0
+/// and INT_MIN. Both cases are steered to a harmless division before it runs:
+///
+/// - a zero divisor becomes 0 / 1, which is 0,
+/// - for SDIV, a divisor of -1 becomes -dividend / 1, which is -x for every x and wraps INT_MIN to
+///   itself like A64.
+///
+/// RAX and RDX belong to the scratch pool and may hold guest registers, so they are saved on the
+/// stack around the division. The dividend and divisor are copied out first so the operands may
+/// live in RAX or RDX.
+void
+translate_divide(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t rd        = (uint8_t)(instruction & 0x1FU);
+    const uint8_t rn        = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const bool    is_signed = 1U == ((instruction >> 10U) & 1U);
+    const uint8_t rm        = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const bool    is_32bit  = 0U == (instruction >> 31U);
+
+    // Every register operand treats 31 as the zero register.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bal_x86_register_t dividend        = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t divisor         = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bool               skip_load       = false;
+    const uint8_t            operands[2]     = { rn, rm };
+    const bal_x86_register_t destinations[2] = { dividend, divisor };
+
+    for (size_t i = 0U; i < 2U; ++i)
+    {
+        if (31U == operands[i])
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = destinations[i],
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+        else
+        {
+            const bal_x86_register_t x86_operand
+                = allocate_x86_register(compiler, operands[i], skip_load);
+            push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, destinations[i], x86_operand);
+        }
+    }
+
+    push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, BAL_X86_RAX);
+    push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, BAL_X86_RDX);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_RAX, dividend);
+
+    const bal_x86_macro_t zero_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = dividend,
+        .immediate_or_offset = 0U,
+    };
+    const bal_x86_macro_t one_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = dividend,
+        .immediate_or_offset = 1U,
+    };
+
+    // A zero divisor: divide 0 by 1. Moves leave ZF from the TEST intact.
+    bal_sliding_window_push(&compiler->window, zero_macro);
+    push_macro(compiler,
+               true == is_32bit ? BAL_X86_MACRO_TEST_REGISTER_REGISTER_32
+                                : BAL_X86_MACRO_TEST_REGISTER_REGISTER,
+               divisor,
+               divisor);
+
+    const bal_x86_macro_t select_zero_dividend_macro = {
+        .opcode      = BAL_X86_MACRO_CMOV_REGISTER_REGISTER,
+        .destination = BAL_X86_RAX,
+        .source      = dividend,
+        .condition   = BAL_X86_COND_E,
+    };
+    bal_sliding_window_push(&compiler->window, select_zero_dividend_macro);
+    bal_sliding_window_push(&compiler->window, one_macro);
+
+    const bal_x86_macro_t select_one_divisor_macro = {
+        .opcode      = BAL_X86_MACRO_CMOV_REGISTER_REGISTER,
+        .destination = divisor,
+        .source      = dividend,
+        .condition   = BAL_X86_COND_E,
+    };
+    bal_sliding_window_push(&compiler->window, select_one_divisor_macro);
+
+    if (true == is_signed)
+    {
+        // A divisor of -1: divide -dividend by 1. RDX is free until the sign extension.
+        push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, dividend, BAL_X86_RAX);
+        push_macro(compiler,
+                   true == is_32bit ? BAL_X86_MACRO_NEG_REGISTER_32 : BAL_X86_MACRO_NEG_REGISTER,
+                   dividend,
+                   BAL_X86_INVALID);
+        push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_RDX, divisor);
+
+        const bal_x86_macro_t increment_macro = {
+            .opcode              = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE_32
+                                                    : BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RDX,
+            .immediate_or_offset = 1U,
+        };
+        bal_sliding_window_push(&compiler->window, increment_macro);
+
+        const bal_x86_macro_t select_negated_dividend_macro = {
+            .opcode      = BAL_X86_MACRO_CMOV_REGISTER_REGISTER,
+            .destination = BAL_X86_RAX,
+            .source      = dividend,
+            .condition   = BAL_X86_COND_E,
+        };
+        bal_sliding_window_push(&compiler->window, select_negated_dividend_macro);
+        bal_sliding_window_push(&compiler->window, one_macro);
+        bal_sliding_window_push(&compiler->window, select_one_divisor_macro);
+
+        push_macro(compiler,
+                   true == is_32bit ? BAL_X86_MACRO_CDQ : BAL_X86_MACRO_CQO,
+                   BAL_X86_INVALID,
+                   BAL_X86_INVALID);
+        push_macro(compiler,
+                   true == is_32bit ? BAL_X86_MACRO_IDIV_REGISTER_32 : BAL_X86_MACRO_IDIV_REGISTER,
+                   BAL_X86_INVALID,
+                   divisor);
+    }
+    else
+    {
+        const bal_x86_macro_t clear_rdx_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RDX,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, clear_rdx_macro);
+        push_macro(compiler,
+                   true == is_32bit ? BAL_X86_MACRO_DIV_REGISTER_32 : BAL_X86_MACRO_DIV_REGISTER,
+                   BAL_X86_INVALID,
+                   divisor);
+    }
+
+    // The 32-bit forms write EAX, which zero-extends into RAX.
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, dividend, BAL_X86_RAX);
+    push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, BAL_X86_RDX, BAL_X86_INVALID);
+    push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, BAL_X86_RAX, BAL_X86_INVALID);
+
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rd, dividend);
     compiler->is_dirty |= 1U << rd;
 }

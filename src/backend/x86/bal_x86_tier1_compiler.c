@@ -1233,10 +1233,14 @@ translate_cbz_cbnz(bal_tier1_compiler_t *BAL_RESTRICT                     compil
     const bal_guest_address_t taken_pc         = guest_address + (uint64_t)offset;
     const bal_guest_address_t fallthrough_pc   = guest_address + 4;
     const bal_x86_register_t  x86_rn           = read_zero_or_register(compiler, rn);
-    const bal_x86_macro_t     test_macro       = {
-                  .opcode      = BAL_X86_MACRO_TEST_REGISTER_REGISTER,
-                  .destination = x86_rn,
-                  .source      = x86_rn,
+
+    // CBZ Wt and CBNZ Wt only look at the low 32 bits of the register.
+    const bool            is_32bit   = 0U == (instruction >> 31U);
+    const bal_x86_macro_t test_macro = {
+        .opcode      = true == is_32bit ? BAL_X86_MACRO_TEST_REGISTER_REGISTER_32
+                                        : BAL_X86_MACRO_TEST_REGISTER_REGISTER,
+        .destination = x86_rn,
+        .source      = x86_rn,
     };
     bal_sliding_window_push(&compiler->window, test_macro);
     terminate_block_conditional(

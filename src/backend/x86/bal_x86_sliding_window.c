@@ -38,13 +38,21 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "RET",
     "ROR_REGISTER_IMMEDIATE",
     "ROR_REGISTER_IMMEDIATE_32",
+    "ROR_REGISTER_CL",
+    "ROR_REGISTER_CL_32",
     "SAR_REGISTER_IMMEDIATE",
     "SAR_REGISTER_IMMEDIATE_32",
+    "SAR_REGISTER_CL",
+    "SAR_REGISTER_CL_32",
     "SETCC",
     "SHL_REGISTER_IMMEDIATE",
     "SHL_REGISTER_IMMEDIATE_32",
+    "SHL_REGISTER_CL",
+    "SHL_REGISTER_CL_32",
     "SHR_REGISTER_IMMEDIATE",
     "SHR_REGISTER_IMMEDIATE_32",
+    "SHR_REGISTER_CL",
+    "SHR_REGISTER_CL_32",
     "STORE",
     "SUB_REGISTER_IMMEDIATE",
     "SUB_REGISTER_IMMEDIATE_32",
@@ -396,6 +404,30 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_TEST_REGISTER_REGISTER_32:
             bal_x86_emit_test_r32_r32(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_ROR_REGISTER_CL:
+            bal_x86_emit_ror_r64_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_ROR_REGISTER_CL_32:
+            bal_x86_emit_ror_r32_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SAR_REGISTER_CL:
+            bal_x86_emit_sar_r64_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SAR_REGISTER_CL_32:
+            bal_x86_emit_sar_r32_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SHL_REGISTER_CL:
+            bal_x86_emit_shl_r64_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SHL_REGISTER_CL_32:
+            bal_x86_emit_shl_r32_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SHR_REGISTER_CL:
+            bal_x86_emit_shr_r64_cl(assembler, destination);
+            break;
+        case BAL_X86_MACRO_SHR_REGISTER_CL_32:
+            bal_x86_emit_shr_r32_cl(assembler, destination);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

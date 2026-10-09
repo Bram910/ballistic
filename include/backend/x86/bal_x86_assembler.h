@@ -608,6 +608,113 @@ extern "C"
                                   bal_x86_register_t   destination,
                                   bal_x86_register_t   source);
 
+    /// Emits a 64-bit logical shift-left by CL, modulo 64.
+    ///
+    /// Assembly equivalent: `shl destination, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_shl_r64_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 32-bit logical shift-left by CL, modulo 32. The upper 32 bits of `destination` are
+    /// zeroed.
+    ///
+    /// Assembly equivalent: `shl destination_32, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_shl_r32_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 64-bit logical shift-right by CL, modulo 64.
+    ///
+    /// Assembly equivalent: `shr destination, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_shr_r64_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 32-bit logical shift-right by CL, modulo 32. The upper 32 bits of `destination` are
+    /// zeroed.
+    ///
+    /// Assembly equivalent: `shr destination_32, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_shr_r32_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 64-bit arithmetic shift-right by CL, modulo 64.
+    ///
+    /// Assembly equivalent: `sar destination, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_sar_r64_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 32-bit arithmetic shift-right by CL, modulo 32. The upper 32 bits of `destination`
+    /// are zeroed.
+    ///
+    /// Assembly equivalent: `sar destination_32, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_sar_r32_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 64-bit rotate-right by CL, modulo 64.
+    ///
+    /// Assembly equivalent: `ror destination, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_ror_r64_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 32-bit rotate-right by CL, modulo 32. The upper 32 bits of `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `ror destination_32, cl`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_ror_r32_cl(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

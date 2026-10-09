@@ -62,6 +62,14 @@ BAL_HOT static void emit_register_register(bal_x86_assembler_t *assembler,
                                            bal_x86_register_t   source,
                                            const char          *mnemonic);
 
+/// Emits `REX D3 /opcode_extension` for shifts and rotates by CL. REX.W is set when `is_64bit` is
+/// true, otherwise the operation is 32-bit and zeroes the upper half of `destination`.
+BAL_HOT static void emit_shift_cl(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  uint8_t              opcode_extension,
+                                  bool                 is_64bit,
+                                  const char          *mnemonic);
+
 /// Emits `REX 0F opcode ModR/M` for a two-byte-opcode register to register instruction in the
 /// `op reg, r/m` direction. REX.W is set when `is_64bit` is true.
 BAL_HOT static void emit_register_register_0f(bal_x86_assembler_t *assembler,
@@ -1094,6 +1102,70 @@ bal_x86_emit_mov_r32_r32(bal_x86_assembler_t     *assembler,
     const uint8_t opcode   = 0x8B;
     const bool    is_64bit = false;
     emit_register_register(assembler, opcode, is_64bit, destination, source, "mov");
+}
+
+void
+bal_x86_emit_shl_r64_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 4;
+    const bool    is_64bit         = true;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "shl");
+}
+
+void
+bal_x86_emit_shl_r32_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 4;
+    const bool    is_64bit         = false;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "shl");
+}
+
+void
+bal_x86_emit_shr_r64_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 5;
+    const bool    is_64bit         = true;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "shr");
+}
+
+void
+bal_x86_emit_shr_r32_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 5;
+    const bool    is_64bit         = false;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "shr");
+}
+
+void
+bal_x86_emit_sar_r64_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 7;
+    const bool    is_64bit         = true;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "sar");
+}
+
+void
+bal_x86_emit_sar_r32_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 7;
+    const bool    is_64bit         = false;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "sar");
+}
+
+void
+bal_x86_emit_ror_r64_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 1;
+    const bool    is_64bit         = true;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "ror");
+}
+
+void
+bal_x86_emit_ror_r32_cl(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    const uint8_t opcode_extension = 1;
+    const bool    is_64bit         = false;
+    emit_shift_cl(assembler, destination, opcode_extension, is_64bit, "ror");
 }
 
 void
@@ -2294,6 +2366,61 @@ emit_register_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
     emit_rex(assembler->buffer, &assembler->offset, w, r, b);
     emit8(assembler->buffer, &assembler->offset, opcode);
     emit_modrm_register(assembler->buffer, &assembler->offset, destination, source);
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+emit_shift_cl(bal_x86_assembler_t *BAL_RESTRICT assembler,
+              const bal_x86_register_t          destination,
+              const uint8_t                     opcode_extension,
+              const bool                        is_64bit,
+              const char *BAL_RESTRICT          mnemonic)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid destination register: %d", destination);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s r%d%s, cl",
+                  assembler->offset,
+                  mnemonic,
+                  destination,
+                  true == is_64bit ? "" : "d");
+
+    const uint8_t w          = true == is_64bit ? 1U : 0U;
+    const uint8_t r          = 0U;
+    const uint8_t b          = (uint8_t)destination >> 3U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0xD3);
+    emit_modrm_register(assembler->buffer, &assembler->offset, (int)opcode_extension, destination);
 
     const size_t bytes_emitted = assembler->offset - old_offset;
     BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,

@@ -350,7 +350,8 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                               "Aborting function: failed to decode instruction %08X at GVA 0x%llX",
                               instruction,
                               (unsigned long long)guest_address);
-                is_block_terminated = false;
+                compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                is_block_terminated = true;
                 break;
             }
 

@@ -66,6 +66,19 @@ local function derive_opcode(mnemonic)
         return "OPCODE_OR"
     end
 
+    if m == "ORN" then
+        return "OPCODE_OR_NOT"
+    end
+
+    -- The inverted logical forms share their encoding class with AND and EOR.
+    if m == "BIC" or m == "BICS" then
+        return "OPCODE_AND"
+    end
+
+    if m == "EON" then
+        return "OPCODE_XOR"
+    end
+
     if m:sub(1, 3) == "ADD" then
         return "OPCODE_ADD"
     end

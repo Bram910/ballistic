@@ -2726,7 +2726,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFF89C00,
           0x2F001400,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -2738,7 +2738,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFF8DC00,
           0x2F009400,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -2750,7 +2750,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFE0FC00,
           0x0E601C00,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2774,7 +2774,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xFF200000,
           0x0A200000,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -2786,7 +2786,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xFF200000,
           0x8A200000,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -2834,7 +2834,7 @@ const bal_decoder_instruction_metadata_t
         { "BICS",
           0xFF200000,
           0x6A200000,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -2846,7 +2846,7 @@ const bal_decoder_instruction_metadata_t
         { "BICS",
           0xFF200000,
           0xEA200000,
-          OPCODE_TRAP,
+          OPCODE_AND,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6842,7 +6842,7 @@ const bal_decoder_instruction_metadata_t
         { "EON",
           0xFF200000,
           0x4A200000,
-          OPCODE_TRAP,
+          OPCODE_XOR,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -6854,7 +6854,7 @@ const bal_decoder_instruction_metadata_t
         { "EON",
           0xFF200000,
           0xCA200000,
-          OPCODE_TRAP,
+          OPCODE_XOR,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26102,7 +26102,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xFF2003E0,
           0x2A2003E0,
-          OPCODE_TRAP,
+          OPCODE_OR_NOT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 10, 6 },
@@ -26114,7 +26114,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xFF2003E0,
           0xAA2003E0,
-          OPCODE_TRAP,
+          OPCODE_OR_NOT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 10, 6 },
@@ -26402,7 +26402,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xBFE0FC00,
           0x0EE01C00,
-          OPCODE_TRAP,
+          OPCODE_OR_NOT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26414,7 +26414,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xFF200000,
           0x2A200000,
-          OPCODE_TRAP,
+          OPCODE_OR_NOT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -26426,7 +26426,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xFF200000,
           0xAA200000,
-          OPCODE_TRAP,
+          OPCODE_OR_NOT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

@@ -166,6 +166,16 @@ local function derive_opcode(mnemonic)
         return "OPCODE_STORE"
     end
 
+    -- The unscaled, unprivileged and non-temporal forms, and the prefetches, which tier 1 treats as
+    -- loads that do nothing.
+    if m:sub(1, 4) == "LDUR" or m:sub(1, 4) == "LDTR" or m == "LDNP" or m == "PRFM" or m == "PRFUM" then
+        return "OPCODE_LOAD"
+    end
+
+    if m:sub(1, 4) == "STUR" or m:sub(1, 4) == "STTR" or m == "STNP" then
+        return "OPCODE_STORE"
+    end
+
     if m == "B" then
         return "OPCODE_JUMP"
     end

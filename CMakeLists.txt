@@ -130,6 +130,7 @@ add_library(Ballistic STATIC
         src/bal_log.c
         src/bal_memory.c
         src/generated/decoder_table.c
+        src/backend/bal_atomic.c
         src/backend/x86/bal_x86_assembler.c
         src/backend/x86/bal_x86_sliding_window.c
         src/backend/x86/bal_x86_tier1_compiler.c

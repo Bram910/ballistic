@@ -54,6 +54,16 @@ extern "C"
         /// Floating-point control and status registers, as seen through MRS/MSR.
         uint64_t fpcr;
         uint64_t fpsr;
+
+        /// The local exclusive monitor. A load-exclusive sets `exclusive_state` to 1 and records
+        /// the address and the value it read; a store-exclusive, CLREX, or a host that wants to
+        /// break the reservation sets it back to 0. Zero-initialised state has no reservation.
+        uint64_t exclusive_state;
+        uint64_t exclusive_address;
+        uint64_t exclusive_value[2];
+
+        /// Keeps the structure a whole number of its 64-byte alignment.
+        uint8_t reserved[32];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

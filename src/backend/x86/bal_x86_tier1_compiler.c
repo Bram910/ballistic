@@ -1,4 +1,5 @@
 #include "backend/x86/bal_x86_tier1_compiler.h"
+#include "backend/bal_atomic.h"
 #include "backend/bal_cpu.h"
 #include "bal_decoder.h"
 #include "bal_engine.h"
@@ -117,6 +118,11 @@ static void translate_load_store(bal_tier1_compiler_t         *compiler,
                                  const bal_memory_interface_t *memory_interface,
                                  uint32_t                      instruction,
                                  bal_guest_address_t           guest_address);
+
+static void translate_atomic(bal_tier1_compiler_t         *compiler,
+                             const bal_memory_interface_t *memory_interface,
+                             uint32_t                      instruction,
+                             bal_guest_address_t           guest_address);
 
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
@@ -588,6 +594,9 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                 case OPCODE_LOAD:
                 case OPCODE_STORE:
                     translate_load_store(compiler, memory_interface, instruction, guest_address);
+                    break;
+                case OPCODE_ATOMIC:
+                    translate_atomic(compiler, memory_interface, instruction, guest_address);
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -4024,14 +4033,83 @@ translate_data_address(const bal_memory_interface_t *memory_interface,
     return host_address;
 }
 
-/// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register,
-/// by calling translate_data_address() for `size` bytes.
+/// Calls the C function at `function`, whose arguments are already in the ABI argument
+/// registers. The return value is left in RAX.
 ///
-/// The call may clobber every caller-saved register, so dirty guest registers are written back and
-/// the register cache is emptied first. R13 and RBP are callee-saved and survive the call. When
-/// the address is not mapped, the block stops: the guest PC is set to this instruction, the
-/// exception field to BAL_EXCEPTION_DATA_ABORT, and the block returns. The jump over that exit is
-/// patched once its size is known.
+/// The call may clobber every caller-saved register, so callers write dirty guest registers back
+/// and empty the register cache first. R13 and RBP are callee-saved and survive the call.
+static void
+emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t function)
+{
+    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
+    {
+        const bal_x86_macro_t reserve_macro = {
+            .opcode              = BAL_X86_MACRO_SUB_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RSP,
+            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
+        };
+        bal_sliding_window_push(&compiler->window, reserve_macro);
+    }
+
+    const bal_x86_macro_t function_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_RAX,
+        .immediate_or_offset = function,
+    };
+    bal_sliding_window_push(&compiler->window, function_macro);
+    push_macro(compiler, BAL_X86_MACRO_CALL_REGISTER, BAL_X86_RAX, BAL_X86_INVALID);
+
+    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
+    {
+        const bal_x86_macro_t release_macro = {
+            .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_RSP,
+            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
+        };
+        bal_sliding_window_push(&compiler->window, release_macro);
+    }
+}
+
+/// Stops the block with a data abort when `result` is zero: the guest PC is set to this
+/// instruction, the exception field to BAL_EXCEPTION_DATA_ABORT, and the block returns. The jump
+/// over that exit is patched once its size is known.
+static void
+emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                        const bal_x86_register_t           result,
+                        const bal_guest_address_t          guest_address)
+{
+    push_macro(compiler, BAL_X86_MACRO_TEST_REGISTER_REGISTER, result, result);
+    bal_sliding_window_flush_all(&compiler->window);
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+    const size_t                      jump_offset = assembler->offset;
+    bal_x86_emit_jcc_rel32(assembler, BAL_X86_COND_NE, 0);
+    const size_t exit_offset = assembler->offset;
+
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, guest_address);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
+    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+    emit_epilogue(assembler);
+
+    if (BAL_SUCCESS == assembler->status)
+    {
+        // The rel32 field is the last four bytes of the 6-byte jcc.
+        const uint32_t        exit_size = (uint32_t)(assembler->offset - exit_offset);
+        uint8_t *BAL_RESTRICT relative  = assembler->buffer + jump_offset + 2U;
+        relative[0]                     = (uint8_t)exit_size;
+        relative[1]                     = (uint8_t)(exit_size >> 8U);
+        relative[2]                     = (uint8_t)(exit_size >> 16U);
+        relative[3]                     = (uint8_t)(exit_size >> 24U);
+    }
+}
+
+/// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register,
+/// by calling translate_data_address() for `size` bytes, and raises a data abort when the address
+/// is not mapped.
+///
+/// Dirty guest registers are written back and the register cache is emptied first, since the
+/// call may clobber every caller-saved register.
 static void
 emit_translate_data_address(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                             const bal_memory_interface_t *BAL_RESTRICT memory_interface,
@@ -4059,60 +4137,9 @@ emit_translate_data_address(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     };
     bal_sliding_window_push(&compiler->window, size_macro);
 
-    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
-    {
-        const bal_x86_macro_t reserve_macro = {
-            .opcode              = BAL_X86_MACRO_SUB_REGISTER_IMMEDIATE,
-            .destination         = BAL_X86_RSP,
-            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
-        };
-        bal_sliding_window_push(&compiler->window, reserve_macro);
-    }
-
-    const bal_x86_macro_t function_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_RAX,
-        .immediate_or_offset = (uint64_t)(uintptr_t)&translate_data_address,
-    };
-    bal_sliding_window_push(&compiler->window, function_macro);
-    push_macro(compiler, BAL_X86_MACRO_CALL_REGISTER, BAL_X86_RAX, BAL_X86_INVALID);
-
-    if (BAL_X86_ABI_SHADOW_SPACE != 0U)
-    {
-        const bal_x86_macro_t release_macro = {
-            .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
-            .destination         = BAL_X86_RSP,
-            .immediate_or_offset = BAL_X86_ABI_SHADOW_SPACE,
-        };
-        bal_sliding_window_push(&compiler->window, release_macro);
-    }
-
+    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&translate_data_address);
     push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, address, BAL_X86_RAX);
-    push_macro(compiler, BAL_X86_MACRO_TEST_REGISTER_REGISTER, address, address);
-    bal_sliding_window_flush_all(&compiler->window);
-
-    // Jump over the data abort exit when the address is mapped.
-    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
-    const size_t                      jump_offset = assembler->offset;
-    bal_x86_emit_jcc_rel32(assembler, BAL_X86_COND_NE, 0);
-    const size_t exit_offset = assembler->offset;
-
-    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, guest_address);
-    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
-    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
-    emit_epilogue(assembler);
-
-    if (BAL_SUCCESS == assembler->status)
-    {
-        // The rel32 field is the last four bytes of the 6-byte jcc.
-        const uint32_t        exit_size = (uint32_t)(assembler->offset - exit_offset);
-        uint8_t *BAL_RESTRICT relative  = assembler->buffer + jump_offset + 2U;
-        relative[0]                     = (uint8_t)exit_size;
-        relative[1]                     = (uint8_t)(exit_size >> 8U);
-        relative[2]                     = (uint8_t)(exit_size >> 16U);
-        relative[3]                     = (uint8_t)(exit_size >> 24U);
-    }
+    emit_data_abort_if_zero(compiler, address, guest_address);
 }
 
 /// Puts the address formed by a base register (the stack pointer for register 31) plus a signed
@@ -4519,4 +4546,48 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     {
         emit_writeback_end(compiler, rn);
     }
+}
+
+/// Translates the synchronisation instructions: exclusives, load-acquire/store-release (including
+/// the RCpc forms), compare-and-swap, the LSE atomic memory operations, and CLREX.
+///
+/// They are rare enough in guest code that tier 1 does not inline them. Each one flushes the guest
+/// registers and calls bal_execute_atomic(), which performs the access as one host atomic
+/// operation and updates the registers in the cpu structure, and the block raises a data abort
+/// when the helper reports an unmapped or misaligned access.
+static void
+translate_atomic(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                 const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                 const uint32_t                             instruction,
+                 const bal_guest_address_t                  guest_address)
+{
+    if (BAL_UNLIKELY(false == bal_is_atomic_supported(instruction)))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: unsupported atomic encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+
+    const bal_x86_macro_t interface_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG2,
+        .immediate_or_offset = (uint64_t)(uintptr_t)memory_interface,
+    };
+    bal_sliding_window_push(&compiler->window, interface_macro);
+
+    const bal_x86_macro_t instruction_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG3,
+        .immediate_or_offset = instruction,
+    };
+    bal_sliding_window_push(&compiler->window, instruction_macro);
+
+    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&bal_execute_atomic);
+    emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
 }

@@ -53,6 +53,8 @@ static void terminate_block_conditional(bal_tier1_compiler_t *compiler,
                                         bal_guest_address_t   fallthrough_pc,
                                         bal_guest_address_t   taken_pc);
 
+static void emit_epilogue(bal_x86_assembler_t *assembler);
+
 static uint32_t extract_operand_value(uint32_t instruction, const bal_decoder_operand_t *operand);
 
 static void translate_add_sub_imm(bal_tier1_compiler_t                     *compiler,
@@ -820,12 +822,7 @@ terminate_block(bal_tier1_compiler_t     *compiler,
     }
 
     BAL_LOG_TRACE(&bal_thread_logger, "Restoring callee-saved registers and emitting RET");
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R15);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R14);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R13);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R12);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_RBP);
-    bal_x86_emit_ret(&compiler->assembler);
+    emit_epilogue(&compiler->assembler);
 }
 
 void
@@ -870,20 +867,26 @@ terminate_block_conditional(bal_tier1_compiler_t     *compiler,
     // Emit fallthrough epilogue.
     bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, fallthrough_pc);
     bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R15);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R14);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R13);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_R12);
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_RBP);
-    bal_x86_emit_ret(&compiler->assembler);
+    emit_epilogue(&compiler->assembler);
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
 
     // Emit taken epilogue.
     bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, taken_pc);
     bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    bal_x86_emit_pop_r64(&compiler->assembler, BAL_X86_RBP);
-    bal_x86_emit_ret(&compiler->assembler);
+    emit_epilogue(&compiler->assembler);
+}
+
+/// Restores the callee-saved registers pushed by the block prologue and returns to the host.
+static void
+emit_epilogue(bal_x86_assembler_t *assembler)
+{
+    bal_x86_emit_pop_r64(assembler, BAL_X86_R15);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_R14);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_R13);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_R12);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_RBP);
+    bal_x86_emit_ret(assembler);
 }
 
 BAL_HOT static uint32_t
@@ -1222,8 +1225,7 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
             bal_sliding_window_flush_all(&compiler->window);
             bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, taken_pc);
             bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-            bal_x86_emit_pop_r64(assembler, BAL_X86_RBP);
-            bal_x86_emit_ret(assembler);
+            emit_epilogue(assembler);
             return;
         default:
             BAL_LOG_ERROR(&bal_thread_logger, "Unsupported B.cond condition: %u", cond);

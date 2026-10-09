@@ -594,6 +594,90 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_cdq(bal_x86_assembler_t *assembler);
 
+    /// Emits a 64-bit bit scan reverse: `destination` receives the index of the highest set bit of
+    /// `source`, and ZF is set when `source` is zero, in which case `destination` must not be
+    /// relied on.
+    ///
+    /// Assembly equivalent: `bsr destination, source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_bsr_r64_r64(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a 32-bit bit scan reverse. ZF is set when `source` is zero.
+    ///
+    /// Assembly equivalent: `bsr destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_bsr_r32_r32(bal_x86_assembler_t *assembler,
+                                  bal_x86_register_t   destination,
+                                  bal_x86_register_t   source);
+
+    /// Emits a byte swap of a 64-bit register.
+    ///
+    /// Assembly equivalent: `bswap destination`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_bswap_r64(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a byte swap of a 32-bit register. The upper 32 bits of `destination` are zeroed.
+    ///
+    /// Assembly equivalent: `bswap destination_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_bswap_r32(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits an unsigned 64-bit widening multiply: RDX:RAX = RAX * `source`.
+    ///
+    /// Assembly equivalent: `mul source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_mul_r64(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
+    /// Emits a signed 64-bit widening multiply: RDX:RAX = RAX * `source`.
+    ///
+    /// Assembly equivalent: `imul source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_imul_r64(bal_x86_assembler_t *assembler, bal_x86_register_t source);
+
     /// Emits a 64-bit conditional move: `destination` = `source` when `condition` holds.
     ///
     /// Assembly equivalent: `cmov<condition> destination, source`

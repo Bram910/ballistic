@@ -18,6 +18,10 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "AND_REGISTER_IMMEDIATE",
     "AND_REGISTER_REGISTER",
     "AND_REGISTER_REGISTER_32",
+    "BSR_REGISTER_REGISTER",
+    "BSR_REGISTER_REGISTER_32",
+    "BSWAP_REGISTER",
+    "BSWAP_REGISTER_32",
     "CDQ",
     "BT_REGISTER_IMMEDIATE",
     "CMC",
@@ -30,6 +34,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "IDIV_REGISTER_32",
     "IMUL_REGISTER_REGISTER",
     "IMUL_REGISTER_REGISTER_32",
+    "IMUL_WIDENING",
     "JCC_RELATIVE",
     "JMP_REGISTER",
     "JMP_RELATIVE",
@@ -38,6 +43,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "MOV_REGISTER_REGISTER",
     "MOV_REGISTER_REGISTER_32",
     "MOVSXD_REGISTER_REGISTER",
+    "MUL_WIDENING",
     "NEG_REGISTER",
     "NEG_REGISTER_32",
     "NOT_REGISTER",
@@ -484,6 +490,24 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_PUSH_REGISTER:
             bal_x86_emit_push_r64(assembler, source);
+            break;
+        case BAL_X86_MACRO_BSR_REGISTER_REGISTER:
+            bal_x86_emit_bsr_r64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_BSR_REGISTER_REGISTER_32:
+            bal_x86_emit_bsr_r32_r32(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_BSWAP_REGISTER:
+            bal_x86_emit_bswap_r64(assembler, destination);
+            break;
+        case BAL_X86_MACRO_BSWAP_REGISTER_32:
+            bal_x86_emit_bswap_r32(assembler, destination);
+            break;
+        case BAL_X86_MACRO_IMUL_WIDENING:
+            bal_x86_emit_imul_r64(assembler, source);
+            break;
+        case BAL_X86_MACRO_MUL_WIDENING:
+            bal_x86_emit_mul_r64(assembler, source);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

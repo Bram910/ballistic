@@ -1142,6 +1142,134 @@ bal_x86_emit_cdq(bal_x86_assembler_t *assembler)
 }
 
 void
+bal_x86_emit_bsr_r64_r64(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0xBD;
+    const bool    is_64bit = true;
+    emit_register_register_0f(assembler, opcode, is_64bit, destination, source, "bsr");
+}
+
+void
+bal_x86_emit_bsr_r32_r32(bal_x86_assembler_t     *assembler,
+                         const bal_x86_register_t destination,
+                         const bal_x86_register_t source)
+{
+    const uint8_t opcode   = 0xBD;
+    const bool    is_64bit = false;
+    emit_register_register_0f(assembler, opcode, is_64bit, destination, source, "bsr");
+}
+
+void
+bal_x86_emit_bswap_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid destination register: %d", destination);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] bswap r%d", assembler->offset, destination);
+
+    const uint8_t w          = 1U;
+    const uint8_t r          = 0U;
+    const uint8_t b          = (uint8_t)destination >> 3U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x0F);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)(0xC8U + ((uint32_t)destination & 7U)));
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+bal_x86_emit_bswap_r32(bal_x86_assembler_t *assembler, const bal_x86_register_t destination)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(destination)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid destination register: %d", destination);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] bswap r%dd", assembler->offset, destination);
+
+    const uint8_t w          = 0U;
+    const uint8_t r          = 0U;
+    const uint8_t b          = (uint8_t)destination >> 3U;
+    const size_t  old_offset = assembler->offset;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x0F);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)(0xC8U + ((uint32_t)destination & 7U)));
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+bal_x86_emit_mul_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 4;
+    const bool    is_64bit         = true;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "mul");
+}
+
+void
+bal_x86_emit_imul_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t source)
+{
+    const uint8_t opcode_extension = 5;
+    const bool    is_64bit         = true;
+    emit_group3_register(assembler, opcode_extension, is_64bit, source, "imul");
+}
+
+void
 bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

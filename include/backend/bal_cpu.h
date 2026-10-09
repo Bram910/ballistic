@@ -30,7 +30,16 @@ extern "C"
         ///
         /// This only increments if the engine flag [`BAL_ENGINE_FLAG_INSTRUCTION_COUNTING`] is set.
         uint64_t instruction_count;
-        char     pad[32];
+
+        /// EL0 thread pointer, read and written by the guest with MRS/MSR TPIDR_EL0.
+        uint64_t tpidr_el0;
+
+        /// Read-only EL0 thread pointer. The guest can only read it; the host sets it.
+        uint64_t tpidrro_el0;
+
+        /// Floating-point control and status registers, as seen through MRS/MSR.
+        uint64_t fpcr;
+        uint64_t fpsr;
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

@@ -66,6 +66,7 @@ extern "C"
         OPCODE_SET_FLAG_V,
         OPCODE_REVERSE,
         OPCODE_COUNT_LEADING,
+        OPCODE_SYSTEM_REGISTER,
         OPCODE_ENUM_END = 0x7FF
     } bal_opcode_t;
 

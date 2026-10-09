@@ -103,6 +103,8 @@ static void translate_conditional_compare(bal_tier1_compiler_t *compiler, uint32
 
 static void translate_multiply_high(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_system_register(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
 
@@ -632,6 +634,22 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     BAL_LOG_ERROR(&bal_thread_logger,
                                   "Aborting function: Tier 1 unsupported conditional instruction "
                                   "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
+                    compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_SYSTEM_REGISTER:
+                    // MRS and MSR (register): bits 31:22 = 1101010100 and bit 20 = 1.
+                    if (0xD5100000U == (instruction & 0xFFD00000U))
+                    {
+                        translate_system_register(compiler, instruction);
+                        break;
+                    }
+
+                    BAL_LOG_ERROR(&bal_thread_logger,
+                                  "Aborting function: Tier 1 unsupported system instruction at "
+                                  "%08x : %s",
                                   instruction,
                                   metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
@@ -3729,4 +3747,241 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
     push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rd, value);
     compiler->is_dirty |= 1U << rd;
+}
+
+/// Encodes the o0:op1:CRn:CRm:op2 fields of a system register as they appear in bits 19:5 of MRS
+/// and MSR.
+#define SYSTEM_REGISTER(op0, op1, crn, crm, op2) \
+    ((((op0) - 2U) << 14U) | ((op1) << 11U) | ((crn) << 7U) | ((crm) << 3U) | (op2))
+
+#define SYSTEM_REGISTER_NZCV        SYSTEM_REGISTER(3U, 3U, 4U, 2U, 0U)
+#define SYSTEM_REGISTER_FPCR        SYSTEM_REGISTER(3U, 3U, 4U, 4U, 0U)
+#define SYSTEM_REGISTER_FPSR        SYSTEM_REGISTER(3U, 3U, 4U, 4U, 1U)
+#define SYSTEM_REGISTER_TPIDR_EL0   SYSTEM_REGISTER(3U, 3U, 13U, 0U, 2U)
+#define SYSTEM_REGISTER_TPIDRRO_EL0 SYSTEM_REGISTER(3U, 3U, 13U, 0U, 3U)
+#define SYSTEM_REGISTER_CTR_EL0     SYSTEM_REGISTER(3U, 3U, 0U, 0U, 1U)
+#define SYSTEM_REGISTER_DCZID_EL0   SYSTEM_REGISTER(3U, 3U, 0U, 0U, 7U)
+
+/// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, Len) and FPSR (N, Z, C, V, QC and the
+/// cumulative exception flags), as implemented by Unicorn's reference model.
+#define FPCR_WRITABLE_BITS 0x07F70000ULL
+#define FPSR_WRITABLE_BITS 0xF800009FULL
+
+/// Cache type and DC ZVA block size of a Cortex-A57: 64-byte cache lines, a 64-byte DC ZVA block.
+#define CTR_EL0_VALUE   0x8444C004ULL
+#define DCZID_EL0_VALUE 0x4ULL
+
+/// Translates MRS and MSR for the system registers an EL0 program uses: NZCV, FPCR, FPSR,
+/// TPIDR_EL0, TPIDRRO_EL0 (read only) and the CTR_EL0 and DCZID_EL0 identification registers.
+/// Other registers are rejected as unknown instructions.
+///
+/// NZCV is converted between the A64 bit layout (N, Z, C and V in bits 31:28) and the four flag
+/// bytes of bal_cpu_t. Each bit is isolated by shifting it to bit 63 and back down to bit 0, which
+/// clears every other bit, and then shifted to its place.
+void
+translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rt              = (uint8_t)(instruction & 0x1FU);
+    const uint32_t system_register = (instruction >> 5U) & 0x7FFFU;
+    const bool     is_read         = 1U == ((instruction >> 21U) & 1U);
+
+    // A64 bit of each flag, and its byte in the word at flag_c.
+    static const uint32_t FLAG_BITS[4]      = { 29U, 30U, 31U, 28U };
+    static const uint32_t FLAG_BYTE_BITS[4] = { 0U, 8U, 16U, 24U };
+
+    const bal_x86_register_t value       = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t scratch     = BAL_X86_REGISTER_DISCARD_RESULT;
+    size_t                   offset      = 0U;
+    uint64_t                 mask        = 0xFFFFFFFFFFFFFFFFULL;
+    uint64_t                 constant    = 0U;
+    bool                     is_constant = false;
+
+    switch (system_register)
+    {
+        case SYSTEM_REGISTER_NZCV:
+            break;
+        case SYSTEM_REGISTER_FPCR:
+            offset = offsetof(bal_cpu_t, fpcr);
+            mask   = FPCR_WRITABLE_BITS;
+            break;
+        case SYSTEM_REGISTER_FPSR:
+            offset = offsetof(bal_cpu_t, fpsr);
+            mask   = FPSR_WRITABLE_BITS;
+            break;
+        case SYSTEM_REGISTER_TPIDR_EL0:
+            offset = offsetof(bal_cpu_t, tpidr_el0);
+            break;
+        case SYSTEM_REGISTER_TPIDRRO_EL0:
+            offset = offsetof(bal_cpu_t, tpidrro_el0);
+            break;
+        case SYSTEM_REGISTER_CTR_EL0:
+            constant    = CTR_EL0_VALUE;
+            is_constant = true;
+            break;
+        case SYSTEM_REGISTER_DCZID_EL0:
+            constant    = DCZID_EL0_VALUE;
+            is_constant = true;
+            break;
+        default:
+            offset = SIZE_MAX;
+            break;
+    }
+
+    // Unknown registers, writes to read-only ones, and EL0-inaccessible writes.
+    const bool is_read_only = SYSTEM_REGISTER_TPIDRRO_EL0 == system_register || true == is_constant;
+
+    if (BAL_UNLIKELY(SIZE_MAX == offset) || BAL_UNLIKELY(false == is_read && true == is_read_only))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: unsupported system register access %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    if (true == is_read)
+    {
+        // Register 31 is the zero register, so a read into it has no effect.
+        if (31U == rt)
+        {
+            return;
+        }
+
+        if (true == is_constant)
+        {
+            const bal_x86_macro_t constant_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = value,
+                .immediate_or_offset = constant,
+            };
+            bal_sliding_window_push(&compiler->window, constant_macro);
+        }
+        else if (SYSTEM_REGISTER_NZCV == system_register)
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = value,
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+
+            for (size_t i = 0U; i < 4U; ++i)
+            {
+                const bal_x86_macro_t load_macro = {
+                    .opcode              = BAL_X86_MACRO_LOAD,
+                    .destination         = scratch,
+                    .immediate_or_offset = offsetof(bal_cpu_t, flag_c) + i,
+                };
+                bal_sliding_window_push(&compiler->window, load_macro);
+                push_shift(compiler,
+                           BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                           BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                           false,
+                           scratch,
+                           63U);
+                push_shift(compiler,
+                           BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                           BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                           false,
+                           scratch,
+                           63U - FLAG_BITS[i]);
+                push_macro(compiler, BAL_X86_MACRO_OR_REGISTER_REGISTER, value, scratch);
+            }
+        }
+        else
+        {
+            const bal_x86_macro_t load_macro = {
+                .opcode              = BAL_X86_MACRO_LOAD,
+                .destination         = value,
+                .immediate_or_offset = offset,
+            };
+            bal_sliding_window_push(&compiler->window, load_macro);
+        }
+
+        const bool               skip_load = true;
+        const bal_x86_register_t x86_rt    = allocate_x86_register(compiler, rt, skip_load);
+        push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rt, value);
+        compiler->is_dirty |= 1U << rt;
+        return;
+    }
+
+    // MSR: copy Xt, which reads as zero for register 31.
+    if (31U == rt)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = value,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bool               skip_load = false;
+        const bal_x86_register_t x86_rt    = allocate_x86_register(compiler, rt, skip_load);
+        push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, value, x86_rt);
+    }
+
+    if (SYSTEM_REGISTER_NZCV == system_register)
+    {
+        // Build the flag word in the discard register from the copy of Xt in the zero register.
+        // flag_c to flag_v are followed by four bytes of padding, so a 64-bit store covers them.
+        const bal_x86_register_t flags      = scratch;
+        const bal_x86_macro_t    zero_macro = {
+               .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+               .destination         = flags,
+               .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+
+        for (size_t i = 0U; i < 4U; ++i)
+        {
+            push_macro(compiler, BAL_X86_MACRO_PUSH_REGISTER, BAL_X86_INVALID, value);
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       value,
+                       63U - FLAG_BITS[i]);
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                       false,
+                       value,
+                       63U);
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       value,
+                       FLAG_BYTE_BITS[i]);
+            push_macro(compiler, BAL_X86_MACRO_OR_REGISTER_REGISTER, flags, value);
+            push_macro(compiler, BAL_X86_MACRO_POP_REGISTER, value, BAL_X86_INVALID);
+        }
+
+        const bal_x86_macro_t store_macro = {
+            .opcode              = BAL_X86_MACRO_STORE,
+            .source              = flags,
+            .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+        };
+        bal_sliding_window_push(&compiler->window, store_macro);
+        return;
+    }
+
+    if (mask != 0xFFFFFFFFFFFFFFFFULL)
+    {
+        const bal_x86_macro_t mask_macro = {
+            .opcode              = BAL_X86_MACRO_AND_REGISTER_IMMEDIATE,
+            .destination         = value,
+            .immediate_or_offset = mask,
+        };
+        bal_sliding_window_push(&compiler->window, mask_macro);
+    }
+
+    const bal_x86_macro_t store_macro = {
+        .opcode              = BAL_X86_MACRO_STORE,
+        .source              = value,
+        .immediate_or_offset = offset,
+    };
+    bal_sliding_window_push(&compiler->window, store_macro);
 }

@@ -372,6 +372,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
             }
 
             start_x86_instruction_offset = compiler->assembler.offset;
+            compiler->pinned_registers   = 0U;
 
             switch (metadata->ir_opcode)
             {
@@ -685,6 +686,7 @@ allocate_x86_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                       "RegAlloc: Hit - ARM X%u is already in x86 r%d",
                       arm_register,
                       cached_x86_register);
+        compiler->pinned_registers |= (uint16_t)(1U << (uint32_t)cached_x86_register);
         return (bal_x86_register_t)cached_x86_register;
     }
 
@@ -715,25 +717,34 @@ allocate_x86_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         ++scratch_register_cursor;
     }
 
-    // Evict a clean register.
+    // Evict a clean register that the current instruction is not using.
     if (BAL_X86_INVALID == free_register)
     {
         for (size_t i = 0U; i < SCRATCH_REGISTERS_SIZE; ++i)
         {
-            const int8_t arm_victim_register = x86_to_arm_cursor[i];
+            const bal_x86_register_t candidate           = SCRATCH_REGISTERS[i];
+            const int8_t             arm_victim_register = x86_to_arm_cursor[candidate];
+            const bool is_pinned = 0U != (compiler->pinned_registers & (1U << candidate));
 
-            if (arm_victim_register != -1 && !(compiler->is_dirty & (1U << arm_victim_register)))
+            if (arm_victim_register != -1 && !(compiler->is_dirty & (1U << arm_victim_register))
+                && false == is_pinned)
             {
-                free_register = (bal_x86_register_t)i;
+                free_register = candidate;
+                break;
             }
         }
 
-        // All registers are dirty, force an eviction.
-        if (BAL_X86_INVALID == free_register)
+        // All unpinned registers are dirty, force an eviction.
+        for (size_t i = 0U; i < SCRATCH_REGISTERS_SIZE && BAL_X86_INVALID == free_register; ++i)
         {
-            const uint8_t slot_index = compiler->eviction_cursor % SCRATCH_REGISTERS_SIZE;
-            free_register            = SCRATCH_REGISTERS[slot_index];
+            const uint8_t slot_index           = compiler->eviction_cursor % SCRATCH_REGISTERS_SIZE;
+            const bal_x86_register_t candidate = SCRATCH_REGISTERS[slot_index];
             ++compiler->eviction_cursor;
+
+            if (0U == (compiler->pinned_registers & (1U << candidate)))
+            {
+                free_register = candidate;
+            }
         }
 
         evict_x86_register(compiler, free_register);
@@ -741,6 +752,7 @@ allocate_x86_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 
     compiler->arm_to_x86[arm_register]  = (int8_t)free_register;
     compiler->x86_to_arm[free_register] = (int8_t)arm_register;
+    compiler->pinned_registers |= (uint16_t)(1U << (uint32_t)free_register);
 
     if (false == skip_load_instruction)
     {

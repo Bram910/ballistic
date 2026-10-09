@@ -15,13 +15,16 @@ extern "C"
 
     BAL_ALIGNED(64) typedef struct
     {
-        bal_x86_assembler_t      assembler;
-        bal_sliding_window_t     window;
-        int8_t                   arm_to_x86[32];
-        int8_t                   x86_to_arm[16];
-        uint32_t                 is_dirty;
-        uint8_t                  eviction_cursor;
-        char                     pad[3];
+        bal_x86_assembler_t  assembler;
+        bal_sliding_window_t window;
+        int8_t               arm_to_x86[32];
+        int8_t               x86_to_arm[16];
+        uint32_t             is_dirty;
+        uint8_t              eviction_cursor;
+        char                 pad;
+        /// Bitmask of the x86 registers allocated for the guest instruction being translated.
+        /// They are never chosen for eviction, so an instruction cannot evict its own operands.
+        uint16_t                 pinned_registers;
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
         uint32_t                 pad1;

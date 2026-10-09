@@ -99,6 +99,8 @@ static void translate_variable_shift(bal_tier1_compiler_t *compiler, uint32_t in
 
 static void translate_divide(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_conditional_compare(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void push_macro(bal_tier1_compiler_t  *compiler,
                        bal_x86_macro_opcode_t opcode,
                        bal_x86_register_t     destination,
@@ -448,6 +450,13 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         && 0U == ((instruction >> 21U) & 1U))
                     {
                         translate_add_sub_shifted(compiler, instruction);
+                        break;
+                    }
+
+                    // CCMN/CCMP: bits 28:21 = 11010010.
+                    if (0xD2U == ((instruction >> 21U) & 0xFFU))
+                    {
+                        translate_conditional_compare(compiler, instruction);
                         break;
                     }
 
@@ -3277,4 +3286,136 @@ translate_divide(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
     const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
     push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, x86_rd, dividend);
     compiler->is_dirty |= 1U << rd;
+}
+
+/// Translates CCMN and CCMP in their register and immediate forms: when the condition holds, NZCV
+/// is set by comparing Rn with the second operand (adding it for CCMN), otherwise NZCV is set to
+/// the immediate nzcv field.
+///
+/// The condition is evaluated on the old flags first. The comparison then runs in
+/// BAL_X86_REGISTER_ZERO and its flags are stored as usual. Finally the four flag bytes are loaded
+/// as one word, together with the padding after them, and replaced by the immediate flags with a
+/// `cmov` when the condition failed. AL and NV always compare.
+void
+translate_conditional_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                              const uint32_t                     instruction)
+{
+    const uint32_t nzcv         = instruction & 0xFU;
+    const uint32_t o3           = (instruction >> 4U) & 1U;
+    const uint8_t  rn           = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t o2           = (instruction >> 10U) & 1U;
+    const bool     is_immediate = 1U == ((instruction >> 11U) & 1U);
+    const uint32_t condition    = (instruction >> 12U) & 0xFU;
+    const uint32_t operand2     = (instruction >> 16U) & 0x1FU;
+    const uint32_t s_bit        = (instruction >> 29U) & 1U;
+    const bool     is_sub       = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_32bit     = 0U == (instruction >> 31U);
+
+    if (BAL_UNLIKELY(s_bit != 1U) || BAL_UNLIKELY(o2 != 0U) || BAL_UNLIKELY(o3 != 0U))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: reserved conditional compare encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    const bool          is_always      = condition >= 14U;
+    bal_x86_condition_t fail_condition = BAL_X86_COND_E;
+
+    if (false == is_always)
+    {
+        fail_condition = emit_condition_value(compiler, condition);
+    }
+
+    // Compare in the zero register. Register 31 is the zero register for Rn and Rm.
+    const bal_x86_register_t comparison = BAL_X86_REGISTER_ZERO;
+    const bool               skip_load  = false;
+
+    if (31U == rn)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = comparison,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rn = allocate_x86_register(compiler, rn, skip_load);
+        push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, comparison, x86_rn);
+    }
+
+    if (true == is_immediate || 31U == operand2)
+    {
+        const uint64_t        immediate     = true == is_immediate ? operand2 : 0U;
+        const bal_x86_macro_t compare_macro = {
+            .opcode = true == is_sub ? (true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_IMMEDIATE_32
+                                                         : BAL_X86_MACRO_SUB_REGISTER_IMMEDIATE)
+                                     : (true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE_32
+                                                         : BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE),
+            .destination         = comparison,
+            .immediate_or_offset = immediate,
+        };
+        bal_sliding_window_push(&compiler->window, compare_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rm
+            = allocate_x86_register(compiler, (uint8_t)operand2, skip_load);
+        const bal_x86_macro_opcode_t opcode
+            = true == is_sub ? (true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_REGISTER_32
+                                                 : BAL_X86_MACRO_SUB_REGISTER_REGISTER)
+                             : (true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_REGISTER_32
+                                                 : BAL_X86_MACRO_ADD_REGISTER_REGISTER);
+        push_macro(compiler, opcode, comparison, x86_rm);
+    }
+
+    capture_nzcv(compiler, true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B);
+
+    if (true == is_always)
+    {
+        return;
+    }
+
+    // flag_c, flag_z, flag_n and flag_v are consecutive bytes followed by four bytes of padding,
+    // so one 64-bit load and store covers exactly them.
+    const uint64_t immediate_flags
+        = (uint64_t)((nzcv >> 1U) & 1U) | ((uint64_t)((nzcv >> 2U) & 1U) << 8U)
+          | ((uint64_t)((nzcv >> 3U) & 1U) << 16U) | ((uint64_t)(nzcv & 1U) << 24U);
+    const bal_x86_register_t condition_value = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    const bal_x86_macro_t load_flags_macro = {
+        .opcode              = BAL_X86_MACRO_LOAD,
+        .destination         = comparison,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+    };
+    bal_sliding_window_push(&compiler->window, load_flags_macro);
+
+    // The condition value is only needed for its zero flag, so the register is reused for the
+    // immediate flags right after the TEST. Moves leave the flags alone.
+    push_macro(compiler, BAL_X86_MACRO_TEST_REGISTER_REGISTER, condition_value, condition_value);
+
+    const bal_x86_macro_t immediate_flags_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = condition_value,
+        .immediate_or_offset = immediate_flags,
+    };
+    bal_sliding_window_push(&compiler->window, immediate_flags_macro);
+
+    const bal_x86_macro_t select_macro = {
+        .opcode      = BAL_X86_MACRO_CMOV_REGISTER_REGISTER,
+        .destination = comparison,
+        .source      = condition_value,
+        .condition   = fail_condition,
+    };
+    bal_sliding_window_push(&compiler->window, select_macro);
+
+    const bal_x86_macro_t store_flags_macro = {
+        .opcode              = BAL_X86_MACRO_STORE,
+        .source              = comparison,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+    };
+    bal_sliding_window_push(&compiler->window, store_flags_macro);
 }

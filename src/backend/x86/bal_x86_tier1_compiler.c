@@ -97,6 +97,8 @@ static void translate_b_cond(bal_tier1_compiler_t *compiler,
                              uint32_t              instruction,
                              bal_guest_address_t   guest_address);
 
+static void emit_compound_condition(bal_tier1_compiler_t *compiler, uint32_t condition);
+
 static void translate_cbz_cbnz(bal_tier1_compiler_t                     *compiler,
                                const bal_decoder_instruction_metadata_t *metadata,
                                uint32_t                                  instruction,
@@ -1066,7 +1068,23 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
             flag_offset   = offsetof(bal_cpu_t, flag_v);
             test_for_zero = true;
             break; // VC (V=0)
-        case 0xE:  // AL (always)
+        case 0x8:  // HI (C=1 and Z=0)
+        case 0x9:  // LS (C=0 or Z=1)
+        case 0xA:  // GE (N=V)
+        case 0xB:  // LT (N!=V)
+        case 0xC:  // GT (Z=0 and N=V)
+        case 0xD:  // LE (Z=1 or N!=V)
+            emit_compound_condition(compiler, cond);
+
+            // The odd conditions are the negations of the even ones, which leave ZF set when they
+            // hold.
+            terminate_block_conditional(compiler,
+                                        0U == (cond & 1U) ? BAL_X86_COND_E : BAL_X86_COND_NE,
+                                        fallthrough_pc,
+                                        taken_pc);
+            return;
+        case 0xF: // NV, which behaves exactly like AL in A64.
+        case 0xE: // AL (always)
             flush_dirty_registers(compiler);
             bal_sliding_window_flush_all(&compiler->window);
             bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, taken_pc);
@@ -1083,6 +1101,119 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     bal_x86_emit_cmp_mem8_rbp_offset_imm(assembler, flag_offset, 0);
     const bal_x86_condition_t x86_cond = test_for_zero ? BAL_X86_COND_E : BAL_X86_COND_NE;
     terminate_block_conditional(compiler, x86_cond, fallthrough_pc, taken_pc);
+}
+
+/// Evaluates HI, GE or GT (or their negations LS, LT and LE) from the guest flags and leaves the
+/// x86 ZF set when the even condition holds.
+///
+/// One 64-bit load from flag_c places C, Z, N and V in bytes 0 to 3, since they are consecutive in
+/// bal_cpu_t. The condition is then reduced to bit 0 of BAL_X86_REGISTER_ZERO, which is zero
+/// exactly when the even condition holds:
+///
+/// - HI: NOT(C) OR Z
+/// - GE: N XOR V
+/// - GT: (N XOR V) OR Z
+static void
+emit_compound_condition(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t condition)
+{
+    const bal_x86_register_t flags   = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t scratch = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    const bal_x86_macro_t load_flags_macro = {
+        .opcode              = BAL_X86_MACRO_LOAD,
+        .destination         = flags,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+    };
+    bal_sliding_window_push(&compiler->window, load_flags_macro);
+
+    const bal_x86_macro_t copy_macro = {
+        .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+        .destination = scratch,
+        .source      = flags,
+    };
+    bal_sliding_window_push(&compiler->window, copy_macro);
+
+    if (0x8U == (condition & ~1U))
+    {
+        // scratch = Z, flags = NOT(C), flags |= scratch.
+        const bal_x86_macro_t shift_z_macro = {
+            .opcode              = BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+            .destination         = scratch,
+            .immediate_or_offset = 8U,
+        };
+        bal_sliding_window_push(&compiler->window, shift_z_macro);
+
+        const bal_x86_macro_t not_c_macro = {
+            .opcode      = BAL_X86_MACRO_NOT_REGISTER,
+            .destination = flags,
+        };
+        bal_sliding_window_push(&compiler->window, not_c_macro);
+
+        const bal_x86_macro_t or_macro = {
+            .opcode      = BAL_X86_MACRO_OR_REGISTER_REGISTER,
+            .destination = flags,
+            .source      = scratch,
+        };
+        bal_sliding_window_push(&compiler->window, or_macro);
+    }
+    else
+    {
+        // flags = N, scratch = V, flags ^= scratch.
+        const bal_x86_macro_t shift_n_macro = {
+            .opcode              = BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+            .destination         = flags,
+            .immediate_or_offset = 16U,
+        };
+        bal_sliding_window_push(&compiler->window, shift_n_macro);
+
+        const bal_x86_macro_t shift_v_macro = {
+            .opcode              = BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+            .destination         = scratch,
+            .immediate_or_offset = 24U,
+        };
+        bal_sliding_window_push(&compiler->window, shift_v_macro);
+
+        const bal_x86_macro_t xor_macro = {
+            .opcode      = BAL_X86_MACRO_XOR_REGISTER_REGISTER,
+            .destination = flags,
+            .source      = scratch,
+        };
+        bal_sliding_window_push(&compiler->window, xor_macro);
+
+        if (0xCU == (condition & ~1U))
+        {
+            // Z sits in byte 0 of a load from flag_z.
+            const bal_x86_macro_t load_z_macro = {
+                .opcode              = BAL_X86_MACRO_LOAD,
+                .destination         = scratch,
+                .immediate_or_offset = offsetof(bal_cpu_t, flag_z),
+            };
+            bal_sliding_window_push(&compiler->window, load_z_macro);
+
+            const bal_x86_macro_t or_macro = {
+                .opcode      = BAL_X86_MACRO_OR_REGISTER_REGISTER,
+                .destination = flags,
+                .source      = scratch,
+            };
+            bal_sliding_window_push(&compiler->window, or_macro);
+        }
+    }
+
+    // Keep bit 0 only. The AND sets ZF from the result, but the TEST makes the dependency explicit
+    // since the AND immediate macro is expanded through a scratch register.
+    const bal_x86_macro_t mask_macro = {
+        .opcode              = BAL_X86_MACRO_AND_REGISTER_IMMEDIATE,
+        .destination         = flags,
+        .immediate_or_offset = 1U,
+    };
+    bal_sliding_window_push(&compiler->window, mask_macro);
+
+    const bal_x86_macro_t test_macro = {
+        .opcode      = BAL_X86_MACRO_TEST_REGISTER_REGISTER,
+        .destination = flags,
+        .source      = flags,
+    };
+    bal_sliding_window_push(&compiler->window, test_macro);
 }
 
 void

@@ -73,8 +73,31 @@ local function derive_opcode(mnemonic)
     end
 
     -- Barriers. Tier 1 emits a fence for DMB and DSB; the rest need no code.
-    if m == "DMB" or m == "DSB" or m == "ISB" or m == "SB" or m == "CLREX" then
+    if m == "DMB" or m == "DSB" or m == "ISB" or m == "SB" then
         return "OPCODE_NOP"
+    end
+
+    -- Synchronisation instructions, executed by the runtime atomic helper. CLREX clears its
+    -- exclusive monitor. The 128-bit LSE forms (LDCLRP, LDSETP, SWPP) and the SIMD LDAP1/STL1 are
+    -- not implemented.
+    if m == "CLREX" then
+        return "OPCODE_ATOMIC"
+    end
+
+    for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
+                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
+        if m:sub(1, #prefix) == prefix then
+            return "OPCODE_ATOMIC"
+        end
+    end
+
+    for _, operation in ipairs({ "LDADD", "LDCLR", "LDEOR", "LDSET", "LDSMAX", "LDSMIN", "LDUMAX",
+                                 "LDUMIN", "SWP" }) do
+        local suffix = m:sub(#operation + 1)
+
+        if m:sub(1, #operation) == operation and suffix:sub(1, 1) ~= "P" then
+            return "OPCODE_ATOMIC"
+        end
     end
 
     if m == "ORR" then

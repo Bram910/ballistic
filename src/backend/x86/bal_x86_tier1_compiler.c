@@ -104,6 +104,10 @@ static void translate_bitfield(bal_tier1_compiler_t *compiler, uint32_t instruct
 
 static void translate_extract(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static bal_x86_condition_t emit_condition_value(bal_tier1_compiler_t *compiler, uint32_t condition);
+
+static void translate_conditional_select(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_b_cond(bal_tier1_compiler_t *compiler,
                              uint32_t              instruction,
                              bal_guest_address_t   guest_address);
@@ -506,6 +510,22 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     bal_sliding_window_flush_all(&compiler->window);
 
                     bal_sliding_window_push(&compiler->window, ud2_macro);
+                    compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_CONDITIONAL_SELECT:
+                    // Conditional select: bits 28:21 = 11010100.
+                    if (0xD4U == ((instruction >> 21U) & 0xFFU))
+                    {
+                        translate_conditional_select(compiler, instruction);
+                        break;
+                    }
+
+                    BAL_LOG_ERROR(&bal_thread_logger,
+                                  "Aborting function: Tier 1 unsupported conditional instruction "
+                                  "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     is_block_terminated = true;
                     break;
@@ -2232,5 +2252,220 @@ translate_extract(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t in
              .source      = low,
     };
     bal_sliding_window_push(&compiler->window, move_macro);
+    compiler->is_dirty |= 1U << rd;
+}
+
+/// Evaluates an A64 condition (0 to 13) from the guest flags into BAL_X86_REGISTER_DISCARD_RESULT
+/// and returns the x86 condition that holds after `test r11, r11` when the A64 condition does not.
+///
+/// The conditions on a single flag load that flag and shift bit 0 to the top, so the register is
+/// non-zero exactly when the flag is set. The compound conditions reuse emit_compound_condition(),
+/// whose result is zero exactly when HI, GE or GT holds. Odd conditions negate the even ones.
+static bal_x86_condition_t
+emit_condition_value(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t condition)
+{
+    const bal_x86_register_t value  = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bool               is_odd = 1U == (condition & 1U);
+    bool                     is_zero_when_even_holds;
+
+    if (condition < 8U)
+    {
+        static const size_t FLAG_OFFSETS[] = {
+            offsetof(bal_cpu_t, flag_z),
+            offsetof(bal_cpu_t, flag_c),
+            offsetof(bal_cpu_t, flag_n),
+            offsetof(bal_cpu_t, flag_v),
+        };
+        const bal_x86_macro_t load_macro = {
+            .opcode              = BAL_X86_MACRO_LOAD,
+            .destination         = value,
+            .immediate_or_offset = FLAG_OFFSETS[(condition >> 1U) & 3U],
+        };
+        bal_sliding_window_push(&compiler->window, load_macro);
+
+        const bal_x86_macro_t isolate_macro = {
+            .opcode              = BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+            .destination         = value,
+            .immediate_or_offset = 63U,
+        };
+        bal_sliding_window_push(&compiler->window, isolate_macro);
+        is_zero_when_even_holds = false;
+    }
+    else
+    {
+        emit_compound_condition(compiler, condition);
+        const bal_x86_macro_t copy_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = value,
+            .source      = BAL_X86_REGISTER_ZERO,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+        is_zero_when_even_holds = true;
+    }
+
+    // The A64 condition fails when the even condition fails (for even conditions) or holds (for
+    // odd ones).
+    const bool is_zero_when_failing = is_zero_when_even_holds == is_odd;
+    return true == is_zero_when_failing ? BAL_X86_COND_E : BAL_X86_COND_NE;
+}
+
+/// Translates CSEL, CSINC, CSINV and CSNEG, and with them CSET, CSETM, CINC, CINV and CNEG.
+///
+/// Rd receives Rn when the condition holds and Rm, Rm + 1, NOT(Rm) or -Rm otherwise. The condition
+/// is evaluated first since building the alternative can change the x86 flags. The alternative is
+/// built in BAL_X86_REGISTER_ZERO, Rn is copied to Rd, and a `cmov` on the failing condition
+/// replaces it.
+void
+translate_conditional_select(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                             const uint32_t                     instruction)
+{
+    const uint8_t  rd        = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn        = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t op2       = (instruction >> 10U) & 0x3U;
+    const uint32_t condition = (instruction >> 12U) & 0xFU;
+    const uint8_t  rm        = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t s_bit     = (instruction >> 29U) & 1U;
+    const uint32_t op        = (instruction >> 30U) & 1U;
+    const bool     is_32bit  = 0U == (instruction >> 31U);
+
+    if (BAL_UNLIKELY(s_bit != 0U) || BAL_UNLIKELY(op2 > 1U))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: reserved conditional select encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    // Every register operand treats 31 as the zero register.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bool          is_always      = condition >= 14U;
+    bal_x86_condition_t fail_condition = BAL_X86_COND_E;
+
+    if (false == is_always)
+    {
+        fail_condition = emit_condition_value(compiler, condition);
+
+        const bal_x86_register_t alternative = BAL_X86_REGISTER_ZERO;
+
+        if (31U == rm)
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = alternative,
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+        else
+        {
+            const bool               skip_load_rm = false;
+            const bal_x86_register_t x86_rm     = allocate_x86_register(compiler, rm, skip_load_rm);
+            const bal_x86_macro_t    copy_macro = {
+                   .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+                   .destination = alternative,
+                   .source      = x86_rm,
+            };
+            bal_sliding_window_push(&compiler->window, copy_macro);
+        }
+
+        if (0U == op && 1U == op2)
+        {
+            const bal_x86_macro_t increment_macro = {
+                .opcode              = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE_32
+                                                        : BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+                .destination         = alternative,
+                .immediate_or_offset = 1U,
+            };
+            bal_sliding_window_push(&compiler->window, increment_macro);
+        }
+        else if (1U == op)
+        {
+            bal_x86_macro_opcode_t opcode;
+
+            if (0U == op2)
+            {
+                opcode
+                    = true == is_32bit ? BAL_X86_MACRO_NOT_REGISTER_32 : BAL_X86_MACRO_NOT_REGISTER;
+            }
+            else
+            {
+                opcode
+                    = true == is_32bit ? BAL_X86_MACRO_NEG_REGISTER_32 : BAL_X86_MACRO_NEG_REGISTER;
+            }
+
+            const bal_x86_macro_t invert_macro = {
+                .opcode      = opcode,
+                .destination = alternative,
+            };
+            bal_sliding_window_push(&compiler->window, invert_macro);
+        }
+    }
+
+    bal_x86_register_t x86_rn = BAL_X86_REGISTER_ZERO;
+
+    if (rn != 31U)
+    {
+        const bool skip_load_rn = false;
+        x86_rn                  = allocate_x86_register(compiler, rn, skip_load_rn);
+    }
+
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+
+    if (31U == rn)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = x86_rd,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_macro_t copy_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = x86_rd,
+            .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    if (true == is_always)
+    {
+        if (true == is_32bit)
+        {
+            const bal_x86_macro_t truncate_macro = {
+                .opcode      = BAL_X86_MACRO_AND_REGISTER_REGISTER_32,
+                .destination = x86_rd,
+                .source      = x86_rd,
+            };
+            bal_sliding_window_push(&compiler->window, truncate_macro);
+        }
+    }
+    else
+    {
+        const bal_x86_macro_t test_macro = {
+            .opcode      = BAL_X86_MACRO_TEST_REGISTER_REGISTER,
+            .destination = BAL_X86_REGISTER_DISCARD_RESULT,
+            .source      = BAL_X86_REGISTER_DISCARD_RESULT,
+        };
+        bal_sliding_window_push(&compiler->window, test_macro);
+
+        const bal_x86_macro_t select_macro = {
+            .opcode      = true == is_32bit ? BAL_X86_MACRO_CMOV_REGISTER_REGISTER_32
+                                            : BAL_X86_MACRO_CMOV_REGISTER_REGISTER,
+            .destination = x86_rd,
+            .source      = BAL_X86_REGISTER_ZERO,
+            .condition   = fail_condition,
+        };
+        bal_sliding_window_push(&compiler->window, select_macro);
+    }
+
     compiler->is_dirty |= 1U << rd;
 }

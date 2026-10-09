@@ -108,6 +108,8 @@ static bal_x86_condition_t emit_condition_value(bal_tier1_compiler_t *compiler, 
 
 static void translate_conditional_select(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_multiply_add(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_b_cond(bal_tier1_compiler_t *compiler,
                              uint32_t              instruction,
                              bal_guest_address_t   guest_address);
@@ -510,6 +512,23 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     bal_sliding_window_flush_all(&compiler->window);
 
                     bal_sliding_window_push(&compiler->window, ud2_macro);
+                    compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                    is_block_terminated = true;
+                    break;
+                case OPCODE_MUL:
+                    // Data-processing (3 source): bits 28:24 = 11011 and op54 = 00.
+                    if (0x1BU == ((instruction >> 24U) & 0x1FU)
+                        && 0U == ((instruction >> 29U) & 0x3U))
+                    {
+                        translate_multiply_add(compiler, instruction);
+                        break;
+                    }
+
+                    BAL_LOG_ERROR(&bal_thread_logger,
+                                  "Aborting function: Tier 1 unsupported multiply instruction "
+                                  "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     is_block_terminated = true;
                     break;
@@ -2467,5 +2486,130 @@ translate_conditional_select(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         bal_sliding_window_push(&compiler->window, select_macro);
     }
 
+    compiler->is_dirty |= 1U << rd;
+}
+
+/// Translates MADD and MSUB (and so MUL and MNEG), and the widening SMADDL, SMSUBL, UMADDL and
+/// UMSUBL (and so SMULL, SMNEGL, UMULL and UMNEGL): Rd = Ra +/- Rn * Rm.
+///
+/// The product is built in BAL_X86_REGISTER_ZERO. The widening forms first sign- or zero-extend
+/// Wn into it and Wm into the discard register. The accumulation then goes through
+/// emit_binary_operation(), which handles Ra being the zero register and Rd aliasing Ra.
+void
+translate_multiply_add(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd             = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn             = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t  ra             = (uint8_t)((instruction >> 10U) & 0x1FU);
+    const bool     is_subtraction = 1U == ((instruction >> 15U) & 1U);
+    const uint8_t  rm             = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t op31           = (instruction >> 21U) & 0x7U;
+    const bool     is_64bit       = 1U == (instruction >> 31U);
+
+    // op31 = 000 is MADD/MSUB, 001 SMADDL/SMSUBL and 101 UMADDL/UMSUBL. The widening forms only
+    // exist with sf = 1. SMULH and UMULH (010 and 110) are not supported yet.
+    const bool is_widening = 1U == op31 || 5U == op31;
+
+    if (BAL_UNLIKELY(op31 != 0U && false == is_widening)
+        || BAL_UNLIKELY(true == is_widening && false == is_64bit))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: unsupported multiply encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    // Every register operand treats 31 as the zero register.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bool               is_32bit  = false == is_64bit;
+    const bal_x86_register_t product   = BAL_X86_REGISTER_ZERO;
+    const bool               skip_load = false;
+
+    if (31U == rn || 31U == rm)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = product,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rn = allocate_x86_register(compiler, rn, skip_load);
+        const bal_x86_register_t x86_rm = allocate_x86_register(compiler, rm, skip_load);
+
+        if (true == is_widening)
+        {
+            const bal_x86_macro_opcode_t extend_opcode
+                = 1U == op31 ? BAL_X86_MACRO_MOVSXD_REGISTER_REGISTER
+                             : BAL_X86_MACRO_MOV_REGISTER_REGISTER_32;
+            const bal_x86_macro_t extend_rn_macro = {
+                .opcode      = extend_opcode,
+                .destination = product,
+                .source      = x86_rn,
+            };
+            bal_sliding_window_push(&compiler->window, extend_rn_macro);
+
+            const bal_x86_macro_t extend_rm_macro = {
+                .opcode      = extend_opcode,
+                .destination = BAL_X86_REGISTER_DISCARD_RESULT,
+                .source      = x86_rm,
+            };
+            bal_sliding_window_push(&compiler->window, extend_rm_macro);
+
+            const bal_x86_macro_t multiply_macro = {
+                .opcode      = BAL_X86_MACRO_IMUL_REGISTER_REGISTER,
+                .destination = product,
+                .source      = BAL_X86_REGISTER_DISCARD_RESULT,
+            };
+            bal_sliding_window_push(&compiler->window, multiply_macro);
+        }
+        else
+        {
+            const bal_x86_macro_t copy_macro = {
+                .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+                .destination = product,
+                .source      = x86_rn,
+            };
+            bal_sliding_window_push(&compiler->window, copy_macro);
+
+            const bal_x86_macro_t multiply_macro = {
+                .opcode      = true == is_32bit ? BAL_X86_MACRO_IMUL_REGISTER_REGISTER_32
+                                                : BAL_X86_MACRO_IMUL_REGISTER_REGISTER,
+                .destination = product,
+                .source      = x86_rm,
+            };
+            bal_sliding_window_push(&compiler->window, multiply_macro);
+        }
+    }
+
+    const bool               is_ra_zero   = 31U == ra;
+    const bal_x86_register_t x86_ra       = true == is_ra_zero
+                                                ? BAL_X86_REGISTER_ZERO
+                                                : allocate_x86_register(compiler, ra, skip_load);
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+
+    bal_x86_macro_opcode_t opcode;
+
+    if (true == is_subtraction)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_SUB_REGISTER_REGISTER;
+    }
+    else
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_ADD_REGISTER_REGISTER;
+    }
+
+    const bool is_commutative = false == is_subtraction;
+    emit_binary_operation(compiler, opcode, is_commutative, x86_rd, is_ra_zero, x86_ra, product);
     compiler->is_dirty |= 1U << rd;
 }

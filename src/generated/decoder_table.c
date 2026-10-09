@@ -25886,7 +25886,7 @@ const bal_decoder_instruction_metadata_t
         { "MRS",
           0xFFF00000,
           0xD5300000,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
@@ -25910,7 +25910,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFF8F01F,
           0xD500401F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -25922,7 +25922,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFF00000,
           0xD5100000,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
@@ -32030,7 +32030,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFFFF9FF,
           0xD503417F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -32042,7 +32042,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFFFF9FF,
           0xD503407F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

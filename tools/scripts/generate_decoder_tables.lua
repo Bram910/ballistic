@@ -142,6 +142,10 @@ local function derive_opcode(mnemonic)
         return "OPCODE_COUNT_LEADING"
     end
 
+    if m == "MRS" or m == "MSR" then
+        return "OPCODE_SYSTEM_REGISTER"
+    end
+
     if m:sub(1, 4) == "SDIV" or m:sub(1, 4) == "UDIV" then
         return "OPCODE_DIV"
     end

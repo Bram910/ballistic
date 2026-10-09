@@ -3770,7 +3770,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFE3FC7C,
           0x1A83FC7C,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3782,7 +3782,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFE3FC7C,
           0x9A83FC7C,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3794,7 +3794,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFE3FC7C,
           0x5A83FC7C,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3806,7 +3806,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFE3FC7C,
           0xDA83FC7C,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -4826,7 +4826,7 @@ const bal_decoder_instruction_metadata_t
         { "CSNEG",
           0xFFE01C00,
           0x5A801C00,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -4838,7 +4838,7 @@ const bal_decoder_instruction_metadata_t
         { "CSNEG",
           0xFFE01C00,
           0xDA801C00,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6326,7 +6326,7 @@ const bal_decoder_instruction_metadata_t
         { "CSEL",
           0xFFE00C00,
           0x1A800000,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -6338,7 +6338,7 @@ const bal_decoder_instruction_metadata_t
         { "CSEL",
           0xFFE00C00,
           0x9A800000,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6350,7 +6350,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFFF1FE0,
           0x1A9F1FE0,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_CONDITION, 12, 4 },
@@ -6362,7 +6362,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFFF1FE0,
           0x9A9F1FE0,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_CONDITION, 12, 4 },
@@ -6374,7 +6374,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFFF1FE0,
           0x5A9F1FE0,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_CONDITION, 12, 4 },
@@ -6386,7 +6386,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFFF1FE0,
           0xDA9F1FE0,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_CONDITION, 12, 4 },
@@ -6398,7 +6398,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFE00C00,
           0x1A800400,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -6410,7 +6410,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINC",
           0xFFE00C00,
           0x9A800400,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6422,7 +6422,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFE00C00,
           0x5A800000,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -6434,7 +6434,7 @@ const bal_decoder_instruction_metadata_t
         { "CSINV",
           0xFFE00C00,
           0xDA800000,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6446,7 +6446,7 @@ const bal_decoder_instruction_metadata_t
         { "CSNEG",
           0xFFE00C00,
           0x5A800400,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -6458,7 +6458,7 @@ const bal_decoder_instruction_metadata_t
         { "CSNEG",
           0xFFE00C00,
           0xDA800400,
-          OPCODE_TRAP,
+          OPCODE_CONDITIONAL_SELECT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

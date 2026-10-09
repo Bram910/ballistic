@@ -83,6 +83,10 @@ local function derive_opcode(mnemonic)
         return "OPCODE_SHIFT"
     end
 
+    if m == "CSEL" or m == "CSINC" or m == "CSINV" or m == "CSNEG" then
+        return "OPCODE_CONDITIONAL_SELECT"
+    end
+
     if m:sub(1, 3) == "ADD" then
         return "OPCODE_ADD"
     end

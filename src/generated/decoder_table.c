@@ -24386,7 +24386,7 @@ const bal_decoder_instruction_metadata_t
         { "MSUB",
           0xFFE0FC00,
           0x1B00FC00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -24398,7 +24398,7 @@ const bal_decoder_instruction_metadata_t
         { "MSUB",
           0xFFE0FC00,
           0x9B00FC00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -25946,7 +25946,7 @@ const bal_decoder_instruction_metadata_t
         { "MSUB",
           0xFFE08000,
           0x1B008000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -25958,7 +25958,7 @@ const bal_decoder_instruction_metadata_t
         { "MSUB",
           0xFFE08000,
           0x9B008000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -30806,7 +30806,7 @@ const bal_decoder_instruction_metadata_t
         { "SMADDL",
           0xFFE08000,
           0x9B200000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -31886,7 +31886,7 @@ const bal_decoder_instruction_metadata_t
         { "SMSUBL",
           0xFFE0FC00,
           0x9B20FC00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -32018,7 +32018,7 @@ const bal_decoder_instruction_metadata_t
         { "SMSUBL",
           0xFFE08000,
           0x9B208000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -32090,7 +32090,7 @@ const bal_decoder_instruction_metadata_t
         { "SMADDL",
           0xFFE0FC00,
           0x9B207C00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -42266,7 +42266,7 @@ const bal_decoder_instruction_metadata_t
         { "UMADDL",
           0xFFE08000,
           0x9BA00000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -43334,7 +43334,7 @@ const bal_decoder_instruction_metadata_t
         { "UMSUBL",
           0xFFE0FC00,
           0x9BA0FC00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -43442,7 +43442,7 @@ const bal_decoder_instruction_metadata_t
         { "UMSUBL",
           0xFFE08000,
           0x9BA08000,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -43514,7 +43514,7 @@ const bal_decoder_instruction_metadata_t
         { "UMADDL",
           0xFFE0FC00,
           0x9BA07C00,
-          OPCODE_TRAP,
+          OPCODE_MUL,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },

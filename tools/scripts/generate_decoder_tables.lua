@@ -99,6 +99,10 @@ local function derive_opcode(mnemonic)
         return "OPCODE_MUL"
     end
 
+    if m == "MSUB" or m == "SMADDL" or m == "SMSUBL" or m == "UMADDL" or m == "UMSUBL" then
+        return "OPCODE_MUL"
+    end
+
     if m:sub(1, 4) == "SDIV" or m:sub(1, 4) == "UDIV" then
         return "OPCODE_DIV"
     end

@@ -3602,7 +3602,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMN",
           0xFFE00C10,
           0x3A400800,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3614,7 +3614,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMN",
           0xFFE00C10,
           0xBA400800,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3626,7 +3626,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMN",
           0xFFE00C10,
           0x3A400000,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3638,7 +3638,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMN",
           0xFFE00C10,
           0xBA400000,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3650,7 +3650,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMP",
           0xFFE00C10,
           0x7A400800,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3662,7 +3662,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMP",
           0xFFE00C10,
           0xFA400800,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3674,7 +3674,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMP",
           0xFFE00C10,
           0x7A400000,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -3686,7 +3686,7 @@ const bal_decoder_instruction_metadata_t
         { "CCMP",
           0xFFE00C10,
           0xFA400000,
-          OPCODE_TRAP,
+          OPCODE_CMP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

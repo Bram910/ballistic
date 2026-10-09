@@ -181,7 +181,7 @@ local function derive_opcode(mnemonic)
         return "OPCODE_TEST_BIT_ZERO"
     end
 
-    if m:sub(1, 3) == "CMP" then
+    if m:sub(1, 3) == "CMP" or m == "CCMP" or m == "CCMN" then
         return "OPCODE_CMP"
     end
 

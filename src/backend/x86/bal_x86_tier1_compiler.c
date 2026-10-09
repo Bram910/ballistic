@@ -95,6 +95,8 @@ static void translate_add_sub_extended(bal_tier1_compiler_t *compiler, uint32_t 
 
 static void translate_add_sub_carry(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_variable_shift(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void push_shift(bal_tier1_compiler_t  *compiler,
@@ -573,6 +575,15 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     if (0x26U == ((instruction >> 23U) & 0x3FU))
                     {
                         translate_bitfield(compiler, instruction);
+                        break;
+                    }
+
+                    // LSLV, LSRV, ASRV and RORV: data-processing (2 source) with bits 30:21 =
+                    // 0011010110 and opcode = 0010xx.
+                    if (0xD6U == ((instruction >> 21U) & 0x3FFU)
+                        && 0x2U == ((instruction >> 12U) & 0xFU))
+                    {
+                        translate_variable_shift(compiler, instruction);
                         break;
                     }
 
@@ -2901,4 +2912,117 @@ translate_add_sub_carry(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint3
     {
         compiler->is_dirty |= 1U << rd;
     }
+}
+
+/// Translates LSLV, LSRV, ASRV and RORV, and so their LSL, LSR, ASR and ROR (register) aliases.
+///
+/// x86 only takes a variable shift count in CL, and RCX is part of the scratch pool, so RCX is
+/// parked in the discard register while CL holds the count and restored afterwards. The value is
+/// shifted in BAL_X86_REGISTER_ZERO. x86 masks the count modulo the operand size like A64 does.
+void
+translate_variable_shift(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd         = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn         = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t shift_type = (instruction >> 10U) & 0x3U;
+    const uint8_t  rm         = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const bool     is_32bit   = 0U == (instruction >> 31U);
+
+    // Every register operand treats 31 as the zero register.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const bal_x86_register_t value     = BAL_X86_REGISTER_ZERO;
+    const bool               skip_load = false;
+
+    if (31U == rn)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = value,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rn     = allocate_x86_register(compiler, rn, skip_load);
+        const bal_x86_macro_t    copy_macro = {
+               .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+               .destination = value,
+               .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    if (31U == rm)
+    {
+        // A zero count leaves Rn unchanged, apart from truncating it to 32 bits.
+        if (true == is_32bit)
+        {
+            const bal_x86_macro_t truncate_macro = {
+                .opcode      = BAL_X86_MACRO_AND_REGISTER_REGISTER_32,
+                .destination = value,
+                .source      = value,
+            };
+            bal_sliding_window_push(&compiler->window, truncate_macro);
+        }
+    }
+    else
+    {
+        static const bal_x86_macro_opcode_t SHIFT_OPCODES_64[] = {
+            BAL_X86_MACRO_SHL_REGISTER_CL,
+            BAL_X86_MACRO_SHR_REGISTER_CL,
+            BAL_X86_MACRO_SAR_REGISTER_CL,
+            BAL_X86_MACRO_ROR_REGISTER_CL,
+        };
+        static const bal_x86_macro_opcode_t SHIFT_OPCODES_32[] = {
+            BAL_X86_MACRO_SHL_REGISTER_CL_32,
+            BAL_X86_MACRO_SHR_REGISTER_CL_32,
+            BAL_X86_MACRO_SAR_REGISTER_CL_32,
+            BAL_X86_MACRO_ROR_REGISTER_CL_32,
+        };
+        const bal_x86_register_t x86_rm    = allocate_x86_register(compiler, rm, skip_load);
+        const bal_x86_register_t saved_rcx = BAL_X86_REGISTER_DISCARD_RESULT;
+
+        const bal_x86_macro_t save_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = saved_rcx,
+            .source      = BAL_X86_RCX,
+        };
+        bal_sliding_window_push(&compiler->window, save_macro);
+
+        const bal_x86_macro_t count_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = BAL_X86_RCX,
+            .source      = x86_rm,
+        };
+        bal_sliding_window_push(&compiler->window, count_macro);
+
+        const bal_x86_macro_t shift_macro = {
+            .opcode
+            = true == is_32bit ? SHIFT_OPCODES_32[shift_type] : SHIFT_OPCODES_64[shift_type],
+            .destination = value,
+        };
+        bal_sliding_window_push(&compiler->window, shift_macro);
+
+        const bal_x86_macro_t restore_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = BAL_X86_RCX,
+            .source      = saved_rcx,
+        };
+        bal_sliding_window_push(&compiler->window, restore_macro);
+    }
+
+    const bool               skip_load_rd = true;
+    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+    const bal_x86_macro_t    move_macro   = {
+             .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+             .destination = x86_rd,
+             .source      = value,
+    };
+    bal_sliding_window_push(&compiler->window, move_macro);
+    compiler->is_dirty |= 1U << rd;
 }

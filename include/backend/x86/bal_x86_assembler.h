@@ -983,6 +983,141 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_mfence(bal_x86_assembler_t *assembler);
 
+    /// Loads 64 bits from the address in `base`.
+    ///
+    /// Assembly equivalent: `mov destination, qword [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_r64_mem64(bal_x86_assembler_t *assembler,
+                                     bal_x86_register_t   destination,
+                                     bal_x86_register_t   base);
+
+    /// Loads 32 bits from the address in `base`, zero-extended.
+    ///
+    /// Assembly equivalent: `mov destination_32, dword [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_r32_mem32(bal_x86_assembler_t *assembler,
+                                     bal_x86_register_t   destination,
+                                     bal_x86_register_t   base);
+
+    /// Loads 16 bits from the address in `base`, zero-extended.
+    ///
+    /// Assembly equivalent: `movzx destination_32, word [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_r32_mem16(bal_x86_assembler_t *assembler,
+                                     bal_x86_register_t   destination,
+                                     bal_x86_register_t   base);
+
+    /// Loads 8 bits from the address in `base`, zero-extended.
+    ///
+    /// Assembly equivalent: `movzx destination_32, byte [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_r32_mem8(bal_x86_assembler_t *assembler,
+                                    bal_x86_register_t   destination,
+                                    bal_x86_register_t   base);
+
+    /// Loads 32 bits from the address in `base`, sign-extended to 64 bits.
+    ///
+    /// Assembly equivalent: `movsxd destination, dword [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_sign_r64_mem32(bal_x86_assembler_t *assembler,
+                                          bal_x86_register_t   destination,
+                                          bal_x86_register_t   base);
+
+    /// Loads 16 bits from the address in `base`, sign-extended to 64 bits.
+    ///
+    /// Assembly equivalent: `movsx destination, word [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_sign_r64_mem16(bal_x86_assembler_t *assembler,
+                                          bal_x86_register_t   destination,
+                                          bal_x86_register_t   base);
+
+    /// Loads 8 bits from the address in `base`, sign-extended to 64 bits.
+    ///
+    /// Assembly equivalent: `movsx destination, byte [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_sign_r64_mem8(bal_x86_assembler_t *assembler,
+                                         bal_x86_register_t   destination,
+                                         bal_x86_register_t   base);
+
+    /// Loads 16 bits from the address in `base`, sign-extended to 32 bits and zero-extended above.
+    ///
+    /// Assembly equivalent: `movsx destination_32, word [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_sign_r32_mem16(bal_x86_assembler_t *assembler,
+                                          bal_x86_register_t   destination,
+                                          bal_x86_register_t   base);
+
+    /// Loads 8 bits from the address in `base`, sign-extended to 32 bits and zero-extended above.
+    ///
+    /// Assembly equivalent: `movsx destination_32, byte [base]`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_load_sign_r32_mem8(bal_x86_assembler_t *assembler,
+                                         bal_x86_register_t   destination,
+                                         bal_x86_register_t   base);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

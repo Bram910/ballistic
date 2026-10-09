@@ -485,6 +485,66 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_not_r32(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
 
+    /// Emits a two's complement negation of a 64-bit register.
+    ///
+    /// Assembly equivalent: `neg destination`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_neg_r64(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a two's complement negation of a 32-bit register. The upper 32 bits of `destination`
+    /// are zeroed.
+    ///
+    /// Assembly equivalent: `neg destination_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_neg_r32(bal_x86_assembler_t *assembler, bal_x86_register_t destination);
+
+    /// Emits a 64-bit conditional move: `destination` = `source` when `condition` holds.
+    ///
+    /// Assembly equivalent: `cmov<condition> destination, source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t *assembler,
+                                   bal_x86_condition_t  condition,
+                                   bal_x86_register_t   destination,
+                                   bal_x86_register_t   source);
+
+    /// Emits a 32-bit conditional move. The upper 32 bits of `destination` are zeroed whether or
+    /// not the condition holds.
+    ///
+    /// Assembly equivalent: `cmov<condition> destination_32, source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_cmov_r32_r32(bal_x86_assembler_t *assembler,
+                                   bal_x86_condition_t  condition,
+                                   bal_x86_register_t   destination,
+                                   bal_x86_register_t   source);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

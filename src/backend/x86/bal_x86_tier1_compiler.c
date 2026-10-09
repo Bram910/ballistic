@@ -654,7 +654,7 @@ allocate_x86_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     {
         const int8_t cached_x86_register = compiler->arm_to_x86[arm_register];
 
-        if (BAL_UNLIKELY(cached_x86_register < 0 || cached_x86_register >= (int8_t)BAL_X86_R15))
+        if (BAL_UNLIKELY(cached_x86_register < 0 || cached_x86_register > (int8_t)BAL_X86_R15))
         {
             BAL_LOG_ERROR(&bal_thread_logger,
                           "RegAlloc: corrupted mapping ARM X%u -> x86 r%d. "

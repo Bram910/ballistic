@@ -139,7 +139,9 @@ bal_fuzzer_state_capture_unicorn_cpu(bal_fuzzer_cpu_snapshot_t *snapshot, uc_eng
     // Unicorn's ARM register enum is NOT contiguous for X0-X31. Why???
     register_ids[29] = UC_ARM64_REG_X29;
     register_ids[30] = UC_ARM64_REG_X30;
-    register_ids[31] = UC_ARM64_REG_XZR;
+    // Ballistic keeps the stack pointer in x[31]. XZR always reads as zero, so it cannot
+    // show whether an instruction wrongly wrote register 31.
+    register_ids[31] = UC_ARM64_REG_SP;
 
     uint64_t *BAL_RESTRICT register_cursor     = snapshot->x;
     void                  *register_values[32] = {};

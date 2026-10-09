@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, uint64_t seed_index);
+
 int
 main(const int argc, const char **argv)
 {
@@ -89,7 +91,8 @@ main(const int argc, const char **argv)
         input.message_id        = i + 1U;
         input.instruction_count = 1U;
         input.instructions[0]   = *seed_cursor;
-        input.initial_state.pc  = 0U;
+        fill_initial_state(&input.initial_state, i);
+        input.initial_state.pc = 0U;
 
         status = bal_fuzzer_ipc_send(ballistic_worker.input_file_descriptor, &input, sizeof(input));
 
@@ -253,4 +256,32 @@ main(const int argc, const char **argv)
     // Return true even if Ballistic is broken (for now). This code needs to get pushed to upstream
     // without the CI failing.
     return EXIT_SUCCESS;
+}
+
+/// Fills the guest registers and flags with values derived from the seed index.
+///
+/// Starting every seed from all-zero registers hides most data processing bugs, since any operation
+/// on zeros tends to produce zero. The values are deterministic so a failing seed reproduces on
+/// every run. x[31] is the stack pointer; both workers load it into SP.
+static void
+fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, const uint64_t seed_index)
+{
+    uint64_t *BAL_RESTRICT register_cursor = state->x;
+
+    for (uint64_t i = 0U; i < 32U; ++i)
+    {
+        // SplitMix64 finalizer.
+        uint64_t value   = (seed_index * 32U + i + 1U) * 0x9E3779B97F4A7C15ULL;
+        value            = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+        value            = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
+        value            = value ^ (value >> 31U);
+        *register_cursor = value;
+        ++register_cursor;
+    }
+
+    const uint64_t flag_bits = state->x[0] >> 60U;
+    state->flag_n            = (uint8_t)((flag_bits >> 3U) & 1U);
+    state->flag_z            = (uint8_t)((flag_bits >> 2U) & 1U);
+    state->flag_c            = (uint8_t)((flag_bits >> 1U) & 1U);
+    state->flag_v            = (uint8_t)(flag_bits & 1U);
 }

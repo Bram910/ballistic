@@ -1390,6 +1390,126 @@ bal_x86_emit_load_sign_r32_mem8(bal_x86_assembler_t     *assembler,
 }
 
 void
+bal_x86_emit_store_mem64_r64(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 0, 1, opcode, 1, source, base, "store_mem64_r64");
+}
+
+void
+bal_x86_emit_store_mem32_r32(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 0, 0, opcode, 1, source, base, "store_mem32_r32");
+}
+
+void
+bal_x86_emit_store_mem16_r16(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 1, 0, opcode, 1, source, base, "store_mem16_r16");
+}
+
+void
+bal_x86_emit_store_mem8_r8(bal_x86_assembler_t     *assembler,
+                           const bal_x86_register_t base,
+                           const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x88, 0x00 };
+    emit_memory_access(assembler, 0, 0, opcode, 1, source, base, "store_mem8_r8");
+}
+
+void
+bal_x86_emit_call_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t target)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(target)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid call target register: %d", target);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] call r%d", assembler->offset, target);
+    const uint8_t w         = 0U;
+    const uint8_t r         = 0U;
+    const uint8_t b         = (uint8_t)target >> 3U;
+    const uint8_t extension = 2U;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0xFF);
+    emit_modrm_register(assembler->buffer, &assembler->offset, (int)extension, target);
+}
+
+void
+bal_x86_emit_store_r32_rbp_offset(bal_x86_assembler_t     *assembler,
+                                  const bal_x86_register_t source,
+                                  const int32_t            offset)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(source)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid source register: %d", source);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 7;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] mov dword [rbp + 0x%X], r%dd",
+                  assembler->offset,
+                  offset,
+                  source);
+    const uint8_t w = 0U;
+    const uint8_t r = (uint8_t)source >> 3U;
+    const uint8_t b = 0U;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x89);
+    emit_modrm_memory_disp32_rbp(assembler->buffer, &assembler->offset, source);
+    emit32(assembler->buffer, &assembler->offset, (uint32_t)offset);
+}
+
+void
 bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,

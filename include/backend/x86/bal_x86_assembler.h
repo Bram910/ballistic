@@ -1118,6 +1118,94 @@ extern "C"
                                          bal_x86_register_t   destination,
                                          bal_x86_register_t   base);
 
+    /// Stores the 64 bits of `source` to the address in `base`.
+    ///
+    /// Assembly equivalent: `mov qword [base], source`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_store_mem64_r64(bal_x86_assembler_t *assembler,
+                                      bal_x86_register_t   base,
+                                      bal_x86_register_t   source);
+
+    /// Stores the low 32 bits of `source` to the address in `base`.
+    ///
+    /// Assembly equivalent: `mov dword [base], source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_store_mem32_r32(bal_x86_assembler_t *assembler,
+                                      bal_x86_register_t   base,
+                                      bal_x86_register_t   source);
+
+    /// Stores the low 16 bits of `source` to the address in `base`.
+    ///
+    /// Assembly equivalent: `mov word [base], source_16`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_store_mem16_r16(bal_x86_assembler_t *assembler,
+                                      bal_x86_register_t   base,
+                                      bal_x86_register_t   source);
+
+    /// Stores the low 8 bits of `source` to the address in `base`.
+    ///
+    /// Assembly equivalent: `mov byte [base], source_8`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_store_mem8_r8(bal_x86_assembler_t *assembler,
+                                    bal_x86_register_t   base,
+                                    bal_x86_register_t   source);
+
+    /// Emits an indirect call to the address in `target`.
+    ///
+    /// Assembly equivalent: `call target`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_call_r64(bal_x86_assembler_t *assembler, bal_x86_register_t target);
+
+    /// Stores the low 32 bits of `source` to the memory location at RBP + offset.
+    ///
+    /// Assembly equivalent: `mov dword [rbp + offset], source_32`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_store_r32_rbp_offset(bal_x86_assembler_t *assembler,
+                                           bal_x86_register_t   source,
+                                           int32_t              offset);
+
     /// Emits a 64-bit rotate-right by an 8-bit immediate.
     ///
     /// Assembly equivalent: `ror destination, immediate`

@@ -81,6 +81,7 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "SUB_REGISTER_REGISTER_32",
     "TEST_REGISTER_REGISTER",
     "TEST_REGISTER_REGISTER_32",
+    "CALL_REGISTER",
     "LOAD_MEMORY_R64_MEM64",
     "LOAD_MEMORY_R32_MEM32",
     "LOAD_MEMORY_R32_MEM16",
@@ -90,6 +91,11 @@ static const char *const BAL_X86_MACRO_NAMES[] = {
     "LOAD_MEMORY_SIGN_R64_MEM8",
     "LOAD_MEMORY_SIGN_R32_MEM16",
     "LOAD_MEMORY_SIGN_R32_MEM8",
+    "STORE_MEMORY_MEM64_R64",
+    "STORE_MEMORY_MEM32_R32",
+    "STORE_MEMORY_MEM16_R16",
+    "STORE_MEMORY_MEM8_R8",
+    "STORE_32",
     "UD2",
     "XOR_REGISTER_REGISTER",
     "XOR_REGISTER_REGISTER_32",
@@ -522,6 +528,9 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
         case BAL_X86_MACRO_MFENCE:
             bal_x86_emit_mfence(assembler);
             break;
+        case BAL_X86_MACRO_CALL_REGISTER:
+            bal_x86_emit_call_r64(assembler, destination);
+            break;
         case BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64:
             bal_x86_emit_load_r64_mem64(assembler, destination, source);
             break;
@@ -548,6 +557,21 @@ flush_single_macro(bal_x86_assembler_t *BAL_RESTRICT   assembler,
             break;
         case BAL_X86_MACRO_LOAD_MEMORY_SIGN_R32_MEM8:
             bal_x86_emit_load_sign_r32_mem8(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_STORE_MEMORY_MEM64_R64:
+            bal_x86_emit_store_mem64_r64(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_STORE_MEMORY_MEM32_R32:
+            bal_x86_emit_store_mem32_r32(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_STORE_MEMORY_MEM16_R16:
+            bal_x86_emit_store_mem16_r16(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_STORE_MEMORY_MEM8_R8:
+            bal_x86_emit_store_mem8_r8(assembler, destination, source);
+            break;
+        case BAL_X86_MACRO_STORE_32:
+            bal_x86_emit_store_r32_rbp_offset(assembler, source, (int32_t)immediate_or_offset);
             break;
         case BAL_X86_MACRO_UD2:
             bal_x86_emit_ud2(assembler);

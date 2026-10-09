@@ -69,10 +69,29 @@ static void translate_add_sub_imm(bal_tier1_compiler_t                     *comp
                                   uint32_t                                  instruction,
                                   bool                                      is_sub);
 
-static void translate_add_sub_reg(bal_tier1_compiler_t                     *compiler,
-                                  const bal_decoder_instruction_metadata_t *metadata,
-                                  uint32_t                                  instruction,
-                                  bool                                      is_sub);
+static bal_x86_register_t read_shifted_register(bal_tier1_compiler_t *compiler,
+                                                uint8_t               arm_register,
+                                                uint32_t              shift_type,
+                                                uint32_t              shift_amount,
+                                                bool                  is_32bit,
+                                                bool                  is_inverted);
+
+static void emit_binary_operation(bal_tier1_compiler_t  *compiler,
+                                  bal_x86_macro_opcode_t opcode,
+                                  bool                   is_commutative,
+                                  bal_x86_register_t     x86_result,
+                                  bool                   is_rn_zero,
+                                  bal_x86_register_t     x86_rn,
+                                  bal_x86_register_t     x86_operand2);
+
+static void capture_nzcv(bal_tier1_compiler_t *compiler, bal_x86_condition_t carry_condition);
+
+static bool decode_bit_masks(
+    uint32_t n, uint32_t imms, uint32_t immr, bool is_32bit, uint64_t *mask);
+
+static void translate_add_sub_shifted(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_b_cond(bal_tier1_compiler_t *compiler,
                              uint32_t              instruction,
@@ -90,17 +109,9 @@ static void translate_jump(const bal_tier1_compiler_t               *compiler,
                            const bal_guest_address_t                 guest_address,
                            bal_guest_address_t                      *target_pc);
 
-static void translate_and_reg(bal_tier1_compiler_t                     *compiler,
-                              const bal_decoder_instruction_metadata_t *metadata,
-                              uint32_t                                  instruction);
-
 static void translate_mov_immediate(bal_tier1_compiler_t                     *compiler,
                                     const bal_decoder_instruction_metadata_t *metadata,
                                     uint32_t                                  instruction);
-
-static void translate_mov_register(bal_tier1_compiler_t                     *compiler,
-                                   const bal_decoder_instruction_metadata_t *metadata,
-                                   uint32_t                                  instruction);
 
 bal_error_t
 bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
@@ -358,13 +369,6 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         break;
                     }
 
-                    if (BAL_LIKELY(BAL_OPERAND_TYPE_REGISTER_64 == metadata->operands[1].type)
-                        || BAL_LIKELY(BAL_OPERAND_TYPE_REGISTER_32 == metadata->operands[1].type))
-                    {
-                        translate_mov_register(compiler, metadata, instruction);
-                        break;
-                    }
-
                     BAL_LOG_ERROR(&bal_thread_logger,
                                   "Aborting function: Invalid MOV instruction detected at %08x : "
                                   "%s",
@@ -376,31 +380,20 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                 case OPCODE_ADD:
                 case OPCODE_SUB:
                 case OPCODE_CMP:;
-                    if (BAL_OPERAND_TYPE_REGISTER_64 == metadata->operands[3].type
-                        || BAL_OPERAND_TYPE_REGISTER_32 == metadata->operands[3].type)
+                    // The decoder table also lists the alias encodings (CMP, CMN, NEG, ...)
+                    // with fewer operands, so the encoding class is taken from the
+                    // instruction bits rather than from the operand layout.
+                    //
+                    // ADD/SUB (shifted register): bits 28:24 = 01011 and bit 21 = 0.
+                    if (0x0BU == ((instruction >> 24U) & 0x1FU)
+                        && 0U == ((instruction >> 21U) & 1U))
                     {
-                        const bool is_sub = (OPCODE_SUB == metadata->ir_opcode)
-                                            || (OPCODE_CMP == metadata->ir_opcode);
-                        translate_add_sub_reg(compiler, metadata, instruction, is_sub);
+                        translate_add_sub_shifted(compiler, instruction);
                         break;
                     }
 
-                    // ADD/SUB (extended register).
-                    if (BAL_OPERAND_TYPE_IMMEDIATE == metadata->operands[2].type
-                        && 3U == metadata->operands[2].bit_width
-                        && (BAL_OPERAND_TYPE_REGISTER_32 == metadata->operands[4].type
-                            || BAL_OPERAND_TYPE_REGISTER_64 == metadata->operands[4].type))
-                    {
-                        BAL_LOG_ERROR(&bal_thread_logger,
-                                      "Aborting function: Tier 1 does not support ADD/SUB "
-                                      "(extended register) instructions at GVA 0x%016llX.",
-                                      (unsigned long long)guest_address);
-                        compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
-                        is_block_terminated = true;
-                        break;
-                    }
-
-                    if (BAL_LIKELY(BAL_OPERAND_TYPE_IMMEDIATE == metadata->operands[2].type))
+                    // ADD/SUB (immediate): bits 28:23 = 100010.
+                    if (0x22U == ((instruction >> 23U) & 0x3FU))
                     {
                         const bool is_sub = (OPCODE_SUB == metadata->ir_opcode)
                                             || (OPCODE_CMP == metadata->ir_opcode);
@@ -468,17 +461,23 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     is_block_terminated = true;
                     break;
                 case OPCODE_AND:
-                    if (BAL_OPERAND_TYPE_REGISTER_64 == metadata->operands[3].type
-                        || BAL_OPERAND_TYPE_REGISTER_32 == metadata->operands[3].type)
+                case OPCODE_OR:
+                case OPCODE_OR_NOT:
+                case OPCODE_XOR:
+                    // Logical (shifted register): bits 28:24 = 01010.
+                    // Logical (immediate): bits 28:23 = 100100.
+                    if (0x0AU == ((instruction >> 24U) & 0x1FU)
+                        || 0x24U == ((instruction >> 23U) & 0x3FU))
                     {
-                        translate_and_reg(compiler, metadata, instruction);
+                        translate_logical(compiler, instruction);
                         break;
                     }
 
                     BAL_LOG_ERROR(&bal_thread_logger,
-                                  "Aborting function: Tier 1 does not support AND (immediate) "
-                                  "at GVA 0x%016llX.",
-                                  (unsigned long long)guest_address);
+                                  "Aborting function: Tier 1 unsupported logical instruction "
+                                  "at %08x : %s",
+                                  instruction,
+                                  metadata->name);
                     compiler->status    = BAL_ERROR_UNKNOWN_INSTRUCTION;
                     is_block_terminated = true;
                     break;
@@ -999,180 +998,12 @@ translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT                     com
 
     if (true == is_setting_flags)
     {
-        const bal_x86_macro_t set_n_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_S,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_n),
-        };
-        bal_sliding_window_push(&compiler->window, set_n_macro);
-
-        const bal_x86_macro_t set_z_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_E,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_z),
-        };
-        bal_sliding_window_push(&compiler->window, set_z_macro);
-
-        const bal_x86_macro_t set_v_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_O,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_v),
-        };
-        bal_sliding_window_push(&compiler->window, set_v_macro);
-
         // ARM carry flag is inverted compared to x86's carry during subtraction.
-        const bal_x86_condition_t c_condition = true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B;
-        const bal_x86_macro_t     set_c_macro = {
-                .opcode              = BAL_X86_MACRO_SETCC,
-                .condition           = c_condition,
-                .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
-        };
-        bal_sliding_window_push(&compiler->window, set_c_macro);
+        capture_nzcv(compiler, true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B);
     }
 
     if (false == is_discarded_result)
     {
-        compiler->is_dirty |= 1U << rd;
-    }
-}
-
-void
-translate_add_sub_reg(bal_tier1_compiler_t *BAL_RESTRICT                     compiler,
-                      const bal_decoder_instruction_metadata_t *BAL_RESTRICT metadata,
-                      const uint32_t                                         instruction,
-                      const bool                                             is_sub)
-{
-    const bal_decoder_operand_t *BAL_RESTRICT operand_cursor = metadata->operands;
-    const uint8_t  rd           = (uint8_t)extract_operand_value(instruction, &operand_cursor[0]);
-    const uint8_t  rn           = (uint8_t)extract_operand_value(instruction, &operand_cursor[1]);
-    const uint32_t shift_amount = extract_operand_value(instruction, &operand_cursor[2]);
-    const uint8_t  rm           = (uint8_t)extract_operand_value(instruction, &operand_cursor[3]);
-    const uint32_t shift_type   = extract_operand_value(instruction, &operand_cursor[4]);
-
-    if (BAL_UNLIKELY(shift_amount != 0))
-    {
-        BAL_LOG_ERROR(&bal_thread_logger,
-                      "Aborting function: Tier 1 does not support shift amounts != 0 yet: %s",
-                      metadata->name);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
-    }
-
-    if (BAL_UNLIKELY(shift_type > 2U))
-    {
-        BAL_LOG_ERROR(
-            &bal_thread_logger, "Aborting function: unsupported shift type %u.", shift_type);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
-    }
-
-    // Does this instruction set flags?
-    const bool is_setting_flags = (OPCODE_CMP == metadata->ir_opcode) || ('S' == metadata->name[3])
-                                  || ('N' == metadata->name[2]);
-
-    // Register 31 is the zero register for every operand of the shifted register form.
-    const bool               is_discarded_result = 31 == rd;
-    const bal_x86_register_t x86_rn              = read_zero_or_register(compiler, rn);
-    bal_x86_register_t       x86_rm              = read_zero_or_register(compiler, rm);
-    bal_x86_register_t       x86_rd              = BAL_X86_REGISTER_DISCARD_RESULT;
-
-    // The register the arithmetic is performed in. This differs from x86_rd only when rd aliases
-    // rm in a subtraction, where the result is built in the scratch register and copied to rd
-    // afterwards so rm is not overwritten before it is read.
-    bal_x86_register_t x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
-
-    if (false == is_discarded_result)
-    {
-        const bool skip_load_rd = true;
-        x86_rd                  = allocate_x86_register(compiler, rd, skip_load_rd);
-        x86_result              = x86_rd;
-    }
-
-    if (x86_result == x86_rn)
-    {
-    }
-    else if (x86_result == x86_rm && false == is_sub)
-    {
-        // Addition commutes, so add rn into rd which already holds rm.
-        x86_rm = x86_rn;
-    }
-    else
-    {
-        if (x86_result == x86_rm)
-        {
-            x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
-        }
-
-        const bal_x86_macro_t mov_macro = {
-            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-            .destination = x86_result,
-            .source      = x86_rn,
-        };
-        bal_sliding_window_push(&compiler->window, mov_macro);
-    }
-
-    const bool             is_32bit = BAL_OPERAND_TYPE_REGISTER_32 == operand_cursor[0].type;
-    bal_x86_macro_opcode_t arithmetic_opcode;
-
-    if (true == is_sub)
-    {
-        arithmetic_opcode = true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_REGISTER_32
-                                             : BAL_X86_MACRO_SUB_REGISTER_REGISTER;
-    }
-    else
-    {
-        arithmetic_opcode = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_REGISTER_32
-                                             : BAL_X86_MACRO_ADD_REGISTER_REGISTER;
-    }
-
-    const bal_x86_macro_t arithmetic_macro = {
-        .opcode      = arithmetic_opcode,
-        .destination = x86_result,
-        .source      = x86_rm,
-    };
-    bal_sliding_window_push(&compiler->window, arithmetic_macro);
-
-    if (true == is_setting_flags)
-    {
-        const bal_x86_macro_t set_n_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_S,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_n),
-        };
-        bal_sliding_window_push(&compiler->window, set_n_macro);
-
-        const bal_x86_macro_t set_z_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_E,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_z),
-        };
-        bal_sliding_window_push(&compiler->window, set_z_macro);
-
-        const bal_x86_macro_t set_v_macro = {
-            .opcode              = BAL_X86_MACRO_SETCC,
-            .condition           = BAL_X86_COND_O,
-            .immediate_or_offset = offsetof(bal_cpu_t, flag_v),
-        };
-        bal_sliding_window_push(&compiler->window, set_v_macro);
-
-        // ARM carry flag is inverted compared to x86's carry during subtraction.
-        const bal_x86_condition_t c_condition = true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B;
-        const bal_x86_macro_t     set_c_macro = {
-                .opcode              = BAL_X86_MACRO_SETCC,
-                .condition           = c_condition,
-                .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
-        };
-        bal_sliding_window_push(&compiler->window, set_c_macro);
-    }
-
-    if (false == is_discarded_result)
-    {
-        const bal_x86_macro_t mov_macro = {
-            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-            .destination = x86_rd,
-            .source      = x86_result,
-        };
-        bal_sliding_window_push(&compiler->window, mov_macro);
         compiler->is_dirty |= 1U << rd;
     }
 }
@@ -1304,90 +1135,6 @@ translate_jump(const bal_tier1_compiler_t *BAL_RESTRICT               compiler,
 }
 
 void
-translate_and_reg(bal_tier1_compiler_t *BAL_RESTRICT                     compiler,
-                  const bal_decoder_instruction_metadata_t *BAL_RESTRICT metadata,
-                  const uint32_t                                         instruction)
-{
-    const bal_decoder_operand_t *BAL_RESTRICT operands = metadata->operands;
-    const uint8_t  rd           = (uint8_t)extract_operand_value(instruction, &operands[0]);
-    const uint8_t  rn           = (uint8_t)extract_operand_value(instruction, &operands[1]);
-    const uint32_t shift_amount = extract_operand_value(instruction, &operands[2]);
-    const uint8_t  rm           = (uint8_t)extract_operand_value(instruction, &operands[3]);
-    const uint32_t shift_type   = extract_operand_value(instruction, &operands[4]);
-
-    if (BAL_UNLIKELY('S' == metadata->name[3]))
-    {
-        BAL_LOG_ERROR(&bal_thread_logger,
-                      "Aborting function: Tier 1 does not support ANDS yet: %s",
-                      metadata->name);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
-    }
-
-    if (BAL_UNLIKELY(shift_amount != 0))
-    {
-        BAL_LOG_ERROR(&bal_thread_logger,
-                      "Aborting function: Tier 1 does not support shift amounts != 0 yet: %s",
-                      metadata->name);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
-    }
-
-    if (BAL_UNLIKELY(shift_type > 2U))
-    {
-        BAL_LOG_ERROR(
-            &bal_thread_logger, "Aborting function: unsupported shift type %u", shift_type);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
-    }
-
-    // Without flags to set, writing the zero register has no architectural effect.
-    if (31 == rd)
-    {
-        return;
-    }
-
-    const bal_x86_register_t x86_rn       = read_zero_or_register(compiler, rn);
-    const bal_x86_register_t x86_rm       = read_zero_or_register(compiler, rm);
-    const bool               skip_load_rd = true;
-    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
-
-    if (BAL_UNLIKELY(BAL_X86_INVALID == x86_rd) || BAL_UNLIKELY(BAL_X86_INVALID == x86_rn)
-        || BAL_UNLIKELY(BAL_X86_INVALID == x86_rm))
-    {
-        compiler->status = BAL_ERROR_INCORRECT_REGISTER_TYPE;
-        return;
-    }
-
-    bal_x86_register_t x86_and_source = x86_rm;
-
-    if (x86_rd == x86_rm)
-    {
-        x86_and_source = x86_rn;
-    }
-    else if (x86_rd != x86_rn)
-    {
-        const bal_x86_macro_t mov_macro = {
-            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-            .destination = x86_rd,
-            .source      = x86_rn,
-        };
-        bal_sliding_window_push(&compiler->window, mov_macro);
-    }
-
-    // The 32-bit form zeroes the upper half of the destination, like writes to W registers.
-    const bool            is_32bit  = BAL_OPERAND_TYPE_REGISTER_32 == operands[0].type;
-    const bal_x86_macro_t and_macro = {
-        .opcode      = true == is_32bit ? BAL_X86_MACRO_AND_REGISTER_REGISTER_32
-                                        : BAL_X86_MACRO_AND_REGISTER_REGISTER,
-        .destination = x86_rd,
-        .source      = x86_and_source,
-    };
-    bal_sliding_window_push(&compiler->window, and_macro);
-    compiler->is_dirty |= 1U << rd;
-}
-
-void
 translate_mov_immediate(bal_tier1_compiler_t                     *compiler,
                         const bal_decoder_instruction_metadata_t *metadata,
                         const uint32_t                            instruction)
@@ -1464,43 +1211,428 @@ translate_mov_immediate(bal_tier1_compiler_t                     *compiler,
 }
 
 void
-translate_mov_register(bal_tier1_compiler_t *BAL_RESTRICT                     compiler,
-                       const bal_decoder_instruction_metadata_t *BAL_RESTRICT metadata,
-                       uint32_t                                               instruction)
+translate_add_sub_shifted(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
-    if (BAL_UNLIKELY(NULL == compiler))
+    const uint8_t  rd               = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn               = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t shift_amount     = (instruction >> 10U) & 0x3FU;
+    const uint8_t  rm               = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t shift_type       = (instruction >> 22U) & 0x3U;
+    const bool     is_setting_flags = 1U == ((instruction >> 29U) & 1U);
+    const bool     is_sub           = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_32bit         = 0U == (instruction >> 31U);
+
+    // ROR is reserved for ADD/SUB, as are 32-bit shifts of 32 or more.
+    if (BAL_UNLIKELY(3U == shift_type) || BAL_UNLIKELY(true == is_32bit && shift_amount > 31U))
     {
-        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: compiler is NULL.");
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: reserved ADD/SUB (shifted register) encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
         return;
     }
 
-    if (BAL_UNLIKELY(NULL == metadata))
+    // Register 31 is the zero register for every operand of this form. Without flags to set,
+    // writing it has no architectural effect.
+    const bool is_discarded_result = 31U == rd;
+
+    if (true == is_discarded_result && false == is_setting_flags)
     {
-        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: metadata is NULL.");
-        compiler->status = BAL_ERROR_INVALID_ARGUMENT;
         return;
     }
 
-    if (BAL_UNLIKELY(compiler->status != BAL_SUCCESS))
+    const bool               is_rn_zero  = 31U == rn;
+    const bool               skip_load   = false;
+    const bal_x86_register_t x86_rn      = true == is_rn_zero
+                                               ? BAL_X86_REGISTER_ZERO
+                                               : allocate_x86_register(compiler, rn, skip_load);
+    const bool               is_inverted = false;
+    const bal_x86_register_t x86_operand2
+        = read_shifted_register(compiler, rm, shift_type, shift_amount, is_32bit, is_inverted);
+    bal_x86_register_t x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (false == is_discarded_result)
     {
-        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: compiler->status != BAL_SUCCESS.");
+        const bool skip_load_rd = true;
+        x86_result              = allocate_x86_register(compiler, rd, skip_load_rd);
+    }
+
+    bal_x86_macro_opcode_t opcode;
+
+    if (true == is_sub)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_SUB_REGISTER_REGISTER;
+    }
+    else
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_ADD_REGISTER_REGISTER;
+    }
+
+    const bool is_commutative = false == is_sub;
+    emit_binary_operation(
+        compiler, opcode, is_commutative, x86_result, is_rn_zero, x86_rn, x86_operand2);
+
+    if (true == is_setting_flags)
+    {
+        // ARM carry flag is inverted compared to x86's carry during subtraction.
+        capture_nzcv(compiler, true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B);
+    }
+
+    if (false == is_discarded_result)
+    {
+        compiler->is_dirty |= 1U << rd;
+    }
+}
+
+void
+translate_logical(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd               = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn               = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t opc              = (instruction >> 29U) & 0x3U;
+    const bool     is_32bit         = 0U == (instruction >> 31U);
+    const bool     is_immediate     = 0x24U == ((instruction >> 23U) & 0x3FU);
+    const bool     is_setting_flags = 3U == opc;
+
+    // Rd is the stack pointer for AND/ORR/EOR (immediate) and the zero register otherwise.
+    const bool is_rd_stack_pointer = true == is_immediate && false == is_setting_flags;
+    const bool is_discarded_result = 31U == rd && false == is_rd_stack_pointer;
+
+    if (true == is_discarded_result && false == is_setting_flags)
+    {
         return;
     }
 
-    const bal_decoder_operand_t *BAL_RESTRICT operand_cursor = metadata->operands;
-    const uint8_t rd = (uint8_t)extract_operand_value(instruction, &operand_cursor[0]);
-    const uint8_t rm = (uint8_t)extract_operand_value(instruction, &operand_cursor[1]);
+    uint64_t bit_mask = 0U;
 
-    const bool               skip_load_rm = false;
-    const bal_x86_register_t x86_rm       = allocate_x86_register(compiler, rm, skip_load_rm);
-    const bool               skip_load_rd = true;
-    const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
+    if (true == is_immediate)
+    {
+        const uint32_t imms           = (instruction >> 10U) & 0x3FU;
+        const uint32_t immr           = (instruction >> 16U) & 0x3FU;
+        const uint32_t n              = (instruction >> 22U) & 1U;
+        const bool     is_valid_masks = decode_bit_masks(n, imms, immr, is_32bit, &bit_mask);
 
-    const bal_x86_macro_t mov_macro = {
+        if (BAL_UNLIKELY(false == is_valid_masks))
+        {
+            BAL_LOG_ERROR(&bal_thread_logger,
+                          "Aborting function: reserved logical immediate encoding %08x",
+                          instruction);
+            compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+            return;
+        }
+    }
+    else if (BAL_UNLIKELY(true == is_32bit && ((instruction >> 10U) & 0x3FU) > 31U))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: reserved logical shifted register encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    const bool               is_rn_zero   = 31U == rn;
+    const bool               skip_load    = false;
+    const bal_x86_register_t x86_rn       = true == is_rn_zero
+                                                ? BAL_X86_REGISTER_ZERO
+                                                : allocate_x86_register(compiler, rn, skip_load);
+    bal_x86_register_t       x86_operand2 = BAL_X86_REGISTER_ZERO;
+
+    if (true == is_immediate)
+    {
+        const bal_x86_macro_t mask_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = bit_mask,
+        };
+        bal_sliding_window_push(&compiler->window, mask_macro);
+    }
+    else
+    {
+        const uint32_t shift_amount = (instruction >> 10U) & 0x3FU;
+        const uint8_t  rm           = (uint8_t)((instruction >> 16U) & 0x1FU);
+        const bool     is_inverted  = 1U == ((instruction >> 21U) & 1U);
+        const uint32_t shift_type   = (instruction >> 22U) & 0x3U;
+        x86_operand2
+            = read_shifted_register(compiler, rm, shift_type, shift_amount, is_32bit, is_inverted);
+    }
+
+    bal_x86_register_t x86_result = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (false == is_discarded_result)
+    {
+        const bool skip_load_rd = true;
+        x86_result              = allocate_x86_register(compiler, rd, skip_load_rd);
+    }
+
+    bal_x86_macro_opcode_t opcode;
+
+    if (1U == opc)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_OR_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_OR_REGISTER_REGISTER;
+    }
+    else if (2U == opc)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_XOR_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_XOR_REGISTER_REGISTER;
+    }
+    else
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_AND_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_AND_REGISTER_REGISTER;
+    }
+
+    const bool is_commutative = true;
+    emit_binary_operation(
+        compiler, opcode, is_commutative, x86_result, is_rn_zero, x86_rn, x86_operand2);
+
+    if (true == is_setting_flags)
+    {
+        // x86 AND clears CF and OF, which matches the C = 0 and V = 0 that ANDS and BICS set.
+        capture_nzcv(compiler, BAL_X86_COND_B);
+    }
+
+    if (false == is_discarded_result)
+    {
+        compiler->is_dirty |= 1U << rd;
+    }
+}
+
+/// Returns an x86 register holding the second operand of a shifted register instruction: the
+/// guest register shifted by an immediate and, for BIC/ORN/EON/BICS, inverted. Register 31 reads
+/// as zero. When the operand needs a shift, an inversion or zero, it is built in
+/// BAL_X86_REGISTER_ZERO so the guest register keeps its value.
+static bal_x86_register_t
+read_shifted_register(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                      const uint8_t                      arm_register,
+                      const uint32_t                     shift_type,
+                      const uint32_t                     shift_amount,
+                      const bool                         is_32bit,
+                      const bool                         is_inverted)
+{
+    if (31U == arm_register)
+    {
+        // Any shift of zero is zero, so only the inversion matters.
+        const uint64_t        all_ones   = true == is_32bit ? 0xFFFFFFFFULL : 0xFFFFFFFFFFFFFFFFULL;
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = true == is_inverted ? all_ones : 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+        return BAL_X86_REGISTER_ZERO;
+    }
+
+    const bool               skip_load_instruction = false;
+    const bal_x86_register_t x86_register
+        = allocate_x86_register(compiler, arm_register, skip_load_instruction);
+
+    if (0U == shift_amount && false == is_inverted)
+    {
+        return x86_register;
+    }
+
+    const bal_x86_macro_t copy_macro = {
         .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
-        .destination = x86_rd,
-        .source      = x86_rm,
+        .destination = BAL_X86_REGISTER_ZERO,
+        .source      = x86_register,
     };
-    bal_sliding_window_push(&compiler->window, mov_macro);
-    compiler->is_dirty |= 1U << rd;
+    bal_sliding_window_push(&compiler->window, copy_macro);
+
+    if (shift_amount != 0U)
+    {
+        static const bal_x86_macro_opcode_t SHIFT_OPCODES_64[] = {
+            BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+            BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+            BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE,
+            BAL_X86_MACRO_ROR_REGISTER_IMMEDIATE,
+        };
+        static const bal_x86_macro_opcode_t SHIFT_OPCODES_32[] = {
+            BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE_32,
+            BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE_32,
+            BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE_32,
+            BAL_X86_MACRO_ROR_REGISTER_IMMEDIATE_32,
+        };
+        const bal_x86_macro_t shift_macro = {
+            .opcode              = true == is_32bit ? SHIFT_OPCODES_32[shift_type & 3U]
+                                                    : SHIFT_OPCODES_64[shift_type & 3U],
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = shift_amount,
+        };
+        bal_sliding_window_push(&compiler->window, shift_macro);
+    }
+
+    if (true == is_inverted)
+    {
+        const bal_x86_macro_t not_macro = {
+            .opcode = true == is_32bit ? BAL_X86_MACRO_NOT_REGISTER_32 : BAL_X86_MACRO_NOT_REGISTER,
+            .destination = BAL_X86_REGISTER_ZERO,
+        };
+        bal_sliding_window_push(&compiler->window, not_macro);
+    }
+
+    return BAL_X86_REGISTER_ZERO;
+}
+
+/// Emits `x86_result = rn <opcode> operand2` for a two operand x86 instruction, where rn reads as
+/// zero when `is_rn_zero` is set.
+///
+/// x86_result may alias x86_rn or x86_operand2. When it aliases the second operand of a
+/// non-commutative operation, the operand is first copied to BAL_X86_REGISTER_ZERO so it is not
+/// overwritten by rn before it is read.
+static void
+emit_binary_operation(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                      const bal_x86_macro_opcode_t       opcode,
+                      const bool                         is_commutative,
+                      const bal_x86_register_t           x86_result,
+                      const bool                         is_rn_zero,
+                      const bal_x86_register_t           x86_rn,
+                      bal_x86_register_t                 x86_operand2)
+{
+    if (x86_result == x86_operand2)
+    {
+        if (true == is_commutative && false == is_rn_zero)
+        {
+            const bal_x86_macro_t operation_macro = {
+                .opcode      = opcode,
+                .destination = x86_result,
+                .source      = x86_rn,
+            };
+            bal_sliding_window_push(&compiler->window, operation_macro);
+            return;
+        }
+
+        const bal_x86_macro_t copy_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = BAL_X86_REGISTER_ZERO,
+            .source      = x86_operand2,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+        x86_operand2 = BAL_X86_REGISTER_ZERO;
+    }
+
+    if (true == is_rn_zero)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = x86_result,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_macro_t copy_macro = {
+            .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+            .destination = x86_result,
+            .source      = x86_rn,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+    }
+
+    const bal_x86_macro_t operation_macro = {
+        .opcode      = opcode,
+        .destination = x86_result,
+        .source      = x86_operand2,
+    };
+    bal_sliding_window_push(&compiler->window, operation_macro);
+}
+
+/// Stores the x86 flags left by the previous instruction into the guest NZCV fields.
+/// `carry_condition` selects the x86 condition that holds the guest C flag.
+static void
+capture_nzcv(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_x86_condition_t carry_condition)
+{
+    const bal_x86_macro_t set_n_macro = {
+        .opcode              = BAL_X86_MACRO_SETCC,
+        .condition           = BAL_X86_COND_S,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_n),
+    };
+    bal_sliding_window_push(&compiler->window, set_n_macro);
+
+    const bal_x86_macro_t set_z_macro = {
+        .opcode              = BAL_X86_MACRO_SETCC,
+        .condition           = BAL_X86_COND_E,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_z),
+    };
+    bal_sliding_window_push(&compiler->window, set_z_macro);
+
+    const bal_x86_macro_t set_v_macro = {
+        .opcode              = BAL_X86_MACRO_SETCC,
+        .condition           = BAL_X86_COND_O,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_v),
+    };
+    bal_sliding_window_push(&compiler->window, set_v_macro);
+
+    const bal_x86_macro_t set_c_macro = {
+        .opcode              = BAL_X86_MACRO_SETCC,
+        .condition           = carry_condition,
+        .immediate_or_offset = offsetof(bal_cpu_t, flag_c),
+    };
+    bal_sliding_window_push(&compiler->window, set_c_macro);
+}
+
+/// Expands the N:immr:imms bitmask immediate of the A64 logical instructions, following the
+/// DecodeBitMasks() pseudocode of the Arm Architecture Reference Manual. Returns false for the
+/// reserved encodings.
+static bool
+decode_bit_masks(const uint32_t         n,
+                 const uint32_t         imms,
+                 const uint32_t         immr,
+                 const bool             is_32bit,
+                 uint64_t *BAL_RESTRICT mask)
+{
+    // The element size is given by the highest set bit of N:NOT(imms).
+    const uint32_t combined = (n << 6U) | (~imms & 0x3FU);
+    uint32_t       length   = 6U;
+
+    while (length > 0U && 0U == (combined & (1U << length)))
+    {
+        --length;
+    }
+
+    if (0U == length || 0U == (combined & (1U << length)))
+    {
+        return false;
+    }
+
+    const uint32_t element_size = 1U << length;
+
+    if (true == is_32bit && element_size > 32U)
+    {
+        return false;
+    }
+
+    const uint32_t levels = element_size - 1U;
+    const uint32_t s      = imms & levels;
+    const uint32_t r      = immr & levels;
+
+    // A run of all ones is reserved.
+    if (s == levels)
+    {
+        return false;
+    }
+
+    const uint64_t element_mask
+        = 64U == element_size ? 0xFFFFFFFFFFFFFFFFULL : (1ULL << element_size) - 1ULL;
+
+    // s + 1 is at most 63 here because s != levels.
+    uint64_t element = (1ULL << (s + 1U)) - 1ULL;
+
+    if (r != 0U)
+    {
+        element = ((element >> r) | (element << (element_size - r))) & element_mask;
+    }
+
+    uint64_t result = 0U;
+
+    for (uint32_t position = 0U; position < 64U; position += element_size)
+    {
+        result |= element << position;
+    }
+
+    *mask = true == is_32bit ? result & 0xFFFFFFFFULL : result;
+    return true;
 }

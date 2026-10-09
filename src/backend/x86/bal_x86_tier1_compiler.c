@@ -91,6 +91,8 @@ static bool decode_bit_masks(
 
 static void translate_add_sub_shifted(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_add_sub_extended(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void push_shift(bal_tier1_compiler_t  *compiler,
@@ -423,6 +425,14 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         && 0U == ((instruction >> 21U) & 1U))
                     {
                         translate_add_sub_shifted(compiler, instruction);
+                        break;
+                    }
+
+                    // ADD/SUB (extended register): bits 28:24 = 01011 and bit 21 = 1.
+                    if (0x0BU == ((instruction >> 24U) & 0x1FU)
+                        && 1U == ((instruction >> 21U) & 1U))
+                    {
+                        translate_add_sub_extended(compiler, instruction);
                         break;
                     }
 
@@ -2612,4 +2622,140 @@ translate_multiply_add(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     const bool is_commutative = false == is_subtraction;
     emit_binary_operation(compiler, opcode, is_commutative, x86_rd, is_ra_zero, x86_ra, product);
     compiler->is_dirty |= 1U << rd;
+}
+
+/// Translates ADD, ADDS, SUB and SUBS (extended register), and so CMP and CMN (extended register):
+/// Rd = Rn +/- (extend(Rm) << imm3).
+///
+/// Rn, and Rd for the forms that do not set flags, are the stack pointer when they encode register
+/// 31, while Rm is the zero register. The extended operand is built in BAL_X86_REGISTER_ZERO by
+/// shifting the source field to the top of the register and back down (arithmetically for the
+/// signed extends), stopping imm3 bits short so the final left shift comes for free.
+void
+translate_add_sub_extended(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint8_t  rd               = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn               = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t shift_amount     = (instruction >> 10U) & 0x7U;
+    const uint32_t option           = (instruction >> 13U) & 0x7U;
+    const uint8_t  rm               = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t opt              = (instruction >> 22U) & 0x3U;
+    const bool     is_setting_flags = 1U == ((instruction >> 29U) & 1U);
+    const bool     is_sub           = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_32bit         = 0U == (instruction >> 31U);
+
+    if (BAL_UNLIKELY(opt != 0U) || BAL_UNLIKELY(shift_amount > 4U))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: reserved ADD/SUB (extended register) encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    const bool               skip_load = false;
+    const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
+    const bal_x86_register_t operand2  = BAL_X86_REGISTER_ZERO;
+
+    if (31U == rm)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = operand2,
+            .immediate_or_offset = 0U,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rm     = allocate_x86_register(compiler, rm, skip_load);
+        const bal_x86_macro_t    copy_macro = {
+               .opcode      = BAL_X86_MACRO_MOV_REGISTER_REGISTER,
+               .destination = operand2,
+               .source      = x86_rm,
+        };
+        bal_sliding_window_push(&compiler->window, copy_macro);
+
+        // option<1:0> selects a byte, halfword, word or doubleword source; option<2> signedness.
+        const uint32_t source_bits = 8U << (option & 0x3U);
+        const bool     is_signed   = 4U == (option & 0x4U);
+
+        if (source_bits < 64U)
+        {
+            const uint32_t top = 64U - source_bits;
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       operand2,
+                       top);
+
+            if (true == is_signed)
+            {
+                push_shift(compiler,
+                           BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE,
+                           BAL_X86_MACRO_SAR_REGISTER_IMMEDIATE,
+                           false,
+                           operand2,
+                           top - shift_amount);
+            }
+            else
+            {
+                push_shift(compiler,
+                           BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                           BAL_X86_MACRO_SHR_REGISTER_IMMEDIATE,
+                           false,
+                           operand2,
+                           top - shift_amount);
+            }
+        }
+        else
+        {
+            push_shift(compiler,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       BAL_X86_MACRO_SHL_REGISTER_IMMEDIATE,
+                       false,
+                       operand2,
+                       shift_amount);
+        }
+    }
+
+    // Rd is the stack pointer unless the instruction sets flags, where register 31 discards the
+    // result (CMP and CMN).
+    const bool         is_discarded_result = true == is_setting_flags && 31U == rd;
+    bal_x86_register_t x86_result          = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    if (false == is_discarded_result)
+    {
+        const bool skip_load_rd = true;
+        x86_result              = allocate_x86_register(compiler, rd, skip_load_rd);
+    }
+
+    bal_x86_macro_opcode_t opcode;
+
+    if (true == is_sub)
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_SUB_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_SUB_REGISTER_REGISTER;
+    }
+    else
+    {
+        opcode = true == is_32bit ? BAL_X86_MACRO_ADD_REGISTER_REGISTER_32
+                                  : BAL_X86_MACRO_ADD_REGISTER_REGISTER;
+    }
+
+    const bool is_rn_zero     = false;
+    const bool is_commutative = false == is_sub;
+    emit_binary_operation(
+        compiler, opcode, is_commutative, x86_result, is_rn_zero, x86_rn, operand2);
+
+    if (true == is_setting_flags)
+    {
+        capture_nzcv(compiler, true == is_sub ? BAL_X86_COND_AE : BAL_X86_COND_B);
+    }
+
+    if (false == is_discarded_result)
+    {
+        compiler->is_dirty |= 1U << rd;
+    }
 }

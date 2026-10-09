@@ -32,6 +32,10 @@ static const bal_x86_register_t SCRATCH_REGISTERS[]
 /// Dedicated throwaway register for instructions that update flags but discards the result.
 #define BAL_X86_REGISTER_DISCARD_RESULT BAL_X86_R11
 
+/// Holds zero whenever an instruction reads the zero register (WZR/XZR). R13 is saved by the block
+/// prologue but is not part of the scratch pool, so it is never mapped to a guest register.
+#define BAL_X86_REGISTER_ZERO BAL_X86_R13
+
 static void reset_register_allocator(bal_tier1_compiler_t *compiler);
 
 static bal_x86_register_t allocate_x86_register(bal_tier1_compiler_t *compiler,
@@ -39,6 +43,9 @@ static bal_x86_register_t allocate_x86_register(bal_tier1_compiler_t *compiler,
                                                 bool                  skip_load_instruction);
 
 static void evict_x86_register(bal_tier1_compiler_t *compiler, bal_x86_register_t x86_register);
+
+static bal_x86_register_t read_zero_or_register(bal_tier1_compiler_t *compiler,
+                                                uint8_t               arm_register);
 
 static void flush_dirty_registers(bal_tier1_compiler_t *compiler);
 
@@ -752,6 +759,26 @@ evict_x86_register(bal_tier1_compiler_t *compiler, const bal_x86_register_t x86_
         &bal_thread_logger, "RegAlloc: evicted ARM X%d from x86 r%d", arm_victim, x86_register);
 }
 
+/// Returns an x86 register holding the value of a source operand where register 31 encodes the zero
+/// register rather than the stack pointer.
+static bal_x86_register_t
+read_zero_or_register(bal_tier1_compiler_t *compiler, const uint8_t arm_register)
+{
+    if (31U == arm_register)
+    {
+        const bal_x86_macro_t zero_macro = {
+            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+            .destination         = BAL_X86_REGISTER_ZERO,
+            .immediate_or_offset = 0,
+        };
+        bal_sliding_window_push(&compiler->window, zero_macro);
+        return BAL_X86_REGISTER_ZERO;
+    }
+
+    const bool skip_load_instruction = false;
+    return allocate_x86_register(compiler, arm_register, skip_load_instruction);
+}
+
 void
 flush_dirty_registers(bal_tier1_compiler_t *compiler)
 {
@@ -1042,12 +1069,12 @@ translate_add_sub_reg(bal_tier1_compiler_t *BAL_RESTRICT                     com
     // Does this instruction set flags?
     const bool is_setting_flags = (OPCODE_CMP == metadata->ir_opcode) || ('S' == metadata->name[3])
                                   || ('N' == metadata->name[2]);
-    const bool               is_discarded_result = is_setting_flags && (31 == rd);
-    const bool               skip_load_rn        = false;
-    const bal_x86_register_t x86_rn       = allocate_x86_register(compiler, rn, skip_load_rn);
-    const bool               skip_load_rm = false;
-    bal_x86_register_t       x86_rm       = allocate_x86_register(compiler, rm, skip_load_rm);
-    bal_x86_register_t       x86_rd       = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    // Register 31 is the zero register for every operand of the shifted register form.
+    const bool               is_discarded_result = 31 == rd;
+    const bal_x86_register_t x86_rn              = read_zero_or_register(compiler, rn);
+    bal_x86_register_t       x86_rm              = read_zero_or_register(compiler, rm);
+    bal_x86_register_t       x86_rd              = BAL_X86_REGISTER_DISCARD_RESULT;
 
     // The register the arithmetic is performed in. This differs from x86_rd only when rd aliases
     // rm in a subtraction, where the result is built in the scratch register and copied to rd
@@ -1237,8 +1264,7 @@ translate_cbz_cbnz(bal_tier1_compiler_t *BAL_RESTRICT                     compil
     const int64_t             offset           = (int64_t)signed_immediate * 4;
     const bal_guest_address_t taken_pc         = guest_address + (uint64_t)offset;
     const bal_guest_address_t fallthrough_pc   = guest_address + 4;
-    const bool                skip_load_rn     = false;
-    const bal_x86_register_t  x86_rn           = allocate_x86_register(compiler, rn, skip_load_rn);
+    const bal_x86_register_t  x86_rn           = read_zero_or_register(compiler, rn);
     const bal_x86_macro_t     test_macro       = {
                   .opcode      = BAL_X86_MACRO_TEST_REGISTER_REGISTER,
                   .destination = x86_rn,
@@ -1315,10 +1341,14 @@ translate_and_reg(bal_tier1_compiler_t *BAL_RESTRICT                     compile
         return;
     }
 
-    const bool               skip_load_rn = false;
-    const bal_x86_register_t x86_rn       = allocate_x86_register(compiler, rn, skip_load_rn);
-    const bool               skip_load_rm = false;
-    const bal_x86_register_t x86_rm       = allocate_x86_register(compiler, rm, skip_load_rm);
+    // Without flags to set, writing the zero register has no architectural effect.
+    if (31 == rd)
+    {
+        return;
+    }
+
+    const bal_x86_register_t x86_rn       = read_zero_or_register(compiler, rn);
+    const bal_x86_register_t x86_rm       = read_zero_or_register(compiler, rm);
     const bool               skip_load_rd = true;
     const bal_x86_register_t x86_rd       = allocate_x86_register(compiler, rd, skip_load_rd);
 
@@ -1331,16 +1361,7 @@ translate_and_reg(bal_tier1_compiler_t *BAL_RESTRICT                     compile
 
     bal_x86_register_t x86_and_source = x86_rm;
 
-    if (31 == rd)
-    {
-        const bal_x86_macro_t mov_macro = {
-            .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-            .destination         = x86_rd,
-            .immediate_or_offset = 0,
-        };
-        bal_sliding_window_push(&compiler->window, mov_macro);
-    }
-    else if (x86_rd == x86_rm)
+    if (x86_rd == x86_rm)
     {
         x86_and_source = x86_rn;
     }
@@ -1368,7 +1389,14 @@ translate_mov_immediate(bal_tier1_compiler_t                     *compiler,
                         const bal_decoder_instruction_metadata_t *metadata,
                         const uint32_t                            instruction)
 {
-    const uint8_t  rd      = (uint8_t)extract_operand_value(instruction, &metadata->operands[0]);
+    const uint8_t rd = (uint8_t)extract_operand_value(instruction, &metadata->operands[0]);
+
+    // MOVZ, MOVN and MOVK treat register 31 as the zero register, so the write is discarded.
+    if (31 == rd)
+    {
+        return;
+    }
+
     const uint64_t imm16   = extract_operand_value(instruction, &metadata->operands[1]);
     const uint64_t hw      = extract_operand_value(instruction, &metadata->operands[2]);
     const uint64_t shift   = hw * 16ULL;

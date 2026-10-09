@@ -559,6 +559,17 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     is_block_terminated = true;
                     break;
                 case OPCODE_NOP:
+                    // DMB and DSB order memory accesses for other observers. x86 keeps loads and
+                    // stores in order except for a load passing an earlier store, so a full fence
+                    // is always sufficient. ISB, SB, CLREX and the hints need nothing here.
+                    if (0xD503309FU == (instruction & 0xFFFFF0DFU)
+                        || 0xD503323FU == (instruction & 0xFFFFF3FFU))
+                    {
+                        const bal_x86_macro_t fence_macro = {
+                            .opcode = BAL_X86_MACRO_MFENCE,
+                        };
+                        bal_sliding_window_push(&compiler->window, fence_macro);
+                    }
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,

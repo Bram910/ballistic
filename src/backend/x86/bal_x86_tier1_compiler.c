@@ -336,16 +336,15 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
             max_readable_instructions = max_instructions;
         }
 
-        if (engine_flags & BAL_ENGINE_FLAG_STRICT_ALIGNMENT)
+        // A64 instructions are always 4-byte aligned; a misaligned PC, reached through BR, BLR or
+        // RET, raises a PC alignment fault. Fetching from it would also be a misaligned read.
+        if (guest_address % 4 != 0)
         {
-            if (guest_address % 4 != 0)
-            {
-                BAL_LOG_ERROR(&bal_thread_logger,
-                              "Aborting function: strict alignment fault at GVA 0x%016llX",
-                              (unsigned long)guest_address);
-                compiler->status = BAL_ERROR_PC_ALIGNMENT;
-                break;
-            }
+            BAL_LOG_ERROR(&bal_thread_logger,
+                          "Aborting function: PC alignment fault at GVA 0x%016llX",
+                          (unsigned long long)guest_address);
+            compiler->status = BAL_ERROR_PC_ALIGNMENT;
+            break;
         }
 
         for (size_t i = 0; i < max_readable_instructions; ++i)

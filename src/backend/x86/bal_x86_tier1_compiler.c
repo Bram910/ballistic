@@ -97,6 +97,10 @@ static void translate_add_sub_carry(bal_tier1_compiler_t *compiler, uint32_t ins
 
 static void translate_variable_shift(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void translate_pc_relative(bal_tier1_compiler_t *compiler,
+                                  uint32_t              instruction,
+                                  bal_guest_address_t   guest_address);
+
 static void translate_logical(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void push_shift(bal_tier1_compiler_t  *compiler,
@@ -401,6 +405,13 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
             switch (metadata->ir_opcode)
             {
                 case OPCODE_MOV:;
+                    // ADR and ADRP: bits 28:24 = 10000.
+                    if (0x10U == ((instruction >> 24U) & 0x1FU))
+                    {
+                        translate_pc_relative(compiler, instruction, guest_address);
+                        break;
+                    }
+
                     const char variant = metadata->name[3];
 
                     if (BAL_LIKELY(variant == 'N') || BAL_LIKELY(variant == 'K')
@@ -522,6 +533,8 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     translate_branch_register(compiler, instruction, guest_address);
                     is_pc_dynamic       = true;
                     is_block_terminated = true;
+                    break;
+                case OPCODE_NOP:
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -3025,5 +3038,49 @@ translate_variable_shift(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
              .source      = value,
     };
     bal_sliding_window_push(&compiler->window, move_macro);
+    compiler->is_dirty |= 1U << rd;
+}
+
+/// Translates ADR and ADRP. Both compute an address relative to the instruction, which is known at
+/// translation time, so Rd receives a constant: PC + imm for ADR, and the 4 KiB page of PC plus
+/// imm * 4096 for ADRP.
+void
+translate_pc_relative(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                      const uint32_t                     instruction,
+                      const bal_guest_address_t          guest_address)
+{
+    const uint8_t rd = (uint8_t)(instruction & 0x1FU);
+
+    // Rd is the zero register when it encodes 31.
+    if (31U == rd)
+    {
+        return;
+    }
+
+    const uint32_t immhi   = (instruction >> 5U) & 0x7FFFFU;
+    const uint32_t immlo   = (instruction >> 29U) & 0x3U;
+    const bool     is_page = 1U == (instruction >> 31U);
+
+    // WARNING: Shifting the 21-bit immediate to the top and back sign-extends it.
+    const int32_t signed_immediate = (int32_t)(((immhi << 2U) | immlo) << 11U) >> 11U;
+    uint64_t      address;
+
+    if (true == is_page)
+    {
+        address = (guest_address & ~0xFFFULL) + (uint64_t)((int64_t)signed_immediate * 4096);
+    }
+    else
+    {
+        address = guest_address + (uint64_t)(int64_t)signed_immediate;
+    }
+
+    const bool               skip_load = true;
+    const bal_x86_register_t x86_rd    = allocate_x86_register(compiler, rd, skip_load);
+    const bal_x86_macro_t    mov_macro = {
+           .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+           .destination         = x86_rd,
+           .immediate_or_offset = address,
+    };
+    bal_sliding_window_push(&compiler->window, mov_macro);
     compiler->is_dirty |= 1U << rd;
 }

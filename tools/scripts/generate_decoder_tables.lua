@@ -84,6 +84,19 @@ local function derive_opcode(mnemonic)
         return "OPCODE_ATOMIC"
     end
 
+    -- Scalar floating point, executed by the runtime floating-point helper. The vector forms
+    -- share these mnemonics; tier 1 rejects them until it implements them.
+    for _, name in ipairs({ "FMOV", "FABS", "FNEG", "FSQRT", "FADD", "FSUB", "FMUL", "FNMUL",
+                            "FDIV", "FMAX", "FMIN", "FMAXNM", "FMINNM", "FCMP", "FCMPE", "FCCMP",
+                            "FCCMPE", "FCSEL", "FCVT", "FRINTN", "FRINTP", "FRINTM", "FRINTZ",
+                            "FRINTA", "FRINTX", "FRINTI", "SCVTF", "UCVTF", "FCVTZS", "FCVTZU",
+                            "FCVTNS", "FCVTNU", "FCVTPS", "FCVTPU", "FCVTMS", "FCVTMU", "FCVTAS",
+                            "FCVTAU", "FMADD", "FMSUB", "FNMADD", "FNMSUB" }) do
+        if m == name then
+            return "OPCODE_FLOAT"
+        end
+    end
+
     for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
                               "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
         if m:sub(1, #prefix) == prefix then

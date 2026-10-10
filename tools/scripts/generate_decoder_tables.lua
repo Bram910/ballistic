@@ -199,6 +199,16 @@ local function derive_opcode(mnemonic)
         return "OPCODE_STORE"
     end
 
+    -- The Advanced SIMD structure loads and stores. The SVE forms share the names; they are
+    -- overridden by encoding.
+    if m:match("^LD[1-4]R?$") then
+        return "OPCODE_LOAD"
+    end
+
+    if m:match("^ST[1-4]$") then
+        return "OPCODE_STORE"
+    end
+
     if m == "B" then
         return "OPCODE_JUMP"
     end

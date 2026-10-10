@@ -90,10 +90,7 @@ static bool emit_fast_float(bal_tier1_compiler_t *compiler, uint32_t instruction
 
 static uint32_t extract_operand_value(uint32_t instruction, const bal_decoder_operand_t *operand);
 
-static void translate_add_sub_imm(bal_tier1_compiler_t                     *compiler,
-                                  const bal_decoder_instruction_metadata_t *metadata,
-                                  uint32_t                                  instruction,
-                                  bool                                      is_sub);
+static void translate_add_sub_imm(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static bal_x86_register_t read_shifted_register(bal_tier1_compiler_t *compiler,
                                                 uint8_t               arm_register,
@@ -554,9 +551,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     // ADD/SUB (immediate): bits 28:23 = 100010.
                     if (0x22U == ((instruction >> 23U) & 0x3FU))
                     {
-                        const bool is_sub = (OPCODE_SUB == metadata->ir_opcode)
-                                            || (OPCODE_CMP == metadata->ir_opcode);
-                        translate_add_sub_imm(compiler, metadata, instruction, is_sub);
+                        translate_add_sub_imm(compiler, instruction);
                         break;
                     }
 
@@ -1315,23 +1310,19 @@ extract_operand_value(const uint32_t instruction, const bal_decoder_operand_t *o
     return bits;
 }
 
+/// Translates ADD, ADDS, SUB and SUBS (immediate): sf op S 100010 sh imm12 Rn Rd. The fields come
+/// from the encoding, since the decoder's alias entries (CMP, CMN, MOV to or from SP) list fewer
+/// operands.
 void
-translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT                     compiler,
-                      const bal_decoder_instruction_metadata_t *BAL_RESTRICT metadata,
-                      const uint32_t                                         instruction,
-                      const bool                                             is_sub)
+translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
-    const bal_decoder_operand_t *BAL_RESTRICT operand_cursor = metadata->operands;
-    const uint8_t  rd           = (uint8_t)extract_operand_value(instruction, &operand_cursor[0]);
-    const uint8_t  rn           = (uint8_t)extract_operand_value(instruction, &operand_cursor[1]);
-    const uint32_t imm12        = extract_operand_value(instruction, &operand_cursor[2]);
-    const uint32_t shift        = extract_operand_value(instruction, &operand_cursor[3]);
-    const uint64_t shift_amount = 1 == shift ? 12 : 0;
-    uint64_t       value        = (uint64_t)imm12 << shift_amount;
-
-    // Does this instruction set flags?
-    const bool is_setting_flags = (OPCODE_CMP == metadata->ir_opcode) || ('S' == metadata->name[3])
-                                  || ('N' == metadata->name[2]);
+    const uint8_t            rd                  = (uint8_t)(instruction & 0x1FU);
+    const uint8_t            rn                  = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t           imm12               = (instruction >> 10U) & 0xFFFU;
+    const uint64_t           shift_amount        = 1U == ((instruction >> 22U) & 1U) ? 12U : 0U;
+    uint64_t                 value               = (uint64_t)imm12 << shift_amount;
+    const bool               is_sub              = 1U == ((instruction >> 30U) & 1U);
+    const bool               is_setting_flags    = 1U == ((instruction >> 29U) & 1U);
     const bool               is_discarded_result = is_setting_flags && (31 == rd);
     const bool               skip_load_rn        = false;
     const bal_x86_register_t x86_rn = allocate_x86_register(compiler, rn, skip_load_rn);
@@ -1362,7 +1353,7 @@ translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT                     com
             bal_sliding_window_push(&compiler->window, mov_macro);
         }
     }
-    const bool             is_32bit = BAL_OPERAND_TYPE_REGISTER_32 == operand_cursor[0].type;
+    const bool             is_32bit = 0U == (instruction >> 31U);
     bal_x86_macro_opcode_t arithmetic_opcode;
 
     if (true == is_sub)

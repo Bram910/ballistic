@@ -87,6 +87,9 @@ static void block_cache_insert(block_cache_set_t *BAL_RESTRICT cache,
                                const bal_guest_address_t       pc,
                                void                           *host_code);
 
+static void discard_translations(const bal_engine_t *BAL_RESTRICT      engine,
+                                 internal_engine_state_t *BAL_RESTRICT engine_state);
+
 static void link_block(internal_engine_state_t *BAL_RESTRICT engine_state,
                        uint64_t                              link_site,
                        const void                           *entry_point);
@@ -316,16 +319,7 @@ bal_engine_run_thread(bal_engine_t *engine)
             BAL_LOG_INFO(&bal_thread_logger,
                          "Clear cache requested. Resetting JIT layout and block cache.");
 
-            // Resetting clears the code buffer, which is executable-only between translations.
-            engine->allocator->protect_rw(engine->allocator->context,
-                                          internal_engine_state->tier1_buffer,
-                                          internal_engine_state->tier1_buffer_size);
-            bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
-            (void)memset(
-                internal_engine_state->block_cache, 0, sizeof(internal_engine_state->block_cache));
-            (void)memset(internal_engine_state->lookup_table,
-                         0,
-                         sizeof(internal_engine_state->lookup_table));
+            discard_translations(engine, internal_engine_state);
             link_site = 0U;
             atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
                                   false,
@@ -386,13 +380,7 @@ bal_engine_run_thread(bal_engine_t *engine)
                 {
                     BAL_LOG_INFO(&bal_thread_logger,
                                  "Tier 1 executable buffer full. Resetting JIT layout cache");
-                    bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
-                    (void)memset(internal_engine_state->block_cache,
-                                 0,
-                                 sizeof(internal_engine_state->block_cache));
-                    (void)memset(internal_engine_state->lookup_table,
-                                 0,
-                                 sizeof(internal_engine_state->lookup_table));
+                    discard_translations(engine, internal_engine_state);
                     link_site = 0U;
                     entry_point
                         = bal_tier1_compiler_translate(&internal_engine_state->tier1_compiler,
@@ -517,12 +505,28 @@ bal_engine_reset(bal_engine_t *BAL_RESTRICT engine)
         return BAL_ERROR_INVALID_ARGUMENT;
     }
 
+    if (BAL_UNLIKELY(NULL == engine->engine_state))
+    {
+        return BAL_ERROR_INVALID_ARGUMENT;
+    }
+
     engine->status = BAL_SUCCESS;
-    internal_engine_state_t *BAL_RESTRICT engine_state
-        = (internal_engine_state_t *)engine->engine_state;
-    (void)memset(&engine_state->tier1_buffer, 0, engine_state->tier1_buffer_size);
-    bal_tier1_compiler_reset(&engine_state->tier1_compiler);
+    discard_translations(engine, (internal_engine_state_t *)engine->engine_state);
     return engine->status;
+}
+
+/// Throws every translation away: the code buffer, the block cache and the indirect branch
+/// lookup table, which point into it, and with them every chained jump.
+static void
+discard_translations(const bal_engine_t *BAL_RESTRICT      engine,
+                     internal_engine_state_t *BAL_RESTRICT engine_state)
+{
+    // Resetting clears the code buffer, which may be executable-only between translations.
+    engine->allocator->protect_rw(
+        engine->allocator->context, engine_state->tier1_buffer, engine_state->tier1_buffer_size);
+    bal_tier1_compiler_reset(&engine_state->tier1_compiler);
+    (void)memset(engine_state->block_cache, 0, sizeof(engine_state->block_cache));
+    (void)memset(engine_state->lookup_table, 0, sizeof(engine_state->lookup_table));
 }
 
 void

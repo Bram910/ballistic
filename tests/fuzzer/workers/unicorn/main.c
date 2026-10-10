@@ -9,6 +9,19 @@
 #define GUEST_BASE_ADDRESS 0x0
 #define GUEST_MEMORY_SIZE  0X1000ULL // 4 KiB, one page.
 
+// QEMU's exception number for a data abort, which Unicorn raises for misaligned exclusive and
+// atomic accesses.
+#define UNICORN_EXCEPTION_DATA_ABORT 4U
+#define UNICORN_EXCEPTION_NONE       0xFFFFFFFFU
+
+/// Records the exception the guest raised and stops emulation at the faulting instruction.
+static void
+on_exception(uc_engine *engine, uint32_t exception_number, void *user_data)
+{
+    *(uint32_t *)user_data = exception_number;
+    (void)uc_emu_stop(engine);
+}
+
 int
 main(void)
 {
@@ -31,6 +44,17 @@ main(void)
         return 1;
     }
 
+    uint32_t exception_number = UNICORN_EXCEPTION_NONE;
+    uc_hook  exception_hook   = 0U;
+    unicorn_error             = uc_hook_add(
+        engine, &exception_hook, UC_HOOK_INTR, (void *)on_exception, &exception_number, 1U, 0U);
+
+    if (unicorn_error != UC_ERR_OK)
+    {
+        (void)fprintf(stderr, "uc_hook_add failed: %s\n", uc_strerror(unicorn_error));
+        return 1;
+    }
+
     while (true)
     {
         if (bal_fuzzer_ipc_receive(STDIN_FILENO, &input, sizeof(input)) != BAL_SUCCESS)
@@ -49,8 +73,7 @@ main(void)
             continue;
         }
 
-        unicorn_error = uc_mem_map(
-            engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE, UC_PROT_READ | UC_PROT_EXEC);
+        unicorn_error = uc_mem_map(engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE, UC_PROT_ALL);
 
         if (unicorn_error != UC_ERR_OK)
         {
@@ -62,6 +85,17 @@ main(void)
         const uint64_t code_buffer_size_bytes = input.instruction_count * 4ULL;
         unicorn_error
             = uc_mem_write(engine, GUEST_BASE_ADDRESS, input.instructions, code_buffer_size_bytes);
+
+        // Mirror the Ballistic worker's guest memory: writable, with a RET after the
+        // instructions, so loads and stores see the same bytes in both engines.
+        if (UC_ERR_OK == unicorn_error)
+        {
+            const uint32_t return_encoding = 0xD65F03C0U;
+            unicorn_error                  = uc_mem_write(engine,
+                                         GUEST_BASE_ADDRESS + code_buffer_size_bytes,
+                                         &return_encoding,
+                                         sizeof(return_encoding));
+        }
 
         if (unicorn_error != UC_ERR_OK)
         {
@@ -88,6 +122,22 @@ main(void)
         register_ids[31] = UC_ARM64_REG_SP;
 
         unicorn_error = uc_reg_write_batch(engine, register_ids, register_values, 32);
+
+        if (unicorn_error != UC_ERR_OK)
+        {
+            response.status = BAL_FUZZER_WORKER_ERROR_EXECUTION_FAILED;
+            (void)uc_mem_unmap(engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE);
+            (void)bal_fuzzer_ipc_send(STDOUT_FILENO, &response, sizeof(response));
+            continue;
+        }
+
+        for (uint32_t vector_register = 0U; vector_register < 32U && UC_ERR_OK == unicorn_error;
+             ++vector_register)
+        {
+            unicorn_error = uc_reg_write(engine,
+                                         UC_ARM64_REG_Q0 + (int)vector_register,
+                                         input.initial_state.v[vector_register]);
+        }
 
         if (unicorn_error != UC_ERR_OK)
         {
@@ -151,8 +201,15 @@ main(void)
             continue;
         }
 
+        exception_number = UNICORN_EXCEPTION_NONE;
         unicorn_error = uc_emu_start(engine, GUEST_BASE_ADDRESS, x30, 0U, input.instruction_count);
-        if (unicorn_error != UC_ERR_OK)
+        if (UC_ERR_READ_UNMAPPED == unicorn_error || UC_ERR_WRITE_UNMAPPED == unicorn_error
+            || UC_ERR_WRITE_PROT == unicorn_error
+            || UNICORN_EXCEPTION_DATA_ABORT == exception_number)
+        {
+            response.status = BAL_FUZZER_WORKER_MEMORY_FAULT;
+        }
+        else if (unicorn_error != UC_ERR_OK || exception_number != UNICORN_EXCEPTION_NONE)
         {
             response.status = BAL_FUZZER_WORKER_ERROR_COMPILE_FAILED;
         }

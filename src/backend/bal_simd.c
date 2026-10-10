@@ -1,0 +1,2635 @@
+#include "backend/bal_simd.h"
+
+#include "backend/bal_float.h"
+#include <string.h>
+
+#define FPSR_QC (1ULL << 27U)
+
+/// A 128-bit SIMD&FP register: d[0] holds bits 63:0 and d[1] bits 127:64.
+typedef struct
+{
+    uint64_t d[2];
+} vector_t;
+
+/// The state one instruction works on.
+typedef struct
+{
+    bal_cpu_t *cpu;
+    /// FPSR flags raised so far, including QC.
+    uint64_t flags;
+} simd_t;
+
+static uint64_t
+mask_of(const uint32_t esize)
+{
+    return esize >= 64U ? ~0ULL : (1ULL << esize) - 1U;
+}
+
+static int64_t
+sign_extend(const uint64_t value, const uint32_t esize)
+{
+    const uint32_t shift = 64U - esize;
+    return (int64_t)(value << shift) >> shift;
+}
+
+static uint64_t
+get_element(const vector_t *vector, const uint32_t index, const uint32_t esize)
+{
+    const uint32_t bit = index * esize;
+    return (vector->d[bit / 64U] >> (bit % 64U)) & mask_of(esize);
+}
+
+static void
+set_element(vector_t *vector, const uint32_t index, const uint32_t esize, const uint64_t value)
+{
+    const uint32_t bit  = index * esize;
+    const uint64_t mask = mask_of(esize) << (bit % 64U);
+    uint64_t      *word = &vector->d[bit / 64U];
+    *word               = (*word & ~mask) | ((value << (bit % 64U)) & mask);
+}
+
+static vector_t
+read_vector(const simd_t *simd, const uint32_t index)
+{
+    vector_t vector = { { simd->cpu->v[index][0], simd->cpu->v[index][1] } };
+    return vector;
+}
+
+/// Writes `datasize` bits of `vector` to register `index`, clearing the bits above them.
+static void
+write_vector(simd_t *simd, const uint32_t index, vector_t vector, const uint32_t datasize)
+{
+    if (datasize < 128U)
+    {
+        vector.d[1] = 0U;
+        vector.d[0] &= mask_of(datasize);
+    }
+
+    simd->cpu->v[index][0] = vector.d[0];
+    simd->cpu->v[index][1] = vector.d[1];
+}
+
+static uint64_t
+read_general(const simd_t *simd, const uint32_t index)
+{
+    return 31U == index ? 0U : simd->cpu->x[index];
+}
+
+static void
+write_general(simd_t *simd, const uint32_t index, const uint64_t value)
+{
+    if (index != 31U)
+    {
+        simd->cpu->x[index] = value;
+    }
+}
+
+/// Saturates a signed value to `esize` bits, setting QC when it does not fit.
+static uint64_t
+saturate_signed(simd_t *simd, const int64_t value, const uint32_t esize)
+{
+    const int64_t maximum = (int64_t)(mask_of(esize) >> 1U);
+    const int64_t minimum = -maximum - 1;
+
+    if (value > maximum)
+    {
+        simd->flags |= FPSR_QC;
+        return (uint64_t)maximum & mask_of(esize);
+    }
+
+    if (value < minimum)
+    {
+        simd->flags |= FPSR_QC;
+        return (uint64_t)minimum & mask_of(esize);
+    }
+
+    return (uint64_t)value & mask_of(esize);
+}
+
+/// Saturates an unsigned value to `esize` bits, setting QC when it does not fit.
+static uint64_t
+saturate_unsigned(simd_t *simd, const uint64_t value, const uint32_t esize)
+{
+    if (value > mask_of(esize))
+    {
+        simd->flags |= FPSR_QC;
+        return mask_of(esize);
+    }
+
+    return value;
+}
+
+/// Saturates a signed value to an unsigned `esize`-bit result (SQXTUN, SQSHLU).
+static uint64_t
+saturate_signed_to_unsigned(simd_t *simd, const int64_t value, const uint32_t esize)
+{
+    if (value < 0)
+    {
+        simd->flags |= FPSR_QC;
+        return 0U;
+    }
+
+    return saturate_unsigned(simd, (uint64_t)value, esize);
+}
+
+/// SQADD/UQADD (`is_subtract` false) and SQSUB/UQSUB on `esize`-bit elements.
+static uint64_t
+saturating_add(simd_t        *simd,
+               const uint64_t a,
+               const uint64_t b,
+               const uint32_t esize,
+               const bool     is_unsigned,
+               const bool     is_subtract)
+{
+    if (true == is_unsigned)
+    {
+        if (true == is_subtract)
+        {
+            if (a < b)
+            {
+                simd->flags |= FPSR_QC;
+                return 0U;
+            }
+
+            return a - b;
+        }
+
+        const uint64_t sum = (a + b) & mask_of(esize);
+
+        if (sum < a)
+        {
+            simd->flags |= FPSR_QC;
+            return mask_of(esize);
+        }
+
+        return sum;
+    }
+
+    const int64_t x = sign_extend(a, esize);
+    const int64_t y = sign_extend(b, esize);
+
+    if (esize < 64U)
+    {
+        return saturate_signed(simd, true == is_subtract ? x - y : x + y, esize);
+    }
+
+    int64_t    result   = 0;
+    const bool overflow = true == is_subtract ? __builtin_sub_overflow(x, y, &result)
+                                              : __builtin_add_overflow(x, y, &result);
+
+    if (true == overflow)
+    {
+        simd->flags |= FPSR_QC;
+        return x < 0 ? 0x8000000000000000ULL : 0x7FFFFFFFFFFFFFFFULL;
+    }
+
+    return (uint64_t)result;
+}
+
+/// Shifts an `esize`-bit element by a signed amount: left when positive, right when negative,
+/// as SSHL, USHL, SRSHL, URSHL, SQSHL, UQSHL, SQRSHL, UQRSHL and the shifts by immediate do.
+/// `saturate_unsigned_result` gives SQSHLU: a signed input saturated to an unsigned result.
+static uint64_t
+shift_element(simd_t        *simd,
+              const uint64_t value,
+              const uint32_t esize,
+              const int64_t  shift,
+              const bool     is_unsigned,
+              const bool     is_rounding,
+              const bool     is_saturating,
+              const bool     saturate_unsigned_result)
+{
+    const uint64_t mask = mask_of(esize);
+
+    if (shift >= 0)
+    {
+        if (false == is_saturating)
+        {
+            return shift >= (int64_t)esize ? 0U : (value << shift) & mask;
+        }
+
+        if (true == is_unsigned || true == saturate_unsigned_result)
+        {
+            if (true == saturate_unsigned_result && sign_extend(value, esize) < 0)
+            {
+                simd->flags |= FPSR_QC;
+                return 0U;
+            }
+
+            if (0U == value)
+            {
+                return 0U;
+            }
+
+            if (shift >= (int64_t)esize || value > (mask >> shift))
+            {
+                simd->flags |= FPSR_QC;
+                return mask;
+            }
+
+            return (value << shift) & mask;
+        }
+
+        const int64_t x = sign_extend(value, esize);
+
+        if (0 == x)
+        {
+            return 0U;
+        }
+
+        const int64_t maximum = (int64_t)(mask >> 1U);
+        const int64_t minimum = -maximum - 1;
+
+        if (shift >= (int64_t)esize || x > (maximum >> shift) || x < (minimum >> shift))
+        {
+            simd->flags |= FPSR_QC;
+            return (uint64_t)(x < 0 ? minimum : maximum) & mask;
+        }
+
+        return ((uint64_t)x << shift) & mask;
+    }
+
+    // Right shifts: (x + round) >> r, computed without the 65-bit intermediate as
+    // (x >> r) + bit r-1 of x.
+    const int64_t r = -shift;
+
+    if (true == is_unsigned)
+    {
+        uint64_t result = r >= 64 ? 0U : value >> r;
+
+        if (true == is_rounding && r - 1 < 64)
+        {
+            result += (value >> (r - 1)) & 1U;
+        }
+
+        return result & mask;
+    }
+
+    const int64_t x      = sign_extend(value, esize);
+    int64_t       result = r >= 64 ? (x < 0 ? -1 : 0) : x >> r;
+
+    if (true == is_rounding)
+    {
+        result += r - 1 >= 64 ? (x < 0 ? 1 : 0) : (int64_t)(((uint64_t)x >> (r - 1)) & 1U);
+    }
+
+    return (uint64_t)result & mask;
+}
+
+static uint64_t
+count_leading_zeros(const uint64_t value, const uint32_t esize)
+{
+    if (0U == value)
+    {
+        return esize;
+    }
+
+    return (uint64_t)__builtin_clzll(value) - (64U - esize);
+}
+
+static uint64_t
+reverse_bits(uint64_t value, const uint32_t esize)
+{
+    uint64_t result = 0U;
+
+    for (uint32_t i = 0U; i < esize; ++i)
+    {
+        result = (result << 1U) | (value & 1U);
+        value >>= 1U;
+    }
+
+    return result;
+}
+
+/// Polynomial multiply of two `esize`-bit values, keeping the low `result_bits` bits.
+static uint64_t
+polynomial_multiply(const uint64_t a,
+                    const uint64_t b,
+                    const uint32_t esize,
+                    const uint32_t result_bits)
+{
+    uint64_t result = 0U;
+
+    for (uint32_t i = 0U; i < esize; ++i)
+    {
+        if (0U != ((b >> i) & 1U))
+        {
+            result ^= a << i;
+        }
+    }
+
+    return result & mask_of(result_bits);
+}
+
+/// Evaluates the integer comparisons CMGT, CMGE, CMHI, CMHS, CMEQ and CMTST.
+static uint64_t
+compare_integers(const uint32_t kind, const uint64_t a, const uint64_t b, const uint32_t esize)
+{
+    bool holds = false;
+
+    switch (kind)
+    {
+        case 0U: // CMGT
+            holds = sign_extend(a, esize) > sign_extend(b, esize);
+            break;
+        case 1U: // CMGE
+            holds = sign_extend(a, esize) >= sign_extend(b, esize);
+            break;
+        case 2U: // CMHI
+            holds = a > b;
+            break;
+        case 3U: // CMHS
+            holds = a >= b;
+            break;
+        case 4U: // CMEQ
+            holds = a == b;
+            break;
+        case 5U: // CMTST
+            holds = 0U != (a & b);
+            break;
+        case 6U: // CMLE (zero)
+            holds = sign_extend(a, esize) <= sign_extend(b, esize);
+            break;
+        default: // CMLT (zero)
+            holds = sign_extend(a, esize) < sign_extend(b, esize);
+            break;
+    }
+
+    return true == holds ? mask_of(esize) : 0U;
+}
+
+/// The integer operations of the three same group. Returns false for encodings it does not
+/// implement. `accumulator` is the destination element for MLA, MLS, SABA, UABA.
+static bool
+integer_three_same_element(simd_t        *simd,
+                           const uint32_t u,
+                           const uint32_t opcode,
+                           const uint64_t a,
+                           const uint64_t b,
+                           const uint64_t accumulator,
+                           const uint32_t esize,
+                           uint64_t      *result)
+{
+    const uint64_t mask        = mask_of(esize);
+    const bool     is_unsigned = 1U == u;
+    const int64_t  x           = sign_extend(a, esize);
+    const int64_t  y           = sign_extend(b, esize);
+
+    switch (opcode)
+    {
+        case 0x00U: // SHADD, UHADD
+        case 0x02U: // SRHADD, URHADD
+        case 0x04U: // SHSUB, UHSUB
+        {
+            const uint64_t round = 0x02U == opcode ? 1U : 0U;
+
+            if (0x04U == opcode)
+            {
+                *result = (true == is_unsigned ? (a - b) >> 1U : (uint64_t)((x - y) >> 1)) & mask;
+
+                // a - b needs esize + 1 bits; for 64-bit elements recover the borrow.
+                if (64U == esize)
+                {
+                    const uint64_t half = (a >> 1U) - (b >> 1U) - ((~a & b) & 1U);
+                    *result             = true == is_unsigned
+                                              ? half
+                                              : (uint64_t)((x >> 1) - (y >> 1) - (int64_t)((~a & b) & 1U));
+                }
+
+                return true;
+            }
+
+            // (a + b + round) >> 1 without overflow.
+            *result = true == is_unsigned
+                          ? (a >> 1U) + (b >> 1U) + (((a & 1U) + (b & 1U) + round) >> 1U)
+                          : (uint64_t)((x >> 1) + (y >> 1)
+                                       + (int64_t)(((a & 1U) + (b & 1U) + round) >> 1U));
+            *result &= mask;
+            return true;
+        }
+        case 0x01U: // SQADD, UQADD
+            *result = saturating_add(simd, a, b, esize, is_unsigned, false);
+            return true;
+        case 0x05U: // SQSUB, UQSUB
+            *result = saturating_add(simd, a, b, esize, is_unsigned, true);
+            return true;
+        case 0x06U: // CMGT, CMHI
+            *result = compare_integers(true == is_unsigned ? 2U : 0U, a, b, esize);
+            return true;
+        case 0x07U: // CMGE, CMHS
+            *result = compare_integers(true == is_unsigned ? 3U : 1U, a, b, esize);
+            return true;
+        case 0x08U: // SSHL, USHL
+        case 0x09U: // SQSHL, UQSHL
+        case 0x0AU: // SRSHL, URSHL
+        case 0x0BU: // SQRSHL, UQRSHL
+            *result = shift_element(simd,
+                                    a,
+                                    esize,
+                                    sign_extend(b & 0xFFU, 8U),
+                                    is_unsigned,
+                                    0U != (opcode & 0x2U),
+                                    0U != (opcode & 0x1U),
+                                    false);
+            return true;
+        case 0x0CU: // SMAX, UMAX
+            *result = (true == is_unsigned ? a > b : x > y) ? a : b;
+            return true;
+        case 0x0DU: // SMIN, UMIN
+            *result = (true == is_unsigned ? a < b : x < y) ? a : b;
+            return true;
+        case 0x0EU: // SABD, UABD
+        case 0x0FU: // SABA, UABA
+        {
+            const bool     is_a_larger = true == is_unsigned ? a > b : x > y;
+            const uint64_t difference  = (true == is_a_larger ? a - b : b - a) & mask;
+            *result = 0x0FU == opcode ? (accumulator + difference) & mask : difference;
+            return true;
+        }
+        case 0x10U: // ADD, SUB
+            *result = (true == is_unsigned ? a - b : a + b) & mask;
+            return true;
+        case 0x11U: // CMTST, CMEQ
+            *result = compare_integers(true == is_unsigned ? 4U : 5U, a, b, esize);
+            return true;
+        case 0x12U: // MLA, MLS
+            *result = (true == is_unsigned ? accumulator - a * b : accumulator + a * b) & mask;
+            return true;
+        case 0x13U: // MUL, PMUL
+            *result
+                = true == is_unsigned ? polynomial_multiply(a, b, esize, esize) : (a * b) & mask;
+            return true;
+        default:
+            return false;
+    }
+}
+
+/// Returns true if the three same `opcode` with `u` exists in the Advanced SIMD scalar group
+/// for `size`.
+static bool
+is_scalar_three_same(const uint32_t u, const uint32_t opcode, const uint32_t size)
+{
+    switch (opcode)
+    {
+        case 0x01U: // SQADD, UQADD
+        case 0x05U: // SQSUB, UQSUB
+        case 0x09U: // SQSHL, UQSHL
+        case 0x0BU: // SQRSHL, UQRSHL
+            return true;
+        case 0x06U: // CMGT, CMHI
+        case 0x07U: // CMGE, CMHS
+        case 0x08U: // SSHL, USHL
+        case 0x0AU: // SRSHL, URSHL
+        case 0x10U: // ADD, SUB
+        case 0x11U: // CMTST, CMEQ
+            return 3U == size;
+        default:
+            (void)u;
+            return false;
+    }
+}
+
+/// The floating-point operations of the three same group, by U, a (size bit 1) and opcode
+/// bits 2:0 of the 11xxx opcodes. Returns false for encodings it does not implement.
+static bool
+float_three_same_operation(const uint32_t         u,
+                           const uint32_t         a,
+                           const uint32_t         opcode,
+                           bal_float_operation_t *operation,
+                           bool                  *is_pairwise,
+                           bool                  *is_accumulate)
+{
+    *is_pairwise       = false;
+    *is_accumulate     = false;
+    const uint32_t key = (u << 4U) | (a << 3U) | (opcode & 0x7U);
+
+    switch (key)
+    {
+        case 0x00U:
+            *operation = BAL_FLOAT_MAXIMUM_NUMBER;
+            return true;
+        case 0x01U:
+            *operation     = BAL_FLOAT_MULTIPLY_ADD;
+            *is_accumulate = true;
+            return true;
+        case 0x02U:
+            *operation = BAL_FLOAT_ADD;
+            return true;
+        case 0x03U:
+            *operation = BAL_FLOAT_MULTIPLY_EXTENDED;
+            return true;
+        case 0x04U:
+            *operation = BAL_FLOAT_COMPARE_EQUAL;
+            return true;
+        case 0x06U:
+            *operation = BAL_FLOAT_MAXIMUM;
+            return true;
+        case 0x07U:
+            *operation = BAL_FLOAT_RECIPROCAL_STEP;
+            return true;
+        case 0x08U:
+            *operation = BAL_FLOAT_MINIMUM_NUMBER;
+            return true;
+        case 0x09U: // FMLS: the multiply-add of a negated first operand.
+            *operation     = BAL_FLOAT_MULTIPLY_ADD;
+            *is_accumulate = true;
+            return true;
+        case 0x0AU:
+            *operation = BAL_FLOAT_SUBTRACT;
+            return true;
+        case 0x0EU:
+            *operation = BAL_FLOAT_MINIMUM;
+            return true;
+        case 0x0FU:
+            *operation = BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP;
+            return true;
+        case 0x10U:
+            *operation   = BAL_FLOAT_MAXIMUM_NUMBER;
+            *is_pairwise = true;
+            return true;
+        case 0x12U:
+            *operation   = BAL_FLOAT_ADD;
+            *is_pairwise = true;
+            return true;
+        case 0x13U:
+            *operation = BAL_FLOAT_MULTIPLY;
+            return true;
+        case 0x14U:
+            *operation = BAL_FLOAT_COMPARE_GREATER_EQUAL;
+            return true;
+        case 0x15U:
+            *operation = BAL_FLOAT_ABSOLUTE_COMPARE_GREATER_EQUAL;
+            return true;
+        case 0x16U:
+            *operation   = BAL_FLOAT_MAXIMUM;
+            *is_pairwise = true;
+            return true;
+        case 0x17U:
+            *operation = BAL_FLOAT_DIVIDE;
+            return true;
+        case 0x18U:
+            *operation   = BAL_FLOAT_MINIMUM_NUMBER;
+            *is_pairwise = true;
+            return true;
+        case 0x1AU:
+            *operation = BAL_FLOAT_ABSOLUTE_DIFFERENCE;
+            return true;
+        case 0x1CU:
+            *operation = BAL_FLOAT_COMPARE_GREATER;
+            return true;
+        case 0x1DU:
+            *operation = BAL_FLOAT_ABSOLUTE_COMPARE_GREATER;
+            return true;
+        case 0x1EU:
+            *operation   = BAL_FLOAT_MINIMUM;
+            *is_pairwise = true;
+            return true;
+        default:
+            return false;
+    }
+}
+
+/// Applies a floating-point element operation, with FMLS negating the first multiplicand.
+static uint64_t
+float_operation(simd_t                     *simd,
+                const bool                  is_double,
+                const bal_float_operation_t operation,
+                const bool                  negate_first,
+                uint64_t                    a,
+                const uint64_t              b,
+                const uint64_t              accumulator)
+{
+    if (true == negate_first)
+    {
+        a ^= true == is_double ? 0x8000000000000000ULL : 0x80000000ULL;
+    }
+
+    return bal_float_element(
+        simd->cpu->fpcr, &simd->flags, is_double, operation, a, b, accumulator);
+}
+
+/// Advanced SIMD three same, vector and scalar.
+static bool
+three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t rm       = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode   = (instruction >> 11U) & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = true == is_scalar ? 0U : (1U == q ? 128U : 64U);
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t m        = read_vector(simd, rm);
+    const vector_t d        = read_vector(simd, rd);
+    vector_t       result   = { { 0U, 0U } };
+
+    // Logical operations: AND, BIC, ORR, ORN, EOR, BSL, BIT, BIF.
+    if (0x03U == opcode)
+    {
+        if (true == is_scalar)
+        {
+            return false;
+        }
+
+        for (uint32_t i = 0U; i < 2U; ++i)
+        {
+            const uint64_t x = n.d[i];
+            const uint64_t y = m.d[i];
+            const uint64_t z = d.d[i];
+            uint64_t       r = 0U;
+
+            switch ((u << 2U) | size)
+            {
+                case 0U:
+                    r = x & y;
+                    break;
+                case 1U:
+                    r = x & ~y;
+                    break;
+                case 2U:
+                    r = x | y;
+                    break;
+                case 3U:
+                    r = x | ~y;
+                    break;
+                case 4U:
+                    r = x ^ y;
+                    break;
+                case 5U: // BSL: d selects between n and m.
+                    r = (z & x) | (~z & y);
+                    break;
+                case 6U: // BIT: insert n where m is set.
+                    r = (x & y) | (z & ~y);
+                    break;
+                default: // BIF: insert n where m is clear.
+                    r = (z & y) | (x & ~y);
+                    break;
+            }
+
+            result.d[i] = r;
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // Floating point: opcode 11xxx, with size<0> selecting double precision.
+    if (0x18U == (opcode & 0x18U))
+    {
+        const bool            is_double     = 1U == (size & 1U);
+        const uint32_t        esize         = true == is_double ? 64U : 32U;
+        bal_float_operation_t operation     = BAL_FLOAT_ADD;
+        bool                  is_pairwise   = false;
+        bool                  is_accumulate = false;
+
+        if (false
+            == float_three_same_operation(
+                u, size >> 1U, opcode, &operation, &is_pairwise, &is_accumulate))
+        {
+            return false;
+        }
+
+        if (true == is_scalar)
+        {
+            // FMULX, FCMEQ, FRECPS, FRSQRTS, FCMGE, FACGE, FABD, FCMGT and FACGT.
+            const bool is_allowed = BAL_FLOAT_MULTIPLY_EXTENDED == operation
+                                    || BAL_FLOAT_RECIPROCAL_STEP == operation
+                                    || BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP == operation
+                                    || BAL_FLOAT_ABSOLUTE_DIFFERENCE == operation
+                                    || operation >= BAL_FLOAT_COMPARE_EQUAL;
+
+            if (false == is_allowed || true == is_pairwise)
+            {
+                return false;
+            }
+
+            set_element(&result,
+                        0U,
+                        esize,
+                        float_operation(simd,
+                                        is_double,
+                                        operation,
+                                        false,
+                                        get_element(&n, 0U, esize),
+                                        get_element(&m, 0U, esize),
+                                        0U));
+            write_vector(simd, rd, result, esize);
+            return true;
+        }
+
+        if (true == is_double && 0U == q)
+        {
+            return false;
+        }
+
+        const uint32_t elements     = datasize / esize;
+        const bool     negate_first = true == is_accumulate && 1U == (size >> 1U);
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            uint64_t a = 0U;
+            uint64_t b = 0U;
+
+            if (true == is_pairwise)
+            {
+                // Pairs of adjacent elements of m:n.
+                const uint32_t first = 2U * e;
+                a                    = first < elements ? get_element(&n, first, esize)
+                                                        : get_element(&m, first - elements, esize);
+                b                    = first + 1U < elements ? get_element(&n, first + 1U, esize)
+                                                             : get_element(&m, first + 1U - elements, esize);
+            }
+            else
+            {
+                a = get_element(&n, e, esize);
+                b = get_element(&m, e, esize);
+            }
+
+            set_element(
+                &result,
+                e,
+                esize,
+                float_operation(
+                    simd, is_double, operation, negate_first, a, b, get_element(&d, e, esize)));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    const uint32_t esize = 8U << size;
+
+    if (true == is_scalar)
+    {
+        if (false == is_scalar_three_same(u, opcode, size))
+        {
+            return false;
+        }
+
+        uint64_t value = 0U;
+
+        if (false
+            == integer_three_same_element(simd,
+                                          u,
+                                          opcode,
+                                          get_element(&n, 0U, esize),
+                                          get_element(&m, 0U, esize),
+                                          0U,
+                                          esize,
+                                          &value))
+        {
+            return false;
+        }
+
+        set_element(&result, 0U, esize, value);
+        write_vector(simd, rd, result, esize);
+        return true;
+    }
+
+    if (3U == size && 0U == q)
+    {
+        return false;
+    }
+
+    const uint32_t elements = datasize / esize;
+
+    // Pairwise integer operations: SMAXP, SMINP, UMAXP, UMINP and ADDP.
+    if (opcode >= 0x14U && opcode <= 0x17U)
+    {
+        if (0x16U == opcode || (0x17U == opcode && 1U == u))
+        {
+            return false; // SQDMULH, SQRDMULH and the U = 1 form of ADDP are not implemented.
+        }
+
+        if (3U == size && opcode != 0x17U)
+        {
+            return false;
+        }
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint32_t first = 2U * e;
+            const uint64_t a     = first < elements ? get_element(&n, first, esize)
+                                                    : get_element(&m, first - elements, esize);
+            const uint64_t b     = first + 1U < elements
+                                       ? get_element(&n, first + 1U, esize)
+                                       : get_element(&m, first + 1U - elements, esize);
+            uint64_t       value = 0U;
+
+            if (0x17U == opcode)
+            {
+                value = (a + b) & mask_of(esize);
+            }
+            else
+            {
+                const bool is_maximum = 0x14U == opcode;
+                const bool a_wins
+                    = 1U == u ? (is_maximum ? a > b : a < b)
+                              : (is_maximum ? sign_extend(a, esize) > sign_extend(b, esize)
+                                            : sign_extend(a, esize) < sign_extend(b, esize));
+                value = true == a_wins ? a : b;
+            }
+
+            set_element(&result, e, esize, value);
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // MUL, MLA, MLS, the halving additions, the maxima and minima and the absolute differences
+    // have no 64-bit form; PMUL only works on bytes.
+    const bool is_without_64bit = 0x12U == opcode || 0x13U == opcode || 0x00U == opcode
+                                  || 0x02U == opcode || 0x04U == opcode
+                                  || (opcode >= 0x0CU && opcode <= 0x0FU);
+
+    if ((true == is_without_64bit && 3U == size) || (0x13U == opcode && 1U == u && size != 0U))
+    {
+        return false;
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        uint64_t value = 0U;
+
+        if (false
+            == integer_three_same_element(simd,
+                                          u,
+                                          opcode,
+                                          get_element(&n, e, esize),
+                                          get_element(&m, e, esize),
+                                          get_element(&d, e, esize),
+                                          esize,
+                                          &value))
+        {
+            return false;
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_vector(simd, rd, result, datasize);
+    return true;
+}
+
+/// The FRINT* and FCVT* rounding mode of a two-register miscellaneous opcode.
+static uint32_t
+misc_rounding_mode(const uint32_t u, const uint32_t a, const uint32_t opcode, const bal_cpu_t *cpu)
+{
+    // opcode 11000/11001: FRINTN, FRINTM (a = 0), FRINTP, FRINTZ (a = 1); U = 1 gives FRINTA,
+    // FRINTX (a = 0) and FRINTI (a = 1, opcode 11001). The FCVT forms use the same pattern.
+    const uint32_t low = opcode & 0x1U;
+
+    if (0x1CU == opcode) // FCVTAS, FCVTAU
+    {
+        return 4U;
+    }
+
+    if (0U == u)
+    {
+        return 0U == a ? (0U == low ? 0U : 2U) : (0U == low ? 1U : 3U);
+    }
+
+    if (0x18U == (opcode & 0x1EU))
+    {
+        if (0U == a)
+        {
+            return 0U == low ? 4U : (uint32_t)((cpu->fpcr >> 22U) & 0x3U); // FRINTA, FRINTX
+        }
+
+        return (uint32_t)((cpu->fpcr >> 22U) & 0x3U); // FRINTI
+    }
+
+    return 0U == a ? (0U == low ? 0U : 2U) : (0U == low ? 1U : 3U);
+}
+
+/// Advanced SIMD two-register miscellaneous, vector and scalar.
+static bool
+two_register_misc(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode   = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = true == is_scalar ? 64U : (1U == q ? 128U : 64U);
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t d        = read_vector(simd, rd);
+    vector_t       result   = { { 0U, 0U } };
+    const uint64_t fpcr     = simd->cpu->fpcr;
+
+    // Floating point: opcodes 01100-01111 with size<1> = 1 and 1x0xx-11111.
+    const bool is_float = opcode >= 0x16U || (opcode >= 0x0CU && opcode <= 0x0FU && size >= 2U);
+
+    if (true == is_float && opcode != 0x16U && opcode != 0x17U)
+    {
+        const bool     is_double = 1U == (size & 1U);
+        const uint32_t a         = size >> 1U;
+        const uint32_t esize     = true == is_double ? 64U : 32U;
+        const uint32_t elements  = true == is_scalar ? 1U : datasize / esize;
+
+        if (false == is_scalar && true == is_double && 0U == q)
+        {
+            return false;
+        }
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t x     = get_element(&n, e, esize);
+            uint64_t       value = 0U;
+
+            switch ((u << 6U) | (a << 5U) | opcode)
+            {
+                case 0x2CU: // FCMGT #0
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER, x, 0U, 0U);
+                    break;
+                case 0x2DU: // FCMEQ #0
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_EQUAL, x, 0U, 0U);
+                    break;
+                case 0x2EU: // FCMLT #0: 0 > x
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER, 0U, x, 0U);
+                    break;
+                case 0x6CU: // FCMGE #0
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER_EQUAL, x, 0U, 0U);
+                    break;
+                case 0x6DU: // FCMLE #0: 0 >= x
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER_EQUAL, 0U, x, 0U);
+                    break;
+                case 0x2FU: // FABS
+                    if (true == is_scalar)
+                    {
+                        return false;
+                    }
+                    value = x & (mask_of(esize) >> 1U);
+                    break;
+                case 0x6FU: // FNEG
+                    if (true == is_scalar)
+                    {
+                        return false;
+                    }
+                    value = x ^ (1ULL << (esize - 1U));
+                    break;
+                case 0x7FU: // FSQRT
+                    if (true == is_scalar)
+                    {
+                        return false;
+                    }
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_SQUARE_ROOT, x, 0U, 0U);
+                    break;
+                case 0x3DU: // FRECPE
+                    value = bal_float_element(
+                        fpcr, &simd->flags, is_double, BAL_FLOAT_RECIPROCAL_ESTIMATE, x, 0U, 0U);
+                    break;
+                case 0x7DU: // FRSQRTE
+                    value = bal_float_element(fpcr,
+                                              &simd->flags,
+                                              is_double,
+                                              BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE,
+                                              x,
+                                              0U,
+                                              0U);
+                    break;
+                case 0x18U: // FRINTN
+                case 0x19U: // FRINTM
+                case 0x38U: // FRINTP
+                case 0x39U: // FRINTZ
+                case 0x58U: // FRINTA
+                case 0x59U: // FRINTX
+                case 0x79U: // FRINTI
+                    if (true == is_scalar)
+                    {
+                        return false;
+                    }
+                    value = bal_float_round_element(fpcr,
+                                                    &simd->flags,
+                                                    is_double,
+                                                    x,
+                                                    misc_rounding_mode(u, a, opcode, simd->cpu),
+                                                    0x59U == ((u << 6U) | (a << 5U) | opcode));
+                    break;
+                case 0x1AU: // FCVTNS
+                case 0x1BU: // FCVTMS
+                case 0x1CU: // FCVTAS
+                case 0x3AU: // FCVTPS
+                case 0x3BU: // FCVTZS
+                case 0x5AU: // FCVTNU
+                case 0x5BU: // FCVTMU
+                case 0x5CU: // FCVTAU
+                case 0x7AU: // FCVTPU
+                case 0x7BU: // FCVTZU
+                    value
+                        = bal_float_to_integer_element(fpcr,
+                                                       &simd->flags,
+                                                       is_double,
+                                                       x,
+                                                       0U,
+                                                       misc_rounding_mode(u, a, opcode, simd->cpu),
+                                                       1U == u,
+                                                       esize);
+                    break;
+                case 0x1DU: // SCVTF
+                case 0x5DU: // UCVTF
+                    value = bal_float_from_integer_element(
+                        fpcr, &simd->flags, is_double, x, 0U, 1U == u, esize);
+                    break;
+                default:
+                    return false;
+            }
+
+            set_element(&result, e, esize, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+        return true;
+    }
+
+    // FCVTN, FCVTN2 (double to single) and FCVTL, FCVTL2 (single to double).
+    if (0x16U == opcode || 0x17U == opcode)
+    {
+        if (true == is_scalar || 0U == u || 1U == u)
+        {
+            if (true == is_scalar || 1U == u || 0U == (size & 1U))
+            {
+                return false; // FCVTXN and the half precision forms are not implemented.
+            }
+        }
+
+        if (0x16U == opcode)
+        {
+            result = 1U == q ? d : result;
+
+            for (uint32_t e = 0U; e < 2U; ++e)
+            {
+                set_element(
+                    &result,
+                    2U * q + e,
+                    32U,
+                    bal_float_convert_element(fpcr, &simd->flags, false, get_element(&n, e, 64U)));
+            }
+
+            write_vector(simd, rd, result, 1U == q ? 128U : 64U);
+            return true;
+        }
+
+        for (uint32_t e = 0U; e < 2U; ++e)
+        {
+            set_element(&result,
+                        e,
+                        64U,
+                        bal_float_convert_element(
+                            fpcr, &simd->flags, true, get_element(&n, 2U * q + e, 32U)));
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    const uint32_t esize    = 8U << size;
+    const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+    // Narrowing: XTN, SQXTN, UQXTN, SQXTUN write the lower or (Q = 1) upper half.
+    if (0x12U == opcode || 0x14U == opcode)
+    {
+        if (3U == size || (0x12U == opcode && 0U == u && true == is_scalar))
+        {
+            return false;
+        }
+
+        const uint32_t narrow = esize;
+        const uint32_t wide   = esize * 2U;
+        const uint32_t count  = true == is_scalar ? 1U : 64U / narrow;
+        const uint32_t base   = true == is_scalar ? 0U : q * count;
+        result                = 1U == q && false == is_scalar ? d : result;
+
+        for (uint32_t e = 0U; e < count; ++e)
+        {
+            const uint64_t x     = get_element(&n, e, wide);
+            uint64_t       value = 0U;
+
+            if (0x12U == opcode)
+            {
+                value = 0U == u ? x & mask_of(narrow) // XTN
+                                : saturate_signed_to_unsigned(
+                                      simd, sign_extend(x, wide), narrow); // SQXTUN
+            }
+            else
+            {
+                value = 0U == u ? saturate_signed(simd, sign_extend(x, wide), narrow) // SQXTN
+                                : saturate_unsigned(simd, x, narrow);                 // UQXTN
+            }
+
+            set_element(&result, base + e, narrow, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? narrow : (1U == q ? 128U : 64U));
+        return true;
+    }
+
+    // SHLL, SHLL2: widen and shift left by the element size.
+    if (0x13U == opcode && 1U == u)
+    {
+        if (true == is_scalar || 3U == size)
+        {
+            return false;
+        }
+
+        for (uint32_t e = 0U; e < 64U / esize; ++e)
+        {
+            set_element(
+                &result, e, esize * 2U, get_element(&n, q * (64U / esize) + e, esize) << esize);
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    // Pairwise add long: SADDLP, UADDLP, SADALP, UADALP.
+    if (0x02U == opcode || 0x06U == opcode)
+    {
+        if (true == is_scalar || 3U == size)
+        {
+            return false;
+        }
+
+        const uint32_t wide = esize * 2U;
+
+        for (uint32_t e = 0U; e < datasize / wide; ++e)
+        {
+            const uint64_t a = get_element(&n, 2U * e, esize);
+            const uint64_t b = get_element(&n, 2U * e + 1U, esize);
+            uint64_t       sum
+                = 1U == u ? a + b : (uint64_t)(sign_extend(a, esize) + sign_extend(b, esize));
+
+            if (0x06U == opcode)
+            {
+                sum += get_element(&d, e, wide);
+            }
+
+            set_element(&result, e, wide, sum & mask_of(wide));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // NOT (size 00) and RBIT (size 01) work on bytes whatever the size field says.
+    if (0x25U == ((u << 5U) | opcode))
+    {
+        if (true == is_scalar || size >= 2U)
+        {
+            return false;
+        }
+
+        for (uint32_t e = 0U; e < datasize / 8U; ++e)
+        {
+            const uint64_t x = get_element(&n, e, 8U);
+            set_element(&result, e, 8U, 0U == size ? ~x & 0xFFU : reverse_bits(x, 8U));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // The element-wise integer operations.
+    const bool is_64bit_only = true == is_scalar;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint64_t x     = get_element(&n, e, esize);
+        uint64_t       value = 0U;
+
+        switch ((u << 5U) | opcode)
+        {
+            case 0x00U: // REV64
+            case 0x20U: // REV32
+            case 0x01U: // REV16
+            {
+                const uint32_t key       = (u << 5U) | opcode;
+                const uint32_t container = 0x00U == key ? 64U : (0x01U == key ? 16U : 32U);
+
+                if (true == is_scalar || esize >= container)
+                {
+                    return false;
+                }
+
+                const uint32_t per_container = container / esize;
+                const uint32_t base          = (e / per_container) * per_container;
+                value = get_element(&n, base + (per_container - 1U - (e - base)), esize);
+                break;
+            }
+            case 0x04U: // CLS
+                if (true == is_scalar || 3U == size)
+                {
+                    return false;
+                }
+                value = count_leading_zeros(x ^ (0U - (x >> (esize - 1U)) & mask_of(esize)), esize)
+                        - 1U;
+                break;
+            case 0x24U: // CLZ
+                if (true == is_scalar || 3U == size)
+                {
+                    return false;
+                }
+                value = count_leading_zeros(x, esize);
+                break;
+            case 0x05U: // CNT
+                if (true == is_scalar || size != 0U)
+                {
+                    return false;
+                }
+                value = (uint64_t)__builtin_popcountll(x);
+                break;
+            case 0x07U: // SQABS
+            case 0x27U: // SQNEG
+            {
+                const int64_t signed_x   = sign_extend(x, esize);
+                const bool    is_minimum = signed_x == -(int64_t)(mask_of(esize) >> 1U) - 1;
+
+                if (true == is_minimum)
+                {
+                    // Both saturate the most negative value to the most positive one.
+                    simd->flags |= FPSR_QC;
+                    value = mask_of(esize) >> 1U;
+                    break;
+                }
+
+                value = 0U == u && signed_x >= 0 ? x : (0U - x) & mask_of(esize);
+                break;
+            }
+            case 0x08U: // CMGT #0
+            case 0x09U: // CMEQ #0
+            case 0x0AU: // CMLT #0
+            case 0x28U: // CMGE #0
+            case 0x29U: // CMLE #0
+            {
+                if (true == is_64bit_only && size != 3U)
+                {
+                    return false;
+                }
+
+                static const uint32_t KINDS[] = { 0U, 4U, 7U };
+                const uint32_t kind = 0U == u ? KINDS[opcode - 0x08U] : (0x08U == opcode ? 1U : 6U);
+                value               = compare_integers(kind, x, 0U, esize);
+                break;
+            }
+            case 0x0BU: // ABS
+            case 0x2BU: // NEG
+                if (true == is_64bit_only && size != 3U)
+                {
+                    return false;
+                }
+                value = 0x2BU == ((u << 5U) | opcode) || sign_extend(x, esize) < 0
+                            ? (0U - x) & mask_of(esize)
+                            : x;
+                break;
+            default:
+                return false;
+        }
+
+        if (false == is_scalar && 3U == size && 0U == q)
+        {
+            return false;
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+    return true;
+}
+
+/// Advanced SIMD across lanes.
+static bool
+across_lanes(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode   = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    vector_t       result   = { { 0U, 0U } };
+
+    // FMAXNMV, FMINNMV, FMAXV, FMINV: single precision, 4S only, reduced as a tree.
+    if (1U == u && (0x0CU == opcode || 0x0FU == opcode))
+    {
+        if (0U == q || 1U == (size & 1U))
+        {
+            return false;
+        }
+
+        const bool                  is_minimum = 1U == (size >> 1U);
+        const bal_float_operation_t operation
+            = 0x0CU == opcode ? (is_minimum ? BAL_FLOAT_MINIMUM_NUMBER : BAL_FLOAT_MAXIMUM_NUMBER)
+                              : (is_minimum ? BAL_FLOAT_MINIMUM : BAL_FLOAT_MAXIMUM);
+        const uint64_t fpcr = simd->cpu->fpcr;
+        const uint64_t low  = bal_float_element(fpcr,
+                                               &simd->flags,
+                                               false,
+                                               operation,
+                                               get_element(&n, 0U, 32U),
+                                               get_element(&n, 1U, 32U),
+                                               0U);
+        const uint64_t high = bal_float_element(fpcr,
+                                                &simd->flags,
+                                                false,
+                                                operation,
+                                                get_element(&n, 2U, 32U),
+                                                get_element(&n, 3U, 32U),
+                                                0U);
+        set_element(&result,
+                    0U,
+                    32U,
+                    bal_float_element(fpcr, &simd->flags, false, operation, low, high, 0U));
+        write_vector(simd, rd, result, 32U);
+        return true;
+    }
+
+    const uint32_t esize    = 8U << size;
+    const uint32_t elements = datasize / esize;
+
+    if (3U == size || (2U == size && 0U == q))
+    {
+        return false;
+    }
+
+    if (0x03U == opcode) // SADDLV, UADDLV
+    {
+        uint64_t sum = 0U;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t x = get_element(&n, e, esize);
+            sum += 1U == u ? x : (uint64_t)sign_extend(x, esize);
+        }
+
+        set_element(&result, 0U, esize * 2U, sum & mask_of(esize * 2U));
+        write_vector(simd, rd, result, esize * 2U);
+        return true;
+    }
+
+    if (opcode != 0x0AU && opcode != 0x1AU && !(0x1BU == opcode && 0U == u))
+    {
+        return false;
+    }
+
+    uint64_t accumulator = get_element(&n, 0U, esize);
+
+    for (uint32_t e = 1U; e < elements; ++e)
+    {
+        const uint64_t x = get_element(&n, e, esize);
+
+        if (0x1BU == opcode) // ADDV
+        {
+            accumulator = (accumulator + x) & mask_of(esize);
+            continue;
+        }
+
+        const bool is_maximum = 0x0AU == opcode;
+        const bool x_wins
+            = 1U == u ? (is_maximum ? x > accumulator : x < accumulator)
+                      : (is_maximum ? sign_extend(x, esize) > sign_extend(accumulator, esize)
+                                    : sign_extend(x, esize) < sign_extend(accumulator, esize));
+        accumulator = true == x_wins ? x : accumulator;
+    }
+
+    set_element(&result, 0U, esize, accumulator);
+    write_vector(simd, rd, result, esize);
+    return true;
+}
+
+/// Advanced SIMD copy: DUP, INS, SMOV, UMOV; and the scalar DUP (element).
+static bool
+copy(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q    = (instruction >> 30U) & 1U;
+    const uint32_t op   = (instruction >> 29U) & 1U;
+    const uint32_t imm5 = (instruction >> 16U) & 0x1FU;
+    const uint32_t imm4 = (instruction >> 11U) & 0xFU;
+    const uint32_t rn   = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd   = instruction & 0x1FU;
+
+    if (0U == (imm5 & 0xFU))
+    {
+        return false;
+    }
+
+    const uint32_t size     = (uint32_t)__builtin_ctz(imm5);
+    const uint32_t esize    = 8U << size;
+    const uint32_t index    = imm5 >> (size + 1U);
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    vector_t       result   = { { 0U, 0U } };
+
+    if (true == is_scalar)
+    {
+        set_element(&result, 0U, esize, get_element(&n, index, esize));
+        write_vector(simd, rd, result, esize);
+        return true;
+    }
+
+    if (1U == op)
+    {
+        // INS (element): Vd.T[index] = Vn.T[imm4 >> size].
+        if (0U == q)
+        {
+            return false;
+        }
+
+        result = read_vector(simd, rd);
+        set_element(&result, index, esize, get_element(&n, imm4 >> size, esize));
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    switch (imm4)
+    {
+        case 0x0U: // DUP (element)
+        case 0x1U: // DUP (general)
+        {
+            if (3U == size && 0U == q)
+            {
+                return false;
+            }
+
+            const uint64_t value = 0x0U == imm4 ? get_element(&n, index, esize)
+                                                : read_general(simd, rn) & mask_of(esize);
+
+            for (uint32_t e = 0U; e < datasize / esize; ++e)
+            {
+                set_element(&result, e, esize, value);
+            }
+
+            write_vector(simd, rd, result, datasize);
+            return true;
+        }
+        case 0x3U: // INS (general)
+            if (0U == q)
+            {
+                return false;
+            }
+
+            result = read_vector(simd, rd);
+            set_element(&result, index, esize, read_general(simd, rn));
+            write_vector(simd, rd, result, 128U);
+            return true;
+        case 0x5U: // SMOV
+        {
+            // Wd from a byte or halfword (Q = 0), Xd from up to a word (Q = 1).
+            if (size >= (1U == q ? 3U : 2U))
+            {
+                return false;
+            }
+
+            const int64_t value = sign_extend(get_element(&n, index, esize), esize);
+            write_general(simd, rd, 1U == q ? (uint64_t)value : (uint64_t)value & 0xFFFFFFFFU);
+            return true;
+        }
+        case 0x7U: // UMOV
+            if ((1U == q) != (3U == size))
+            {
+                return false;
+            }
+
+            write_general(simd, rd, get_element(&n, index, esize));
+            return true;
+        default:
+            return false;
+    }
+}
+
+/// Advanced SIMD modified immediate: MOVI, MVNI, ORR, BIC and FMOV (vector, immediate).
+static bool
+modified_immediate(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t op       = (instruction >> 29U) & 1U;
+    const uint32_t cmode    = (instruction >> 12U) & 0xFU;
+    const uint32_t o2       = (instruction >> 11U) & 1U;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint64_t imm8     = (((instruction >> 16U) & 0x7U) << 5U) | ((instruction >> 5U) & 0x1FU);
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    uint64_t       imm64    = 0U;
+    bool           is_orr   = false;
+    bool           is_bic   = false;
+
+    if (1U == o2 && !(0xFU == cmode && 0U == op))
+    {
+        return false;
+    }
+
+    switch (cmode >> 1U)
+    {
+        case 0U:
+        case 1U:
+        case 2U:
+        case 3U: // 32-bit shifted immediate
+        {
+            const uint64_t word = imm8 << (8U * (cmode >> 1U));
+            imm64               = word | (word << 32U);
+            is_orr              = 1U == (cmode & 1U) && 0U == op;
+            is_bic              = 1U == (cmode & 1U) && 1U == op;
+            break;
+        }
+        case 4U:
+        case 5U: // 16-bit shifted immediate
+        {
+            const uint64_t half = imm8 << (8U * ((cmode >> 1U) & 1U));
+            imm64               = half | (half << 16U) | (half << 32U) | (half << 48U);
+            is_orr              = 1U == (cmode & 1U) && 0U == op;
+            is_bic              = 1U == (cmode & 1U) && 1U == op;
+            break;
+        }
+        case 6U: // 32-bit shifting ones (MSL)
+        {
+            const uint64_t word
+                = 0U == (cmode & 1U) ? (imm8 << 8U) | 0xFFU : (imm8 << 16U) | 0xFFFFU;
+            imm64 = word | (word << 32U);
+            break;
+        }
+        default:
+            if (0xEU == cmode)
+            {
+                if (0U == op)
+                {
+                    imm64 = imm8 * 0x0101010101010101ULL;
+                }
+                else
+                {
+                    for (uint32_t i = 0U; i < 8U; ++i)
+                    {
+                        imm64 |= (0U != ((imm8 >> i) & 1U) ? 0xFFULL : 0U) << (8U * i);
+                    }
+                }
+            }
+            else if (0U == op)
+            {
+                if (1U == o2)
+                {
+                    return false; // FMOV (vector, immediate) with half precision.
+                }
+
+                // FMOV single: imm8 expanded as VFPExpandImm(imm8, 32), replicated.
+                const uint64_t b6   = (imm8 >> 6U) & 1U;
+                const uint64_t word = ((imm8 >> 7U) << 31U) | ((b6 ^ 1U) << 30U)
+                                      | ((0U - b6) & 0x1FU) << 25U | ((imm8 & 0x3FU) << 19U);
+                imm64 = word | (word << 32U);
+            }
+            else
+            {
+                if (0U == q)
+                {
+                    return false;
+                }
+
+                const uint64_t b6 = (imm8 >> 6U) & 1U;
+                imm64 = ((imm8 >> 7U) << 63U) | ((b6 ^ 1U) << 62U) | ((0U - b6) & 0xFFU) << 54U
+                        | ((imm8 & 0x3FU) << 48U);
+            }
+
+            break;
+    }
+
+    vector_t result = read_vector(simd, rd);
+
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        if (true == is_orr)
+        {
+            result.d[i] |= imm64;
+        }
+        else if (true == is_bic)
+        {
+            result.d[i] &= ~imm64;
+        }
+        else
+        {
+            // MVNI inverts the shifted and MSL forms.
+            const bool is_inverted = 1U == op && cmode < 0xEU;
+            result.d[i]            = true == is_inverted ? ~imm64 : imm64;
+        }
+    }
+
+    write_vector(simd, rd, result, datasize);
+    return true;
+}
+
+/// Advanced SIMD permute: UZP1, TRN1, ZIP1, UZP2, TRN2, ZIP2.
+static bool
+permute(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t rm       = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode   = (instruction >> 12U) & 0x7U;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const uint32_t esize    = 8U << size;
+    const uint32_t elements = datasize / esize;
+    const uint32_t part     = opcode >> 2U;
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t m        = read_vector(simd, rm);
+    vector_t       result   = { { 0U, 0U } };
+
+    if ((3U == size && 0U == q) || 0U == (opcode & 0x3U))
+    {
+        return false;
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        uint64_t value = 0U;
+
+        switch (opcode & 0x3U)
+        {
+            case 1U: // UZP: the even (UZP1) or odd (UZP2) elements of n:m.
+            {
+                const uint32_t source = 2U * e + part;
+                value                 = source < elements ? get_element(&n, source, esize)
+                                                          : get_element(&m, source - elements, esize);
+                break;
+            }
+            case 2U: // TRN
+                value = 0U == (e & 1U) ? get_element(&n, (e & ~1U) + part, esize)
+                                       : get_element(&m, (e & ~1U) + part, esize);
+                break;
+            default: // ZIP
+            {
+                const uint32_t source = part * (elements / 2U) + e / 2U;
+                value                 = 0U == (e & 1U) ? get_element(&n, source, esize)
+                                                       : get_element(&m, source, esize);
+                break;
+            }
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_vector(simd, rd, result, datasize);
+    return true;
+}
+
+/// EXT: bytes `imm4` onwards of m:n.
+static bool
+extract(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q      = (instruction >> 30U) & 1U;
+    const uint32_t rm     = (instruction >> 16U) & 0x1FU;
+    const uint32_t imm4   = (instruction >> 11U) & 0xFU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const uint32_t bytes  = 1U == q ? 16U : 8U;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t m      = read_vector(simd, rm);
+    vector_t       result = { { 0U, 0U } };
+
+    if (0U == q && imm4 >= 8U)
+    {
+        return false;
+    }
+
+    for (uint32_t e = 0U; e < bytes; ++e)
+    {
+        const uint32_t source = imm4 + e;
+        set_element(&result,
+                    e,
+                    8U,
+                    source < bytes ? get_element(&n, source, 8U)
+                                   : get_element(&m, source - bytes, 8U));
+    }
+
+    write_vector(simd, rd, result, bytes * 8U);
+    return true;
+}
+
+/// TBL and TBX with one to four table registers.
+static bool
+table_lookup(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q       = (instruction >> 30U) & 1U;
+    const uint32_t rm      = (instruction >> 16U) & 0x1FU;
+    const uint32_t length  = ((instruction >> 13U) & 0x3U) + 1U;
+    const bool     is_tbx  = 1U == ((instruction >> 12U) & 1U);
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd      = instruction & 0x1FU;
+    const uint32_t bytes   = 1U == q ? 16U : 8U;
+    const vector_t indices = read_vector(simd, rm);
+    vector_t       table[4];
+    vector_t       result = true == is_tbx ? read_vector(simd, rd) : (vector_t) { { 0U, 0U } };
+
+    if (0U != ((instruction >> 22U) & 0x3U))
+    {
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < length; ++i)
+    {
+        table[i] = read_vector(simd, (rn + i) % 32U);
+    }
+
+    for (uint32_t e = 0U; e < bytes; ++e)
+    {
+        const uint32_t index = (uint32_t)get_element(&indices, e, 8U);
+
+        if (index < length * 16U)
+        {
+            set_element(&result, e, 8U, get_element(&table[index / 16U], index % 16U, 8U));
+        }
+        else if (false == is_tbx)
+        {
+            set_element(&result, e, 8U, 0U);
+        }
+    }
+
+    write_vector(simd, rd, result, bytes * 8U);
+    return true;
+}
+
+/// Advanced SIMD shift by immediate, vector and scalar.
+static bool
+shift_immediate(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t immh     = (instruction >> 19U) & 0xFU;
+    const uint32_t immhb    = (instruction >> 16U) & 0x7FU;
+    const uint32_t opcode   = (instruction >> 11U) & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t d        = read_vector(simd, rd);
+    vector_t       result   = { { 0U, 0U } };
+
+    if (0U == immh)
+    {
+        return false;
+    }
+
+    const uint32_t size        = 31U - (uint32_t)__builtin_clz(immh);
+    const uint32_t esize       = 8U << size;
+    const uint32_t right_shift = 2U * esize - immhb;
+    const uint32_t left_shift  = immhb - esize;
+
+    // Narrowing and lengthening forms: SHRN, RSHRN, SQSHRN, SQRSHRN, SQSHRUN, SQRSHRUN, UQSHRN,
+    // UQRSHRN (opcode 1000x/1001x), and SSHLL, USHLL (opcode 10100).
+    if (opcode >= 0x10U && opcode <= 0x14U)
+    {
+        if (3U == size)
+        {
+            return false;
+        }
+
+        if (0x14U == opcode)
+        {
+            if (true == is_scalar)
+            {
+                return false;
+            }
+
+            for (uint32_t e = 0U; e < 64U / esize; ++e)
+            {
+                const uint64_t x = get_element(&n, q * (64U / esize) + e, esize);
+                const uint64_t widened
+                    = 1U == u ? x : (uint64_t)sign_extend(x, esize) & mask_of(esize * 2U);
+                set_element(&result, e, esize * 2U, (widened << left_shift) & mask_of(esize * 2U));
+            }
+
+            write_vector(simd, rd, result, 128U);
+            return true;
+        }
+
+        const bool     is_rounding = 1U == (opcode & 1U);
+        const uint32_t kind
+            = (u << 1U) | ((opcode >> 1U) & 1U); // 0 SHRN, 1 SQSHRN, 2 SQSHRUN, 3 UQSHRN
+        const uint32_t wide  = esize * 2U;
+        const uint32_t count = true == is_scalar ? 1U : 64U / esize;
+        const uint32_t base  = true == is_scalar ? 0U : q * count;
+
+        if (true == is_scalar && 0U == kind)
+        {
+            return false; // SHRN and RSHRN have no scalar form.
+        }
+
+        result = 1U == q && false == is_scalar ? d : result;
+
+        for (uint32_t e = 0U; e < count; ++e)
+        {
+            const uint64_t x            = get_element(&n, e, wide);
+            const bool     signed_input = kind != 3U;
+            // The right shift, 2 * esize - immh:immb, is at most the narrow element size.
+            const uint64_t shifted = shift_element(simd,
+                                                   x,
+                                                   wide,
+                                                   -(int64_t)right_shift,
+                                                   false == signed_input,
+                                                   is_rounding,
+                                                   false,
+                                                   false);
+            uint64_t       value   = 0U;
+
+            switch (kind)
+            {
+                case 0U:
+                    value = shifted & mask_of(esize);
+                    break;
+                case 1U:
+                    value = saturate_signed(simd, sign_extend(shifted, wide), esize);
+                    break;
+                case 2U:
+                    value = saturate_signed_to_unsigned(simd, sign_extend(shifted, wide), esize);
+                    break;
+                default:
+                    value = saturate_unsigned(simd, shifted, esize);
+                    break;
+            }
+
+            set_element(&result, base + e, esize, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : (1U == q ? 128U : 64U));
+        return true;
+    }
+
+    // Fixed-point conversions: SCVTF, UCVTF (opcode 11100) and FCVTZS, FCVTZU (11111).
+    if (0x1CU == opcode || 0x1FU == opcode)
+    {
+        if (size < 2U || (false == is_scalar && 3U == size && 0U == q))
+        {
+            return false; // The half precision forms are not implemented.
+        }
+
+        const bool     is_double = 3U == size;
+        const uint32_t elements  = true == is_scalar ? 1U : datasize / esize;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t x     = get_element(&n, e, esize);
+            const uint64_t value = 0x1CU == opcode ? bal_float_from_integer_element(simd->cpu->fpcr,
+                                                                                    &simd->flags,
+                                                                                    is_double,
+                                                                                    x,
+                                                                                    right_shift,
+                                                                                    1U == u,
+                                                                                    esize)
+                                                   : bal_float_to_integer_element(simd->cpu->fpcr,
+                                                                                  &simd->flags,
+                                                                                  is_double,
+                                                                                  x,
+                                                                                  right_shift,
+                                                                                  3U,
+                                                                                  1U == u,
+                                                                                  esize);
+            set_element(&result, e, esize, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+        return true;
+    }
+
+    if ((false == is_scalar && 3U == size && 0U == q)
+        || (true == is_scalar && 3U != size && opcode != 0x0EU && opcode != 0x0CU))
+    {
+        return false;
+    }
+
+    const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint64_t x     = get_element(&n, e, esize);
+        const uint64_t old   = get_element(&d, e, esize);
+        uint64_t       value = 0U;
+
+        switch (opcode)
+        {
+            case 0x00U: // SSHR, USHR
+            case 0x02U: // SSRA, USRA
+            case 0x04U: // SRSHR, URSHR
+            case 0x06U: // SRSRA, URSRA
+                value = shift_element(
+                    simd, x, esize, -(int64_t)right_shift, 1U == u, opcode >= 0x04U, false, false);
+                if (0x02U == opcode || 0x06U == opcode)
+                {
+                    value = (value + old) & mask_of(esize);
+                }
+                break;
+            case 0x08U: // SRI (U = 1)
+            {
+                if (0U == u)
+                {
+                    return false;
+                }
+
+                const uint64_t keep = right_shift >= esize
+                                          ? mask_of(esize)
+                                          : ~(mask_of(esize) >> right_shift) & mask_of(esize);
+                value               = (old & keep) | (right_shift >= esize ? 0U : x >> right_shift);
+                break;
+            }
+            case 0x0AU: // SHL (U = 0), SLI (U = 1)
+            {
+                const uint64_t shifted = (x << left_shift) & mask_of(esize);
+                value = 0U == u ? shifted : (old & ((1ULL << left_shift) - 1U)) | shifted;
+                break;
+            }
+            case 0x0CU: // SQSHLU (U = 1)
+                if (0U == u)
+                {
+                    return false;
+                }
+                value
+                    = shift_element(simd, x, esize, (int64_t)left_shift, false, false, true, true);
+                break;
+            case 0x0EU: // SQSHL, UQSHL (immediate)
+                value = shift_element(
+                    simd, x, esize, (int64_t)left_shift, 1U == u, false, true, false);
+                break;
+            default:
+                return false;
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+    return true;
+}
+
+/// Advanced SIMD vector x indexed element, vector and scalar: FMUL, FMLA, FMLS, FMULX and
+/// MUL, MLA, MLS, SMULL, UMULL, SMLAL, UMLAL, SMLSL, UMLSL.
+static bool
+indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t l        = (instruction >> 21U) & 1U;
+    const uint32_t m_bit    = (instruction >> 20U) & 1U;
+    const uint32_t rm_low   = (instruction >> 16U) & 0xFU;
+    const uint32_t opcode   = (instruction >> 12U) & 0xFU;
+    const uint32_t h        = (instruction >> 11U) & 1U;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t d        = read_vector(simd, rd);
+    vector_t       result   = { { 0U, 0U } };
+
+    // Floating point: FMLA (0001), FMLS (0101), FMUL (1001, U = 0), FMULX (1001, U = 1).
+    if (1U == (opcode & 0x3U) && opcode != 0xDU)
+    {
+        if (size < 2U)
+        {
+            return false; // The half precision forms are not implemented.
+        }
+
+        const bool     is_double = 3U == size;
+        const uint32_t esize     = true == is_double ? 64U : 32U;
+
+        if ((true == is_double && 1U == l) || (false == is_scalar && true == is_double && 0U == q)
+            || (1U == u && opcode != 0x9U))
+        {
+            return false;
+        }
+
+        const uint32_t index    = true == is_double ? h : (h << 1U) | l;
+        const uint32_t rm       = (m_bit << 4U) | rm_low;
+        const vector_t m        = read_vector(simd, rm);
+        const uint64_t element  = get_element(&m, index, esize);
+        const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t a     = get_element(&n, e, esize);
+            uint64_t       value = 0U;
+
+            if (0x9U == opcode)
+            {
+                value = float_operation(simd,
+                                        is_double,
+                                        1U == u ? BAL_FLOAT_MULTIPLY_EXTENDED : BAL_FLOAT_MULTIPLY,
+                                        false,
+                                        a,
+                                        element,
+                                        0U);
+            }
+            else
+            {
+                value = float_operation(simd,
+                                        is_double,
+                                        BAL_FLOAT_MULTIPLY_ADD,
+                                        0x5U == opcode,
+                                        a,
+                                        element,
+                                        get_element(&d, e, esize));
+            }
+
+            set_element(&result, e, esize, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+        return true;
+    }
+
+    if (true == is_scalar || 0U == size || 3U == size)
+    {
+        return false;
+    }
+
+    const uint32_t esize   = 8U << size;
+    const uint32_t index   = 1U == size ? (h << 2U) | (l << 1U) | m_bit : (h << 1U) | l;
+    const uint32_t rm      = 1U == size ? rm_low : (m_bit << 4U) | rm_low;
+    const vector_t m       = read_vector(simd, rm);
+    const uint64_t element = get_element(&m, index, esize);
+
+    // MUL (U = 0, 1000), MLA (U = 1, 0000), MLS (U = 1, 0100).
+    if ((0U == u && 0x8U == opcode) || (1U == u && (0x0U == opcode || 0x4U == opcode)))
+    {
+        for (uint32_t e = 0U; e < datasize / esize; ++e)
+        {
+            const uint64_t product = get_element(&n, e, esize) * element;
+            const uint64_t old     = get_element(&d, e, esize);
+            const uint64_t value
+                = 0x8U == opcode ? product : (0x0U == opcode ? old + product : old - product);
+            set_element(&result, e, esize, value & mask_of(esize));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // SMULL, UMULL (1010), SMLAL, UMLAL (0010), SMLSL, UMLSL (0110), with the "2" forms taking
+    // the upper half of n.
+    if (0xAU == opcode || 0x2U == opcode || 0x6U == opcode)
+    {
+        const uint32_t wide     = esize * 2U;
+        const uint32_t elements = 64U / esize;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t a = get_element(&n, q * elements + e, esize);
+            const uint64_t product
+                = 1U == u ? a * element
+                          : (uint64_t)(sign_extend(a, esize) * sign_extend(element, esize));
+            const uint64_t old = get_element(&d, e, wide);
+            const uint64_t value
+                = 0xAU == opcode ? product : (0x2U == opcode ? old + product : old - product);
+            set_element(&result, e, wide, value & mask_of(wide));
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    return false;
+}
+
+/// Advanced SIMD three different: the long, wide and narrow additions, subtractions and
+/// multiplications.
+static bool
+three_different(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q      = (instruction >> 30U) & 1U;
+    const uint32_t u      = (instruction >> 29U) & 1U;
+    const uint32_t size   = (instruction >> 22U) & 0x3U;
+    const uint32_t rm     = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode = (instruction >> 12U) & 0xFU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t m      = read_vector(simd, rm);
+    const vector_t d      = read_vector(simd, rd);
+    vector_t       result = { { 0U, 0U } };
+
+    if (3U == size)
+    {
+        return false;
+    }
+
+    const uint32_t esize    = 8U << size;
+    const uint32_t wide     = esize * 2U;
+    const uint32_t elements = 64U / esize;
+    const uint32_t part     = q * elements;
+
+    // ADDHN, RADDHN, SUBHN, RSUBHN: the high halves of wide sums, written to the lower or upper
+    // half of the destination.
+    if (0x4U == opcode || 0x6U == opcode)
+    {
+        result = 1U == q ? d : result;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t a     = get_element(&n, e, wide);
+            const uint64_t b     = get_element(&m, e, wide);
+            uint64_t       value = 0x4U == opcode ? a + b : a - b;
+
+            if (1U == u)
+            {
+                value += 1ULL << (esize - 1U);
+            }
+
+            set_element(&result, part + e, esize, (value & mask_of(wide)) >> esize);
+        }
+
+        write_vector(simd, rd, result, 1U == q ? 128U : 64U);
+        return true;
+    }
+
+    if (0x9U == opcode || 0xBU == opcode || 0xDU == opcode || 0xFU == opcode
+        || (0xEU == opcode && (1U == u || size != 0U)))
+    {
+        return false; // The saturating doubling multiplies and the wider PMULL are not implemented.
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint64_t raw_b = get_element(&m, part + e, esize);
+        const uint64_t b     = 1U == u ? raw_b : (uint64_t)sign_extend(raw_b, esize);
+        const uint64_t old   = get_element(&d, e, wide);
+        uint64_t       a     = 0U;
+
+        // The W forms take a wide first operand.
+        if (0x1U == opcode || 0x3U == opcode)
+        {
+            a = get_element(&n, e, wide);
+        }
+        else
+        {
+            const uint64_t raw_a = get_element(&n, part + e, esize);
+            a                    = 1U == u ? raw_a : (uint64_t)sign_extend(raw_a, esize);
+        }
+
+        uint64_t value = 0U;
+
+        switch (opcode)
+        {
+            case 0x0U: // SADDL, UADDL
+            case 0x1U: // SADDW, UADDW
+                value = a + b;
+                break;
+            case 0x2U: // SSUBL, USUBL
+            case 0x3U: // SSUBW, USUBW
+                value = a - b;
+                break;
+            case 0x5U: // SABAL, UABAL
+            case 0x7U: // SABDL, UABDL
+            {
+                const bool     is_a_larger = 1U == u ? a > b : (int64_t)a > (int64_t)b;
+                const uint64_t difference  = true == is_a_larger ? a - b : b - a;
+                value                      = 0x5U == opcode ? old + difference : difference;
+                break;
+            }
+            case 0x8U: // SMLAL, UMLAL
+                value = old + a * b;
+                break;
+            case 0xAU: // SMLSL, UMLSL
+                value = old - a * b;
+                break;
+            case 0xCU: // SMULL, UMULL
+                value = a * b;
+                break;
+            default: // PMULL with bytes
+                value = polynomial_multiply(get_element(&n, part + e, esize), raw_b, esize, wide);
+                break;
+        }
+
+        set_element(&result, e, wide, value & mask_of(wide));
+    }
+
+    write_vector(simd, rd, result, 128U);
+    return true;
+}
+
+/// Advanced SIMD scalar pairwise: ADDP and the floating-point FADDP, FMAXP, FMINP, FMAXNMP,
+/// FMINNMP on the two elements of a vector.
+static bool
+scalar_pairwise(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t u      = (instruction >> 29U) & 1U;
+    const uint32_t size   = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    vector_t       result = { { 0U, 0U } };
+
+    if (0U == u)
+    {
+        if (0x1BU != opcode || size != 3U)
+        {
+            return false; // Only ADDP; the U = 0 floating-point forms are half precision.
+        }
+
+        set_element(&result, 0U, 64U, n.d[0] + n.d[1]);
+        write_vector(simd, rd, result, 64U);
+        return true;
+    }
+
+    const bool            is_double = 1U == (size & 1U);
+    const uint32_t        esize     = true == is_double ? 64U : 32U;
+    const bool            is_second = 1U == (size >> 1U);
+    bal_float_operation_t operation = BAL_FLOAT_ADD;
+
+    switch (opcode)
+    {
+        case 0x0CU:
+            operation = true == is_second ? BAL_FLOAT_MINIMUM_NUMBER : BAL_FLOAT_MAXIMUM_NUMBER;
+            break;
+        case 0x0DU:
+            if (true == is_second)
+            {
+                return false;
+            }
+            operation = BAL_FLOAT_ADD;
+            break;
+        case 0x0FU:
+            operation = true == is_second ? BAL_FLOAT_MINIMUM : BAL_FLOAT_MAXIMUM;
+            break;
+        default:
+            return false;
+    }
+
+    set_element(&result,
+                0U,
+                esize,
+                float_operation(simd,
+                                is_double,
+                                operation,
+                                false,
+                                get_element(&n, 0U, esize),
+                                get_element(&n, 1U, esize),
+                                0U));
+    write_vector(simd, rd, result, esize);
+    return true;
+}
+
+/// Decodes and executes one instruction. Returns false if it is not implemented.
+static bool
+execute(simd_t *simd, const uint32_t instruction)
+{
+    // Advanced SIMD scalar: 01 U 1111x ...
+    if (0x5E000000U == (instruction & 0xDE000000U))
+    {
+        if (0x5E200400U == (instruction & 0xDF200400U))
+        {
+            return three_same(simd, instruction, true);
+        }
+
+        if (0x5E200800U == (instruction & 0xDF3E0C00U))
+        {
+            return two_register_misc(simd, instruction, true);
+        }
+
+        if (0x5E300800U == (instruction & 0xDF3E0C00U))
+        {
+            return scalar_pairwise(simd, instruction);
+        }
+
+        if (0x5E000400U == (instruction & 0xFFE0FC00U))
+        {
+            return copy(simd, instruction, true);
+        }
+
+        if (0x5F000400U == (instruction & 0xDF800400U))
+        {
+            return shift_immediate(simd, instruction, true);
+        }
+
+        if (0x5F000000U == (instruction & 0xDF000400U))
+        {
+            return indexed_element(simd, instruction, true);
+        }
+
+        return false;
+    }
+
+    // Advanced SIMD vector: 0 Q U 0111x ...
+    if (0x0E000000U != (instruction & 0x9E000000U))
+    {
+        return false;
+    }
+
+    if (0x0E200400U == (instruction & 0x9F200400U))
+    {
+        return three_same(simd, instruction, false);
+    }
+
+    if (0x0E200800U == (instruction & 0x9F3E0C00U))
+    {
+        return two_register_misc(simd, instruction, false);
+    }
+
+    if (0x0E300800U == (instruction & 0x9F3E0C00U))
+    {
+        return across_lanes(simd, instruction);
+    }
+
+    if (0x0E200000U == (instruction & 0x9F200C00U))
+    {
+        return three_different(simd, instruction);
+    }
+
+    if (0x0E000400U == (instruction & 0x9FE08400U))
+    {
+        return copy(simd, instruction, false);
+    }
+
+    if (0x0E000800U == (instruction & 0xBF208C00U))
+    {
+        return permute(simd, instruction);
+    }
+
+    if (0x2E000000U == (instruction & 0xBFE08400U))
+    {
+        return extract(simd, instruction);
+    }
+
+    if (0x0E000000U == (instruction & 0xBF208C00U))
+    {
+        return table_lookup(simd, instruction);
+    }
+
+    if (0x0F000400U == (instruction & 0x9FF80400U))
+    {
+        return modified_immediate(simd, instruction);
+    }
+
+    if (0x0F000400U == (instruction & 0x9F800400U))
+    {
+        return shift_immediate(simd, instruction, false);
+    }
+
+    if (0x0F000000U == (instruction & 0x9F000400U))
+    {
+        return indexed_element(simd, instruction, false);
+    }
+
+    return false;
+}
+
+bool
+bal_is_simd_supported(const uint32_t instruction)
+{
+    // Execute against scratch state: the operations are pure functions of the registers.
+    bal_cpu_t cpu;
+    (void)memset(&cpu, 0, sizeof(cpu));
+    simd_t simd = { .cpu = &cpu, .flags = 0U };
+    return execute(&simd, instruction);
+}
+
+uint64_t
+bal_execute_simd(bal_cpu_t *cpu, const uint32_t instruction)
+{
+    simd_t simd = { .cpu = cpu, .flags = 0U };
+    (void)execute(&simd, instruction);
+    cpu->fpsr |= simd.flags;
+    return 1U;
+}
+
+/// The shape of an Advanced SIMD structure load or store.
+typedef struct
+{
+    bool is_load;
+    bool is_single;
+    bool is_replicate;
+    bool has_writeback;
+    /// Registers per structure, and how often the structures repeat (LD1 with several
+    /// registers).
+    uint32_t selem;
+    uint32_t repeat;
+    uint32_t esize;
+    uint32_t datasize;
+    /// The lane of a single-structure access.
+    uint32_t index;
+    uint32_t pad;
+} structure_t;
+
+/// Decodes the load/store vector structure classes. Returns false for unallocated encodings.
+static bool
+decode_structure(const uint32_t instruction, structure_t *structure)
+{
+    const uint32_t q    = (instruction >> 30U) & 1U;
+    const uint32_t size = (instruction >> 10U) & 0x3U;
+    (void)memset(structure, 0, sizeof(*structure));
+    structure->is_load  = 1U == ((instruction >> 22U) & 1U);
+    structure->datasize = 1U == q ? 128U : 64U;
+
+    const bool is_multiple         = 0x0C000000U == (instruction & 0xBFBF0000U);
+    const bool is_multiple_indexed = 0x0C800000U == (instruction & 0xBFA00000U);
+    const bool is_single           = 0x0D000000U == (instruction & 0xBF9F0000U);
+    const bool is_single_indexed   = 0x0D800000U == (instruction & 0xBF800000U);
+    structure->has_writeback       = is_multiple_indexed || is_single_indexed;
+
+    if (true == is_multiple || true == is_multiple_indexed)
+    {
+        static const uint8_t REPEAT[16] = { 1, 0, 4, 0, 1, 0, 3, 1, 1, 0, 2, 0, 0, 0, 0, 0 };
+        static const uint8_t SELEM[16]  = { 4, 0, 1, 0, 3, 0, 1, 1, 2, 0, 1, 0, 0, 0, 0, 0 };
+        const uint32_t       opcode     = (instruction >> 12U) & 0xFU;
+        structure->repeat               = REPEAT[opcode];
+        structure->selem                = SELEM[opcode];
+        structure->esize                = 8U << size;
+
+        // Structures of several 64-bit elements need a whole Q register.
+        return structure->repeat != 0U && !(3U == size && 0U == q && structure->selem != 1U);
+    }
+
+    if (false == is_single && false == is_single_indexed)
+    {
+        return false;
+    }
+
+    const uint32_t opcode = (instruction >> 13U) & 0x7U;
+    const uint32_t r      = (instruction >> 21U) & 1U;
+    const uint32_t s      = (instruction >> 12U) & 1U;
+    uint32_t       scale  = opcode >> 1U;
+    structure->is_single  = true;
+    structure->repeat     = 1U;
+    structure->selem      = (((opcode & 1U) << 1U) | r) + 1U;
+
+    switch (scale)
+    {
+        case 3U: // LD1R-LD4R
+            if (false == structure->is_load || 1U == s)
+            {
+                return false;
+            }
+
+            scale                   = size;
+            structure->is_replicate = true;
+            break;
+        case 0U:
+            structure->index = (q << 3U) | (s << 2U) | size;
+            break;
+        case 1U:
+            if (1U == (size & 1U))
+            {
+                return false;
+            }
+
+            structure->index = (q << 2U) | (s << 1U) | (size >> 1U);
+            break;
+        default:
+            if (1U == (size >> 1U))
+            {
+                return false;
+            }
+
+            if (0U == size)
+            {
+                structure->index = (q << 1U) | s;
+            }
+            else
+            {
+                if (1U == s)
+                {
+                    return false;
+                }
+
+                structure->index = q;
+                scale            = 3U;
+            }
+
+            break;
+    }
+
+    structure->esize = 8U << scale;
+    return true;
+}
+
+bool
+bal_is_simd_memory_supported(const uint32_t instruction)
+{
+    structure_t structure;
+    return decode_structure(instruction, &structure);
+}
+
+/// Returns the host address of `bytes` bytes at `address`, or NULL if they are not all mapped.
+static uint8_t *
+translate_element(const bal_memory_interface_t *memory_interface,
+                  const uint64_t                address,
+                  const uint32_t                bytes)
+{
+    size_t         available_bytes = 0U;
+    const uint8_t *host_address
+        = memory_interface->translate((void *)memory_interface, address, &available_bytes);
+
+    if (NULL == host_address || available_bytes < bytes)
+    {
+        return NULL;
+    }
+
+    return (uint8_t *)(uintptr_t)host_address;
+}
+
+uint64_t
+bal_execute_simd_memory(bal_cpu_t                    *cpu,
+                        const bal_memory_interface_t *memory_interface,
+                        const uint32_t                instruction)
+{
+    structure_t structure;
+    (void)decode_structure(instruction, &structure);
+
+    simd_t         simd    = { .cpu = cpu, .flags = 0U };
+    const uint32_t rt      = instruction & 0x1FU;
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+    const uint32_t rm      = (instruction >> 16U) & 0x1FU;
+    const uint32_t ebytes  = structure.esize / 8U;
+    const uint64_t address = cpu->x[rn]; // Register 31 is the stack pointer.
+    uint64_t       offset  = 0U;
+
+    if (true == structure.is_replicate)
+    {
+        uint32_t t = rt;
+
+        for (uint32_t s = 0U; s < structure.selem; ++s)
+        {
+            const uint8_t *pointer = translate_element(memory_interface, address + offset, ebytes);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            uint64_t element = 0U;
+            (void)memcpy(&element, pointer, ebytes);
+            vector_t result = { { 0U, 0U } };
+
+            for (uint32_t e = 0U; e < structure.datasize / structure.esize; ++e)
+            {
+                set_element(&result, e, structure.esize, element);
+            }
+
+            write_vector(&simd, t, result, structure.datasize);
+            offset += ebytes;
+            t = (t + 1U) % 32U;
+        }
+    }
+    else
+    {
+        // A single structure works on one lane of full registers; multiple structures on every
+        // lane of datasize-bit registers.
+        const uint32_t elements
+            = true == structure.is_single ? 1U : structure.datasize / structure.esize;
+        const uint32_t width = true == structure.is_single ? 128U : structure.datasize;
+
+        for (uint32_t r = 0U; r < structure.repeat; ++r)
+        {
+            for (uint32_t e = 0U; e < elements; ++e)
+            {
+                uint32_t       t    = (rt + r) % 32U;
+                const uint32_t lane = true == structure.is_single ? structure.index : e;
+
+                for (uint32_t s = 0U; s < structure.selem; ++s)
+                {
+                    uint8_t *pointer
+                        = translate_element(memory_interface, address + offset, ebytes);
+
+                    if (NULL == pointer)
+                    {
+                        return 0U;
+                    }
+
+                    vector_t value = read_vector(&simd, t);
+
+                    if (true == structure.is_load)
+                    {
+                        uint64_t element = 0U;
+                        (void)memcpy(&element, pointer, ebytes);
+                        set_element(&value, lane, structure.esize, element);
+                        write_vector(&simd, t, value, width);
+                    }
+                    else
+                    {
+                        const uint64_t element = get_element(&value, lane, structure.esize);
+                        (void)memcpy(pointer, &element, ebytes);
+                    }
+
+                    offset += ebytes;
+                    t = (t + 1U) % 32U;
+                }
+            }
+        }
+    }
+
+    if (true == structure.has_writeback)
+    {
+        cpu->x[rn] = address + (31U == rm ? offset : cpu->x[rm]);
+    }
+
+    return 1U;
+}
+
+/*** end of file ***/

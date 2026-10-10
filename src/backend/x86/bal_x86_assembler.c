@@ -62,6 +62,17 @@ BAL_HOT static void emit_register_register(bal_x86_assembler_t *assembler,
                                            bal_x86_register_t   source,
                                            const char          *mnemonic);
 
+/// Emits `[66] REX opcode ModR/M [SIB] [disp8]` for a load or store between `reg` and the memory at
+/// the address in `base`. `opcode_size` bytes of `opcode` are emitted.
+BAL_HOT static void emit_memory_access(bal_x86_assembler_t *assembler,
+                                       uint8_t              operand_size_prefix,
+                                       uint8_t              rex_w,
+                                       const uint8_t       *opcode,
+                                       size_t               opcode_size,
+                                       bal_x86_register_t   reg,
+                                       bal_x86_register_t   base,
+                                       const char          *mnemonic);
+
 /// Emits `REX D3 /opcode_extension` for shifts and rotates by CL. REX.W is set when `is_64bit` is
 /// true, otherwise the operation is 32-bit and zeroes the upper half of `destination`.
 BAL_HOT static void emit_shift_cl(bal_x86_assembler_t *assembler,
@@ -366,8 +377,9 @@ bal_x86_emit_jmp_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t re
         return;
     }
 
-    size_t     instruction_size_bytes = 2;
-    const bool can_emit_status        = can_emit(assembler, instruction_size_bytes);
+    // Registers R8 to R15 need a REX prefix in front of the two-byte instruction.
+    const size_t instruction_size_bytes = reg > 7 ? 3U : 2U;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
 
     if (BAL_UNLIKELY(false == can_emit_status))
     {
@@ -385,7 +397,6 @@ bal_x86_emit_jmp_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t re
         // WARNING: reg is verified by is_valid_register() to fall within the safe enum range.
         const uint8_t b = (uint8_t)reg >> 3;
         emit_rex(assembler->buffer, &assembler->offset, w, r, b);
-        ++instruction_size_bytes;
     }
 
     const uint8_t opcode = 0xFF;
@@ -1270,6 +1281,235 @@ bal_x86_emit_imul_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t s
 }
 
 void
+bal_x86_emit_mfence(bal_x86_assembler_t *assembler)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] mfence", assembler->offset);
+    emit8(assembler->buffer, &assembler->offset, 0x0F);
+    emit8(assembler->buffer, &assembler->offset, 0xAE);
+    emit8(assembler->buffer, &assembler->offset, 0xF0);
+}
+
+void
+bal_x86_emit_load_r64_mem64(bal_x86_assembler_t     *assembler,
+                            const bal_x86_register_t destination,
+                            const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x8B, 0x00 };
+    emit_memory_access(assembler, 0, 1, opcode, 1, destination, base, "load_r64_mem64");
+}
+
+void
+bal_x86_emit_load_r32_mem32(bal_x86_assembler_t     *assembler,
+                            const bal_x86_register_t destination,
+                            const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x8B, 0x00 };
+    emit_memory_access(assembler, 0, 0, opcode, 1, destination, base, "load_r32_mem32");
+}
+
+void
+bal_x86_emit_load_r32_mem16(bal_x86_assembler_t     *assembler,
+                            const bal_x86_register_t destination,
+                            const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xB7 };
+    emit_memory_access(assembler, 0, 0, opcode, 2, destination, base, "load_r32_mem16");
+}
+
+void
+bal_x86_emit_load_r32_mem8(bal_x86_assembler_t     *assembler,
+                           const bal_x86_register_t destination,
+                           const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xB6 };
+    emit_memory_access(assembler, 0, 0, opcode, 2, destination, base, "load_r32_mem8");
+}
+
+void
+bal_x86_emit_load_sign_r64_mem32(bal_x86_assembler_t     *assembler,
+                                 const bal_x86_register_t destination,
+                                 const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x63, 0x00 };
+    emit_memory_access(assembler, 0, 1, opcode, 1, destination, base, "load_sign_r64_mem32");
+}
+
+void
+bal_x86_emit_load_sign_r64_mem16(bal_x86_assembler_t     *assembler,
+                                 const bal_x86_register_t destination,
+                                 const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xBF };
+    emit_memory_access(assembler, 0, 1, opcode, 2, destination, base, "load_sign_r64_mem16");
+}
+
+void
+bal_x86_emit_load_sign_r64_mem8(bal_x86_assembler_t     *assembler,
+                                const bal_x86_register_t destination,
+                                const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xBE };
+    emit_memory_access(assembler, 0, 1, opcode, 2, destination, base, "load_sign_r64_mem8");
+}
+
+void
+bal_x86_emit_load_sign_r32_mem16(bal_x86_assembler_t     *assembler,
+                                 const bal_x86_register_t destination,
+                                 const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xBF };
+    emit_memory_access(assembler, 0, 0, opcode, 2, destination, base, "load_sign_r32_mem16");
+}
+
+void
+bal_x86_emit_load_sign_r32_mem8(bal_x86_assembler_t     *assembler,
+                                const bal_x86_register_t destination,
+                                const bal_x86_register_t base)
+{
+    const uint8_t opcode[2] = { 0x0F, 0xBE };
+    emit_memory_access(assembler, 0, 0, opcode, 2, destination, base, "load_sign_r32_mem8");
+}
+
+void
+bal_x86_emit_store_mem64_r64(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 0, 1, opcode, 1, source, base, "store_mem64_r64");
+}
+
+void
+bal_x86_emit_store_mem32_r32(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 0, 0, opcode, 1, source, base, "store_mem32_r32");
+}
+
+void
+bal_x86_emit_store_mem16_r16(bal_x86_assembler_t     *assembler,
+                             const bal_x86_register_t base,
+                             const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x89, 0x00 };
+    emit_memory_access(assembler, 1, 0, opcode, 1, source, base, "store_mem16_r16");
+}
+
+void
+bal_x86_emit_store_mem8_r8(bal_x86_assembler_t     *assembler,
+                           const bal_x86_register_t base,
+                           const bal_x86_register_t source)
+{
+    const uint8_t opcode[2] = { 0x88, 0x00 };
+    emit_memory_access(assembler, 0, 0, opcode, 1, source, base, "store_mem8_r8");
+}
+
+void
+bal_x86_emit_call_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t target)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(target)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid call target register: %d", target);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 3;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] call r%d", assembler->offset, target);
+    const uint8_t w         = 0U;
+    const uint8_t r         = 0U;
+    const uint8_t b         = (uint8_t)target >> 3U;
+    const uint8_t extension = 2U;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0xFF);
+    emit_modrm_register(assembler->buffer, &assembler->offset, (int)extension, target);
+}
+
+void
+bal_x86_emit_store_r32_rbp_offset(bal_x86_assembler_t     *assembler,
+                                  const bal_x86_register_t source,
+                                  const int32_t            offset)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(source)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid source register: %d", source);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    const size_t instruction_size_bytes = 7;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] mov dword [rbp + 0x%X], r%dd",
+                  assembler->offset,
+                  offset,
+                  source);
+    const uint8_t w = 0U;
+    const uint8_t r = (uint8_t)source >> 3U;
+    const uint8_t b = 0U;
+    emit_rex(assembler->buffer, &assembler->offset, w, r, b);
+    emit8(assembler->buffer, &assembler->offset, 0x89);
+    emit_modrm_memory_disp32_rbp(assembler->buffer, &assembler->offset, source);
+    emit32(assembler->buffer, &assembler->offset, (uint32_t)offset);
+}
+
+void
 bal_x86_emit_cmov_r64_r64(bal_x86_assembler_t      *assembler,
                           const bal_x86_condition_t condition,
                           const bal_x86_register_t  destination,
@@ -1538,8 +1778,9 @@ bal_x86_emit_push_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t r
         return;
     }
 
-    size_t     instruction_size_bytes = 1;
-    const bool can_emit_status        = can_emit(assembler, instruction_size_bytes);
+    // Registers R8 to R15 need a REX prefix in front of the one-byte opcode.
+    const size_t instruction_size_bytes = reg > 7 ? 2U : 1U;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
 
     if (BAL_UNLIKELY(false == can_emit_status))
     {
@@ -1559,7 +1800,6 @@ bal_x86_emit_push_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t r
         const uint8_t b = (uint8_t)reg >> 3;
 
         emit_rex(assembler->buffer, &assembler->offset, w, r, b);
-        ++instruction_size_bytes;
     }
 
     const uint8_t opcode = 0x50;
@@ -1595,8 +1835,9 @@ bal_x86_emit_pop_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t re
         return;
     }
 
-    size_t     instruction_size_bytes = 1;
-    const bool can_emit_status        = can_emit(assembler, instruction_size_bytes);
+    // Registers R8 to R15 need a REX prefix in front of the one-byte opcode.
+    const size_t instruction_size_bytes = reg > 7 ? 2U : 1U;
+    const bool   can_emit_status        = can_emit(assembler, instruction_size_bytes);
 
     if (BAL_UNLIKELY(false == can_emit_status))
     {
@@ -1616,7 +1857,6 @@ bal_x86_emit_pop_r64(bal_x86_assembler_t *assembler, const bal_x86_register_t re
         const uint8_t b = (uint8_t)reg >> 3;
 
         emit_rex(assembler->buffer, &assembler->offset, w, r, b);
-        ++instruction_size_bytes;
     }
 
     const uint8_t opcode = 0x58;
@@ -2701,6 +2941,90 @@ emit_register_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
     emit_rex(assembler->buffer, &assembler->offset, w, r, b);
     emit8(assembler->buffer, &assembler->offset, opcode);
     emit_modrm_register(assembler->buffer, &assembler->offset, destination, source);
+
+    const size_t bytes_emitted = assembler->offset - old_offset;
+    BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,
+                   "Bytes emitted %d does not match instruction size %d",
+                   bytes_emitted,
+                   instruction_size_bytes);
+}
+
+void
+emit_memory_access(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const uint8_t                     operand_size_prefix,
+                   const uint8_t                     rex_w,
+                   const uint8_t *BAL_RESTRICT       opcode,
+                   const size_t                      opcode_size,
+                   const bal_x86_register_t          reg,
+                   const bal_x86_register_t          base,
+                   const char *BAL_RESTRICT          mnemonic)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    if (BAL_UNLIKELY(false == is_valid_register(reg))
+        || BAL_UNLIKELY(false == is_valid_register(base)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid %s operands: r%d, [r%d]", mnemonic, reg, base);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    // [RSP] and [R12] need a SIB byte, [RBP] and [R13] a zero displacement, because their ModR/M
+    // r/m encodings with mod = 00 mean something else.
+    const uint32_t base_low               = (uint32_t)base & 7U;
+    const bool     needs_sib              = 4U == base_low;
+    const bool     needs_displacement     = 5U == base_low;
+    const size_t   instruction_size_bytes = (size_t)operand_size_prefix + 1U + opcode_size + 1U
+                                          + (true == needs_sib ? 1U : 0U)
+                                          + (true == needs_displacement ? 1U : 0U);
+    const bool can_emit_status = can_emit(assembler, instruction_size_bytes);
+
+    if (BAL_UNLIKELY(false == can_emit_status))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(
+        &bal_thread_logger, "[+0x%04zx] %s r%d, [r%d]", assembler->offset, mnemonic, reg, base);
+
+    const size_t old_offset = assembler->offset;
+
+    if (operand_size_prefix != 0U)
+    {
+        emit8(assembler->buffer, &assembler->offset, 0x66);
+    }
+
+    // The REX prefix is always emitted, which also makes the byte registers SPL, BPL, SIL and DIL
+    // reachable instead of AH, CH, DH and BH.
+    emit_rex(assembler->buffer, &assembler->offset, rex_w, (uint8_t)reg >> 3U, (uint8_t)base >> 3U);
+
+    for (size_t i = 0U; i < opcode_size; ++i)
+    {
+        emit8(assembler->buffer, &assembler->offset, opcode[i]);
+    }
+
+    const uint32_t mod   = true == needs_displacement ? 1U : 0U;
+    const uint8_t  modrm = (uint8_t)((mod << 6U) | (((uint32_t)reg & 7U) << 3U) | base_low);
+    emit8(assembler->buffer, &assembler->offset, modrm);
+
+    if (true == needs_sib)
+    {
+        emit8(assembler->buffer, &assembler->offset, 0x24);
+    }
+
+    if (true == needs_displacement)
+    {
+        emit8(assembler->buffer, &assembler->offset, 0x00);
+    }
 
     const size_t bytes_emitted = assembler->offset - old_offset;
     BAL_ASSERT_MSG(bytes_emitted == instruction_size_bytes,

@@ -17,7 +17,8 @@ BAL_ALIGNED(64) typedef struct
     uint8_t  flag_v;
     uint32_t pad0;
     uint64_t instruction_count;
-    uint64_t pad1[5];
+    uint64_t v[32][2];
+    uint64_t pad1[13];
 } bal_fuzzer_cpu_snapshot_t;
 
 static_assert(sizeof(bal_fuzzer_cpu_snapshot_t) == sizeof(bal_cpu_t), "Struct size mismatch");
@@ -30,6 +31,10 @@ typedef enum
     BAL_FUZZER_WORKER_ERROR_TIMEOUT,
     BAl_FUZZER_WORKER_ERROR_CRASHED,
     BAL_FUZZER_WORKER_ERROR_UNKNOWN_INSTRUCTION,
+
+    /// The instruction accessed memory the worker does not map. The final state is still sent so
+    /// it can be compared with the other engine.
+    BAL_FUZZER_WORKER_MEMORY_FAULT,
     BAL_FUZZER_WORKER_ERROR_END
 } bal_fuzzer_worker_status_t;
 

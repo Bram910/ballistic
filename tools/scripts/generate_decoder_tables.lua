@@ -72,6 +72,34 @@ local function derive_opcode(mnemonic)
         return "OPCODE_NOP"
     end
 
+    -- Barriers. Tier 1 emits a fence for DMB and DSB; the rest need no code.
+    if m == "DMB" or m == "DSB" or m == "ISB" or m == "SB" then
+        return "OPCODE_NOP"
+    end
+
+    -- Synchronisation instructions, executed by the runtime atomic helper. CLREX clears its
+    -- exclusive monitor. The 128-bit LSE forms (LDCLRP, LDSETP, SWPP) and the SIMD LDAP1/STL1 are
+    -- not implemented.
+    if m == "CLREX" then
+        return "OPCODE_ATOMIC"
+    end
+
+    for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
+                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
+        if m:sub(1, #prefix) == prefix then
+            return "OPCODE_ATOMIC"
+        end
+    end
+
+    for _, operation in ipairs({ "LDADD", "LDCLR", "LDEOR", "LDSET", "LDSMAX", "LDSMIN", "LDUMAX",
+                                 "LDUMIN", "SWP" }) do
+        local suffix = m:sub(#operation + 1)
+
+        if m:sub(1, #operation) == operation and suffix:sub(1, 1) ~= "P" then
+            return "OPCODE_ATOMIC"
+        end
+    end
+
     if m == "ORR" then
         return "OPCODE_OR"
     end
@@ -137,6 +165,10 @@ local function derive_opcode(mnemonic)
         return "OPCODE_COUNT_LEADING"
     end
 
+    if m == "MRS" or m == "MSR" then
+        return "OPCODE_SYSTEM_REGISTER"
+    end
+
     if m:sub(1, 4) == "SDIV" or m:sub(1, 4) == "UDIV" then
         return "OPCODE_DIV"
     end
@@ -154,6 +186,26 @@ local function derive_opcode(mnemonic)
     end
 
     if m:sub(1, 3) == "STR" or m:sub(1, 3) == "STP" then
+        return "OPCODE_STORE"
+    end
+
+    -- The unscaled, unprivileged and non-temporal forms, and the prefetches, which tier 1 treats as
+    -- loads that do nothing.
+    if m:sub(1, 4) == "LDUR" or m:sub(1, 4) == "LDTR" or m == "LDNP" or m == "PRFM" or m == "PRFUM" then
+        return "OPCODE_LOAD"
+    end
+
+    if m:sub(1, 4) == "STUR" or m:sub(1, 4) == "STTR" or m == "STNP" then
+        return "OPCODE_STORE"
+    end
+
+    -- The Advanced SIMD structure loads and stores. The SVE forms share the names; they are
+    -- overridden by encoding.
+    if m:match("^LD[1-4]R?$") then
+        return "OPCODE_LOAD"
+    end
+
+    if m:match("^ST[1-4]$") then
         return "OPCODE_STORE"
     end
 
@@ -1146,6 +1198,13 @@ local function main(...)
         local top_bits = bit.band(bit.rshift(inst.value, 25), 0xF)
         if top_bits <= 0x3 then
             inst.opcode_override = "OPCODE_TRAP"
+        end
+
+        -- op0 = x111 is the scalar floating-point and Advanced SIMD data processing space, which
+        -- the floating-point and SIMD helpers decode themselves. Its mnemonics overlap with
+        -- integer ones such as ADD and ORR, so it is routed by encoding.
+        if bit.band(top_bits, 0x7) == 0x7 then
+            inst.opcode_override = "OPCODE_FLOAT"
         end
         table.insert(filtered, inst)
     end

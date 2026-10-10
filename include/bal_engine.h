@@ -154,9 +154,8 @@ extern "C"
     /// * Returns [`BAL_ERROR_ENGINE_ALREADY_RUNNING`] if the thread is still running.
     /// * Returns [`BAL_ERROR_MEMORY_FAULT`] if the guest attempts to fetch instructions from an
     ///   unmapped or invalid Guest Virtual Address (GVA).
-    /// * Returns [`BAL_ERROR_PC_ALIGNMENT`] if the guest PC is not 4-byte aligned
-    ///   (when `BAL_ENGINE_FLAG_STRICT_ALIGNMENT` is set) or if instruction fetching crosses a page
-    ///   boundary improperly.
+    /// * Returns [`BAL_ERROR_PC_ALIGNMENT`] if the guest PC is not 4-byte aligned or if
+    ///   instruction fetching crosses a page boundary improperly.
     /// * Returns [`BAL_ERROR_UNKNOWN_INSTRUCTION`] if the decoder encounters an undefined, invalid,
     ///   or unsupported ARM64 instruction.
     /// * Returns [`BAL_ERROR_INSTRUCTION_OVERFLOW`] if the JIT executable buffer is completely

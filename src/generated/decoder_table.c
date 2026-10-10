@@ -38,7 +38,7 @@ const bal_decoder_instruction_metadata_t
         { "ABS",
           0xBF3FFC00,
           0x0E20B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -50,7 +50,7 @@ const bal_decoder_instruction_metadata_t
         { "ABS",
           0xFF3FFC00,
           0x5E20B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -218,7 +218,7 @@ const bal_decoder_instruction_metadata_t
         { "ADD",
           0xBF20FC00,
           0x0E208400,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -230,7 +230,7 @@ const bal_decoder_instruction_metadata_t
         { "ADD",
           0xFF20FC00,
           0x5E208400,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -410,7 +410,7 @@ const bal_decoder_instruction_metadata_t
         { "ADDHN",
           0xBF20FC00,
           0x0E204000,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -446,7 +446,7 @@ const bal_decoder_instruction_metadata_t
         { "ADDP",
           0xFF3FFC00,
           0x5E31B800,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -458,7 +458,7 @@ const bal_decoder_instruction_metadata_t
         { "ADDP",
           0xBF20FC00,
           0x0E20BC00,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -602,7 +602,7 @@ const bal_decoder_instruction_metadata_t
         { "ADDV",
           0xBF3FFC00,
           0x0E31B800,
-          OPCODE_ADD,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -710,7 +710,7 @@ const bal_decoder_instruction_metadata_t
         { "AESD",
           0xFFFFFC00,
           0x4E285800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -734,7 +734,7 @@ const bal_decoder_instruction_metadata_t
         { "AESE",
           0xFFFFFC00,
           0x4E284800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -758,7 +758,7 @@ const bal_decoder_instruction_metadata_t
         { "AESIMC",
           0xFFFFFC00,
           0x4E287800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -782,7 +782,7 @@ const bal_decoder_instruction_metadata_t
         { "AESMC",
           0xFFFFFC00,
           0x4E286800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -806,7 +806,7 @@ const bal_decoder_instruction_metadata_t
         { "AND",
           0xBFE0FC00,
           0x0E201C00,
-          OPCODE_AND,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -1382,7 +1382,7 @@ const bal_decoder_instruction_metadata_t
         { "BCAX",
           0xFFE08000,
           0xCE200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -1538,7 +1538,7 @@ const bal_decoder_instruction_metadata_t
         { "BFCVT",
           0xFFFFFC00,
           0x1E634000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -1574,7 +1574,7 @@ const bal_decoder_instruction_metadata_t
         { "BFCVTN",
           0xBFFFFC00,
           0x0EA16800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -1610,7 +1610,7 @@ const bal_decoder_instruction_metadata_t
         { "BFDOT",
           0xBFC0F400,
           0x0F40F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -1622,7 +1622,7 @@ const bal_decoder_instruction_metadata_t
         { "BFDOT",
           0xBFE0FC00,
           0x2E40FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2114,7 +2114,7 @@ const bal_decoder_instruction_metadata_t
         { "BFMLAL",
           0xBFC0F400,
           0x0FC0F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2126,7 +2126,7 @@ const bal_decoder_instruction_metadata_t
         { "BFMLAL",
           0xBFE0FC00,
           0x2EC0FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2522,7 +2522,7 @@ const bal_decoder_instruction_metadata_t
         { "BFMMLA",
           0xFFE0FC00,
           0x6E40EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2726,7 +2726,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFF89C00,
           0x2F001400,
-          OPCODE_AND,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -2738,7 +2738,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFF8DC00,
           0x2F009400,
-          OPCODE_AND,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -2750,7 +2750,7 @@ const bal_decoder_instruction_metadata_t
         { "BIC",
           0xBFE0FC00,
           0x0E601C00,
-          OPCODE_AND,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2870,7 +2870,7 @@ const bal_decoder_instruction_metadata_t
         { "BIF",
           0xBFE0FC00,
           0x2EE01C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -2882,7 +2882,7 @@ const bal_decoder_instruction_metadata_t
         { "BIT",
           0xBFE0FC00,
           0x2EA01C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -3218,7 +3218,7 @@ const bal_decoder_instruction_metadata_t
         { "BSL",
           0xBFE0FC00,
           0x2E601C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -3266,7 +3266,7 @@ const bal_decoder_instruction_metadata_t
         { "CAS",
           0xFFE0FC00,
           0x88A07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3278,7 +3278,7 @@ const bal_decoder_instruction_metadata_t
         { "CAS",
           0xFFE0FC00,
           0xC8A07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3290,7 +3290,7 @@ const bal_decoder_instruction_metadata_t
         { "CASA",
           0xFFE0FC00,
           0x88E07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3302,7 +3302,7 @@ const bal_decoder_instruction_metadata_t
         { "CASA",
           0xFFE0FC00,
           0xC8E07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3314,7 +3314,7 @@ const bal_decoder_instruction_metadata_t
         { "CASAL",
           0xFFE0FC00,
           0x88E0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3326,7 +3326,7 @@ const bal_decoder_instruction_metadata_t
         { "CASAL",
           0xFFE0FC00,
           0xC8E0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3338,7 +3338,7 @@ const bal_decoder_instruction_metadata_t
         { "CASL",
           0xFFE0FC00,
           0x88A0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3350,7 +3350,7 @@ const bal_decoder_instruction_metadata_t
         { "CASL",
           0xFFE0FC00,
           0xC8A0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3362,7 +3362,7 @@ const bal_decoder_instruction_metadata_t
         { "CASAB",
           0xFFE0FC00,
           0x08E07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3374,7 +3374,7 @@ const bal_decoder_instruction_metadata_t
         { "CASALB",
           0xFFE0FC00,
           0x08E0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3386,7 +3386,7 @@ const bal_decoder_instruction_metadata_t
         { "CASB",
           0xFFE0FC00,
           0x08A07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3398,7 +3398,7 @@ const bal_decoder_instruction_metadata_t
         { "CASLB",
           0xFFE0FC00,
           0x08A0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3410,7 +3410,7 @@ const bal_decoder_instruction_metadata_t
         { "CASAH",
           0xFFE0FC00,
           0x48E07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3422,7 +3422,7 @@ const bal_decoder_instruction_metadata_t
         { "CASALH",
           0xFFE0FC00,
           0x48E0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3434,7 +3434,7 @@ const bal_decoder_instruction_metadata_t
         { "CASH",
           0xFFE0FC00,
           0x48A07C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3446,7 +3446,7 @@ const bal_decoder_instruction_metadata_t
         { "CASLH",
           0xFFE0FC00,
           0x48A0FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3458,7 +3458,7 @@ const bal_decoder_instruction_metadata_t
         { "CASP",
           0xFFE0FC00,
           0x08207C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3470,7 +3470,7 @@ const bal_decoder_instruction_metadata_t
         { "CASP",
           0xFFE0FC00,
           0x48207C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3482,7 +3482,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPA",
           0xFFE0FC00,
           0x08607C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3494,7 +3494,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPA",
           0xFFE0FC00,
           0x48607C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3506,7 +3506,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPAL",
           0xFFE0FC00,
           0x0860FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3518,7 +3518,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPAL",
           0xFFE0FC00,
           0x4860FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3530,7 +3530,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPL",
           0xFFE0FC00,
           0x0820FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3542,7 +3542,7 @@ const bal_decoder_instruction_metadata_t
         { "CASPL",
           0xFFE0FC00,
           0x4820FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3902,7 +3902,7 @@ const bal_decoder_instruction_metadata_t
         { "CLREX",
           0xFFFFF0FF,
           0xD503305F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -3914,7 +3914,7 @@ const bal_decoder_instruction_metadata_t
         { "CLS",
           0xBF3FFC00,
           0x0E204800,
-          OPCODE_COUNT_LEADING,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -3962,7 +3962,7 @@ const bal_decoder_instruction_metadata_t
         { "CLZ",
           0xBF3FFC00,
           0x2E204800,
-          OPCODE_COUNT_LEADING,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4010,7 +4010,7 @@ const bal_decoder_instruction_metadata_t
         { "CMEQ",
           0xBF20FC00,
           0x2E208C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4022,7 +4022,7 @@ const bal_decoder_instruction_metadata_t
         { "CMEQ",
           0xFF20FC00,
           0x7E208C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4034,7 +4034,7 @@ const bal_decoder_instruction_metadata_t
         { "CMEQ",
           0xBF3FFC00,
           0x0E209800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4046,7 +4046,7 @@ const bal_decoder_instruction_metadata_t
         { "CMEQ",
           0xFF3FFC00,
           0x5E209800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4058,7 +4058,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGE",
           0xBF20FC00,
           0x0E203C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4070,7 +4070,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGE",
           0xFF20FC00,
           0x5E203C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4082,7 +4082,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGE",
           0xBF3FFC00,
           0x2E208800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4094,7 +4094,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGE",
           0xFF3FFC00,
           0x7E208800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4106,7 +4106,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGT",
           0xBF20FC00,
           0x0E203400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4118,7 +4118,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGT",
           0xFF20FC00,
           0x5E203400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4130,7 +4130,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGT",
           0xBF3FFC00,
           0x0E208800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4142,7 +4142,7 @@ const bal_decoder_instruction_metadata_t
         { "CMGT",
           0xFF3FFC00,
           0x5E208800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4154,7 +4154,7 @@ const bal_decoder_instruction_metadata_t
         { "CMHI",
           0xBF20FC00,
           0x2E203400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4166,7 +4166,7 @@ const bal_decoder_instruction_metadata_t
         { "CMHI",
           0xFF20FC00,
           0x7E203400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4178,7 +4178,7 @@ const bal_decoder_instruction_metadata_t
         { "CMHS",
           0xBF20FC00,
           0x2E203C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4190,7 +4190,7 @@ const bal_decoder_instruction_metadata_t
         { "CMHS",
           0xFF20FC00,
           0x7E203C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4238,7 +4238,7 @@ const bal_decoder_instruction_metadata_t
         { "CMLE",
           0xBF3FFC00,
           0x2E209800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4250,7 +4250,7 @@ const bal_decoder_instruction_metadata_t
         { "CMLE",
           0xFF3FFC00,
           0x7E209800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4262,7 +4262,7 @@ const bal_decoder_instruction_metadata_t
         { "CMLT",
           0xBF3FFC00,
           0x0E20A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4274,7 +4274,7 @@ const bal_decoder_instruction_metadata_t
         { "CMLT",
           0xFF3FFC00,
           0x5E20A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4802,7 +4802,7 @@ const bal_decoder_instruction_metadata_t
         { "CMTST",
           0xBF20FC00,
           0x0E208C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4814,7 +4814,7 @@ const bal_decoder_instruction_metadata_t
         { "CMTST",
           0xFF20FC00,
           0x5E208C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -4886,7 +4886,7 @@ const bal_decoder_instruction_metadata_t
         { "CNT",
           0xBF3FFC00,
           0x0E205800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -6686,7 +6686,7 @@ const bal_decoder_instruction_metadata_t
         { "DMB",
           0xFFFFF0FF,
           0xD50330BF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6710,7 +6710,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFF0FF,
           0xD503309F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6722,7 +6722,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFF3FF,
           0xD503323F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -6734,7 +6734,7 @@ const bal_decoder_instruction_metadata_t
         { "DUP",
           0xBFE0FC00,
           0x0E000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -6746,7 +6746,7 @@ const bal_decoder_instruction_metadata_t
         { "DUP",
           0xFFE0FC00,
           0x5E000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -6758,7 +6758,7 @@ const bal_decoder_instruction_metadata_t
         { "DUP",
           0xBFE0FC00,
           0x0E000C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -6878,7 +6878,7 @@ const bal_decoder_instruction_metadata_t
         { "EOR3",
           0xFFE08000,
           0xCE000000,
-          OPCODE_XOR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -6902,7 +6902,7 @@ const bal_decoder_instruction_metadata_t
         { "EOR",
           0xBFE0FC00,
           0x2E201C00,
-          OPCODE_XOR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7118,7 +7118,7 @@ const bal_decoder_instruction_metadata_t
         { "EXT",
           0xBFE08400,
           0x2E000000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7190,7 +7190,7 @@ const bal_decoder_instruction_metadata_t
         { "FABD",
           0xBFA0FC00,
           0x2EA0D400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7202,7 +7202,7 @@ const bal_decoder_instruction_metadata_t
         { "FABD",
           0xBFE0FC00,
           0x2EC01400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7214,7 +7214,7 @@ const bal_decoder_instruction_metadata_t
         { "FABD",
           0xFFA0FC00,
           0x7EA0D400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7226,7 +7226,7 @@ const bal_decoder_instruction_metadata_t
         { "FABD",
           0xFFE0FC00,
           0x7EC01400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7250,7 +7250,7 @@ const bal_decoder_instruction_metadata_t
         { "FABS",
           0xBFBFFC00,
           0x0EA0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7262,7 +7262,7 @@ const bal_decoder_instruction_metadata_t
         { "FABS",
           0xBFFFFC00,
           0x0EF8F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7274,7 +7274,7 @@ const bal_decoder_instruction_metadata_t
         { "FABS",
           0xFFFFFC00,
           0x1E20C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -7286,7 +7286,7 @@ const bal_decoder_instruction_metadata_t
         { "FABS",
           0xFFFFFC00,
           0x1E60C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7298,7 +7298,7 @@ const bal_decoder_instruction_metadata_t
         { "FABS",
           0xFFFFFC00,
           0x1EE0C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7322,7 +7322,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGE",
           0xBFA0FC00,
           0x2E20EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7334,7 +7334,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGE",
           0xBFE0FC00,
           0x2E402C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7346,7 +7346,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGE",
           0xFFA0FC00,
           0x7E20EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7358,7 +7358,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGE",
           0xFFE0FC00,
           0x7E402C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7394,7 +7394,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGT",
           0xBFA0FC00,
           0x2EA0EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7406,7 +7406,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGT",
           0xBFE0FC00,
           0x2EC02C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7418,7 +7418,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGT",
           0xFFA0FC00,
           0x7EA0EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7430,7 +7430,7 @@ const bal_decoder_instruction_metadata_t
         { "FACGT",
           0xFFE0FC00,
           0x7EC02C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7466,7 +7466,7 @@ const bal_decoder_instruction_metadata_t
         { "FADD",
           0xBFA0FC00,
           0x0E20D400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7478,7 +7478,7 @@ const bal_decoder_instruction_metadata_t
         { "FADD",
           0xBFE0FC00,
           0x0E401400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7490,7 +7490,7 @@ const bal_decoder_instruction_metadata_t
         { "FADD",
           0xFFE0FC00,
           0x1E202800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -7502,7 +7502,7 @@ const bal_decoder_instruction_metadata_t
         { "FADD",
           0xFFE0FC00,
           0x1E602800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7514,7 +7514,7 @@ const bal_decoder_instruction_metadata_t
         { "FADD",
           0xFFE0FC00,
           0x1EE02800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7622,7 +7622,7 @@ const bal_decoder_instruction_metadata_t
         { "FADDP",
           0xFFBFFC00,
           0x5E30D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7634,7 +7634,7 @@ const bal_decoder_instruction_metadata_t
         { "FADDP",
           0xFFBFFC00,
           0x7E30D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7646,7 +7646,7 @@ const bal_decoder_instruction_metadata_t
         { "FADDP",
           0xBFA0FC00,
           0x2E20D400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7658,7 +7658,7 @@ const bal_decoder_instruction_metadata_t
         { "FADDP",
           0xBFE0FC00,
           0x2E401400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7706,7 +7706,7 @@ const bal_decoder_instruction_metadata_t
         { "FCADD",
           0xBF20EC00,
           0x2E00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7730,7 +7730,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMP",
           0xFFE00C10,
           0x1E200400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -7742,7 +7742,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMP",
           0xFFE00C10,
           0x1E600400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7754,7 +7754,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMP",
           0xFFE00C10,
           0x1EE00400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7766,7 +7766,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMPE",
           0xFFE00C10,
           0x1E200410,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -7778,7 +7778,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMPE",
           0xFFE00C10,
           0x1E600410,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7790,7 +7790,7 @@ const bal_decoder_instruction_metadata_t
         { "FCCMPE",
           0xFFE00C10,
           0x1EE00410,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 4 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7838,7 +7838,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xBFA0FC00,
           0x0E20E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7850,7 +7850,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xBFE0FC00,
           0x0E402400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7862,7 +7862,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xFFA0FC00,
           0x5E20E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7874,7 +7874,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xFFE0FC00,
           0x5E402400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7886,7 +7886,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xBFBFFC00,
           0x0EA0D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7898,7 +7898,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xBFFFFC00,
           0x0EF8D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7910,7 +7910,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xFFBFFC00,
           0x5EA0D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -7922,7 +7922,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMEQ",
           0xFFFFFC00,
           0x5EF8D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8066,7 +8066,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xBFA0FC00,
           0x2E20E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8078,7 +8078,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xBFE0FC00,
           0x2E402400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8090,7 +8090,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xFFA0FC00,
           0x7E20E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8102,7 +8102,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xFFE0FC00,
           0x7E402400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8114,7 +8114,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xBFBFFC00,
           0x2EA0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8126,7 +8126,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xBFFFFC00,
           0x2EF8C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8138,7 +8138,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xFFBFFC00,
           0x7EA0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8150,7 +8150,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGE",
           0xFFFFFC00,
           0x7EF8C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8162,7 +8162,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xBFA0FC00,
           0x2EA0E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8174,7 +8174,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xBFE0FC00,
           0x2EC02400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8186,7 +8186,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xFFA0FC00,
           0x7EA0E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8198,7 +8198,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xFFE0FC00,
           0x7EC02400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8210,7 +8210,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xBFBFFC00,
           0x0EA0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8222,7 +8222,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xBFFFFC00,
           0x0EF8C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8234,7 +8234,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xFFBFFC00,
           0x5EA0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8246,7 +8246,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMGT",
           0xFFFFFC00,
           0x5EF8C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8258,7 +8258,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLA",
           0xBFC09400,
           0x2F401000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8270,7 +8270,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLA",
           0xBFC09400,
           0x2F801000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8282,7 +8282,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLA",
           0xBF20E400,
           0x2E00C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8330,7 +8330,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLE",
           0xBFBFFC00,
           0x2EA0D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8342,7 +8342,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLE",
           0xBFFFFC00,
           0x2EF8D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8354,7 +8354,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLE",
           0xFFBFFC00,
           0x7EA0D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8366,7 +8366,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLE",
           0xFFFFFC00,
           0x7EF8D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8390,7 +8390,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLT",
           0xBFBFFC00,
           0x0EA0E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8402,7 +8402,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLT",
           0xBFFFFC00,
           0x0EF8E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8414,7 +8414,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLT",
           0xFFBFFC00,
           0x5EA0E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8426,7 +8426,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMLT",
           0xFFFFFC00,
           0x5EF8E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8450,7 +8450,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1E202000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -8462,7 +8462,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1E202008,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8474,7 +8474,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1E602000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 16, 5 },
@@ -8486,7 +8486,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1E602008,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8498,7 +8498,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1EE02000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 16, 5 },
@@ -8510,7 +8510,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMP",
           0xFFE0FC1F,
           0x1EE02008,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8522,7 +8522,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1E202010,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -8534,7 +8534,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1E202018,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8546,7 +8546,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1E602010,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 16, 5 },
@@ -8558,7 +8558,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1E602018,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8570,7 +8570,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1EE02010,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 16, 5 },
@@ -8582,7 +8582,7 @@ const bal_decoder_instruction_metadata_t
         { "FCMPE",
           0xFFE0FC1F,
           0x1EE02018,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -8606,7 +8606,7 @@ const bal_decoder_instruction_metadata_t
         { "FCSEL",
           0xFFE00C00,
           0x1E200C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8618,7 +8618,7 @@ const bal_decoder_instruction_metadata_t
         { "FCSEL",
           0xFFE00C00,
           0x1E600C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8630,7 +8630,7 @@ const bal_decoder_instruction_metadata_t
         { "FCSEL",
           0xFFE00C00,
           0x1EE00C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8642,7 +8642,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1E22C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8654,7 +8654,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1E23C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8666,7 +8666,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1E624000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8678,7 +8678,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1E63C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8690,7 +8690,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1EE24000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8702,7 +8702,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVT",
           0xFFFFFC00,
           0x1EE2C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8810,7 +8810,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xBFBFFC00,
           0x0E21C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8822,7 +8822,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xBFFFFC00,
           0x0E79C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8834,7 +8834,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFBFFC00,
           0x5E21C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8846,7 +8846,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x5E79C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8858,7 +8858,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x1E240000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8870,7 +8870,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x1E640000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8882,7 +8882,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x1EE40000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8894,7 +8894,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x9E240000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8906,7 +8906,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x9E640000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8918,7 +8918,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAS",
           0xFFFFFC00,
           0x9EE40000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8930,7 +8930,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xBFBFFC00,
           0x2E21C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8942,7 +8942,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xBFFFFC00,
           0x2E79C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8954,7 +8954,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFBFFC00,
           0x7E21C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8966,7 +8966,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x7E79C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -8978,7 +8978,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x1E250000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -8990,7 +8990,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x1E650000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9002,7 +9002,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x1EE50000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9014,7 +9014,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x9E250000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9026,7 +9026,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x9E650000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9038,7 +9038,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTAU",
           0xFFFFFC00,
           0x9EE50000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9050,7 +9050,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTL",
           0xBFBFFC00,
           0x0E217800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9098,7 +9098,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xBFBFFC00,
           0x0E21B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9110,7 +9110,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xBFFFFC00,
           0x0E79B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9122,7 +9122,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFBFFC00,
           0x5E21B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9134,7 +9134,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x5E79B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9146,7 +9146,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x1E300000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9158,7 +9158,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x1E700000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9170,7 +9170,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x1EF00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9182,7 +9182,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x9E300000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9194,7 +9194,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x9E700000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9206,7 +9206,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMS",
           0xFFFFFC00,
           0x9EF00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9218,7 +9218,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xBFBFFC00,
           0x2E21B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9230,7 +9230,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xBFFFFC00,
           0x2E79B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9242,7 +9242,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFBFFC00,
           0x7E21B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9254,7 +9254,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x7E79B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9266,7 +9266,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x1E310000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9278,7 +9278,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x1E710000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9290,7 +9290,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x1EF10000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9302,7 +9302,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x9E310000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9314,7 +9314,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x9E710000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9326,7 +9326,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTMU",
           0xFFFFFC00,
           0x9EF10000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9338,7 +9338,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTN",
           0xBFBFFC00,
           0x0E216800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9362,7 +9362,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xBFBFFC00,
           0x0E21A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9374,7 +9374,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xBFFFFC00,
           0x0E79A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9386,7 +9386,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFBFFC00,
           0x5E21A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9398,7 +9398,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x5E79A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9410,7 +9410,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x1E200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9422,7 +9422,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x1E600000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9434,7 +9434,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x1EE00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9446,7 +9446,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x9E200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9458,7 +9458,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x9E600000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9470,7 +9470,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNS",
           0xFFFFFC00,
           0x9EE00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9506,7 +9506,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xBFBFFC00,
           0x2E21A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9518,7 +9518,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xBFFFFC00,
           0x2E79A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9530,7 +9530,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFBFFC00,
           0x7E21A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9542,7 +9542,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x7E79A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9554,7 +9554,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x1E210000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9566,7 +9566,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x1E610000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9578,7 +9578,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x1EE10000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9590,7 +9590,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x9E210000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9602,7 +9602,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x9E610000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9614,7 +9614,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTNU",
           0xFFFFFC00,
           0x9EE10000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9626,7 +9626,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xBFBFFC00,
           0x0EA1A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9638,7 +9638,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xBFFFFC00,
           0x0EF9A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9650,7 +9650,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFBFFC00,
           0x5EA1A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9662,7 +9662,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x5EF9A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9674,7 +9674,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x1E280000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9686,7 +9686,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x1E680000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9698,7 +9698,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x1EE80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9710,7 +9710,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x9E280000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9722,7 +9722,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x9E680000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9734,7 +9734,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPS",
           0xFFFFFC00,
           0x9EE80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9746,7 +9746,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xBFBFFC00,
           0x2EA1A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9758,7 +9758,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xBFFFFC00,
           0x2EF9A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9770,7 +9770,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFBFFC00,
           0x7EA1A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9782,7 +9782,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x7EF9A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9794,7 +9794,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x1E290000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9806,7 +9806,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x1E690000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9818,7 +9818,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x1EE90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9830,7 +9830,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x9E290000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9842,7 +9842,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x9E690000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9854,7 +9854,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTPU",
           0xFFFFFC00,
           0x9EE90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9878,7 +9878,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTXN",
           0xBFBFFC00,
           0x2E216800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9890,7 +9890,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTXN",
           0xFFBFFC00,
           0x7E216800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9914,7 +9914,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xBF80FC00,
           0x0F00FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9926,7 +9926,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFF80FC00,
           0x5F00FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9938,7 +9938,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xBFBFFC00,
           0x0EA1B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9950,7 +9950,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xBFFFFC00,
           0x0EF9B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9962,7 +9962,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFBFFC00,
           0x5EA1B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9974,7 +9974,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x5EF9B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -9986,7 +9986,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x1E180000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -9998,7 +9998,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x1E580000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10010,7 +10010,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x1ED80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10022,7 +10022,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x9E180000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10034,7 +10034,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x9E580000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10046,7 +10046,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFF0000,
           0x9ED80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10058,7 +10058,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x1E380000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10070,7 +10070,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x1E780000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10082,7 +10082,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x1EF80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10094,7 +10094,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x9E380000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10106,7 +10106,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x9E780000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10118,7 +10118,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZS",
           0xFFFFFC00,
           0x9EF80000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10238,7 +10238,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xBF80FC00,
           0x2F00FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10250,7 +10250,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFF80FC00,
           0x7F00FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10262,7 +10262,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xBFBFFC00,
           0x2EA1B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10274,7 +10274,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xBFFFFC00,
           0x2EF9B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10286,7 +10286,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFBFFC00,
           0x7EA1B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10298,7 +10298,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x7EF9B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10310,7 +10310,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x1E190000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10322,7 +10322,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x1E590000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10334,7 +10334,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x1ED90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10346,7 +10346,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x9E190000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10358,7 +10358,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x9E590000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10370,7 +10370,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFF0000,
           0x9ED90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10382,7 +10382,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x1E390000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10394,7 +10394,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x1E790000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10406,7 +10406,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x1EF90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10418,7 +10418,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x9E390000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10430,7 +10430,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x9E790000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10442,7 +10442,7 @@ const bal_decoder_instruction_metadata_t
         { "FCVTZU",
           0xFFFFFC00,
           0x9EF90000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10562,7 +10562,7 @@ const bal_decoder_instruction_metadata_t
         { "FDIV",
           0xBFA0FC00,
           0x2E20FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10574,7 +10574,7 @@ const bal_decoder_instruction_metadata_t
         { "FDIV",
           0xBFE0FC00,
           0x2E403C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10586,7 +10586,7 @@ const bal_decoder_instruction_metadata_t
         { "FDIV",
           0xFFE0FC00,
           0x1E201800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10598,7 +10598,7 @@ const bal_decoder_instruction_metadata_t
         { "FDIV",
           0xFFE0FC00,
           0x1E601800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10610,7 +10610,7 @@ const bal_decoder_instruction_metadata_t
         { "FDIV",
           0xFFE0FC00,
           0x1EE01800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10766,7 +10766,7 @@ const bal_decoder_instruction_metadata_t
         { "FJCVTZS",
           0xFFFFFC00,
           0x1E7E0000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10802,7 +10802,7 @@ const bal_decoder_instruction_metadata_t
         { "FMADD",
           0xFFE08000,
           0x1F000000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10814,7 +10814,7 @@ const bal_decoder_instruction_metadata_t
         { "FMADD",
           0xFFE08000,
           0x1F400000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10826,7 +10826,7 @@ const bal_decoder_instruction_metadata_t
         { "FMADD",
           0xFFE08000,
           0x1FC00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10838,7 +10838,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAX",
           0xBFA0FC00,
           0x0E20F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10850,7 +10850,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAX",
           0xBFE0FC00,
           0x0E403400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10862,7 +10862,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAX",
           0xFFE0FC00,
           0x1E204800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -10874,7 +10874,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAX",
           0xFFE0FC00,
           0x1E604800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10886,7 +10886,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAX",
           0xFFE0FC00,
           0x1EE04800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10970,7 +10970,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNM",
           0xBFA0FC00,
           0x0E20C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10982,7 +10982,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNM",
           0xBFE0FC00,
           0x0E400400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -10994,7 +10994,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNM",
           0xFFE0FC00,
           0x1E206800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -11006,7 +11006,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNM",
           0xFFE0FC00,
           0x1E606800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11018,7 +11018,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNM",
           0xFFE0FC00,
           0x1EE06800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11102,7 +11102,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMP",
           0xFFBFFC00,
           0x5E30C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11114,7 +11114,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMP",
           0xFFBFFC00,
           0x7E30C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11126,7 +11126,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMP",
           0xBFA0FC00,
           0x2E20C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11138,7 +11138,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMP",
           0xBFE0FC00,
           0x2E400400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11174,7 +11174,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMV",
           0xBFBFFC00,
           0x2E30C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11186,7 +11186,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXNMV",
           0xBFFFFC00,
           0x0E30C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11210,7 +11210,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXP",
           0xFFBFFC00,
           0x5E30F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11222,7 +11222,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXP",
           0xFFBFFC00,
           0x7E30F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11234,7 +11234,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXP",
           0xBFA0FC00,
           0x2E20F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11246,7 +11246,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXP",
           0xBFE0FC00,
           0x2E403400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11282,7 +11282,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXV",
           0xBFBFFC00,
           0x2E30F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11294,7 +11294,7 @@ const bal_decoder_instruction_metadata_t
         { "FMAXV",
           0xBFFFFC00,
           0x0E30F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11318,7 +11318,7 @@ const bal_decoder_instruction_metadata_t
         { "FMIN",
           0xBFA0FC00,
           0x0EA0F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11330,7 +11330,7 @@ const bal_decoder_instruction_metadata_t
         { "FMIN",
           0xBFE0FC00,
           0x0EC03400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11342,7 +11342,7 @@ const bal_decoder_instruction_metadata_t
         { "FMIN",
           0xFFE0FC00,
           0x1E205800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -11354,7 +11354,7 @@ const bal_decoder_instruction_metadata_t
         { "FMIN",
           0xFFE0FC00,
           0x1E605800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11366,7 +11366,7 @@ const bal_decoder_instruction_metadata_t
         { "FMIN",
           0xFFE0FC00,
           0x1EE05800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11450,7 +11450,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNM",
           0xBFA0FC00,
           0x0EA0C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11462,7 +11462,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNM",
           0xBFE0FC00,
           0x0EC00400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11474,7 +11474,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNM",
           0xFFE0FC00,
           0x1E207800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -11486,7 +11486,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNM",
           0xFFE0FC00,
           0x1E607800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11498,7 +11498,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNM",
           0xFFE0FC00,
           0x1EE07800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11582,7 +11582,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMP",
           0xFFBFFC00,
           0x5EB0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11594,7 +11594,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMP",
           0xFFBFFC00,
           0x7EB0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11606,7 +11606,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMP",
           0xBFA0FC00,
           0x2EA0C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11618,7 +11618,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMP",
           0xBFE0FC00,
           0x2EC00400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11654,7 +11654,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMV",
           0xBFBFFC00,
           0x2EB0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11666,7 +11666,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINNMV",
           0xBFFFFC00,
           0x0EB0C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11690,7 +11690,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINP",
           0xFFBFFC00,
           0x5EB0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11702,7 +11702,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINP",
           0xFFBFFC00,
           0x7EB0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11714,7 +11714,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINP",
           0xBFA0FC00,
           0x2EA0F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11726,7 +11726,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINP",
           0xBFE0FC00,
           0x2EC03400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11762,7 +11762,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINV",
           0xBFBFFC00,
           0x2EB0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11774,7 +11774,7 @@ const bal_decoder_instruction_metadata_t
         { "FMINV",
           0xBFFFFC00,
           0x0EB0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11798,7 +11798,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xBF80F400,
           0x0F801000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11810,7 +11810,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xBFC0F400,
           0x0F001000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11822,7 +11822,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xFF80F400,
           0x5F801000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11834,7 +11834,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xFFC0F400,
           0x5F001000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11846,7 +11846,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xBFA0FC00,
           0x0E20CC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -11858,7 +11858,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLA",
           0xBFE0FC00,
           0x0E400C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12086,7 +12086,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLAL",
           0xBFC0F400,
           0x0F800000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12098,7 +12098,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLAL2",
           0xBFC0F400,
           0x2F808000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12110,7 +12110,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLAL",
           0xBFE0FC00,
           0x0E20EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12122,7 +12122,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLAL2",
           0xBFE0FC00,
           0x2E20CC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12278,7 +12278,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xBF80F400,
           0x0F805000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12290,7 +12290,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xBFC0F400,
           0x0F005000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12302,7 +12302,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xFF80F400,
           0x5F805000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12314,7 +12314,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xFFC0F400,
           0x5F005000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12326,7 +12326,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xBFA0FC00,
           0x0EA0CC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12338,7 +12338,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLS",
           0xBFE0FC00,
           0x0EC00C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12566,7 +12566,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLSL",
           0xBFC0F400,
           0x0F804000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12578,7 +12578,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLSL2",
           0xBFC0F400,
           0x2F80C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12590,7 +12590,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLSL",
           0xBFE0FC00,
           0x0EA0EC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12602,7 +12602,7 @@ const bal_decoder_instruction_metadata_t
         { "FMLSL2",
           0xBFE0FC00,
           0x2EA0CC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12878,7 +12878,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xBFF8FC00,
           0x0F00F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -12890,7 +12890,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xBFF8FC00,
           0x0F00FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -12902,7 +12902,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFF8FC00,
           0x6F00F400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -12962,7 +12962,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1E204000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -12974,7 +12974,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1E604000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12986,7 +12986,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1EE04000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -12998,7 +12998,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1E260000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13010,7 +13010,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1E270000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13022,7 +13022,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1EE60000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13034,7 +13034,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x1EE70000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13046,7 +13046,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9E660000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13058,7 +13058,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9E670000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -13070,7 +13070,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9EAE0000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13082,7 +13082,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9EAF0000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -13094,7 +13094,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9EE60000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13106,7 +13106,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFFFFC00,
           0x9EE70000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -13118,7 +13118,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFE01FE0,
           0x1E201000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -13130,7 +13130,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFE01FE0,
           0x1E601000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -13142,7 +13142,7 @@ const bal_decoder_instruction_metadata_t
         { "FMOV",
           0xFFE01FE0,
           0x1EE01000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -13166,7 +13166,7 @@ const bal_decoder_instruction_metadata_t
         { "FMSUB",
           0xFFE08000,
           0x1F008000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13178,7 +13178,7 @@ const bal_decoder_instruction_metadata_t
         { "FMSUB",
           0xFFE08000,
           0x1F408000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13190,7 +13190,7 @@ const bal_decoder_instruction_metadata_t
         { "FMSUB",
           0xFFE08000,
           0x1FC08000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13202,7 +13202,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xBF80F400,
           0x0F809000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13214,7 +13214,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xBFC0F400,
           0x0F009000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13226,7 +13226,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xFF80F400,
           0x5F809000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13238,7 +13238,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xFFC0F400,
           0x5F009000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13250,7 +13250,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xBFA0FC00,
           0x2E20DC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13262,7 +13262,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xBFE0FC00,
           0x2E401C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13274,7 +13274,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xFFE0FC00,
           0x1E200800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13286,7 +13286,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xFFE0FC00,
           0x1E600800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13298,7 +13298,7 @@ const bal_decoder_instruction_metadata_t
         { "FMUL",
           0xFFE0FC00,
           0x1EE00800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13382,7 +13382,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xBF80F400,
           0x2F809000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13394,7 +13394,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xBFC0F400,
           0x2F009000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13406,7 +13406,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xFF80F400,
           0x7F809000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13418,7 +13418,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xFFC0F400,
           0x7F009000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13430,7 +13430,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xBFA0FC00,
           0x0E20DC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13442,7 +13442,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xBFE0FC00,
           0x0E401C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13454,7 +13454,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xFFA0FC00,
           0x5E20DC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13466,7 +13466,7 @@ const bal_decoder_instruction_metadata_t
         { "FMULX",
           0xFFE0FC00,
           0x5E401C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13490,7 +13490,7 @@ const bal_decoder_instruction_metadata_t
         { "FNEG",
           0xBFBFFC00,
           0x2EA0F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13502,7 +13502,7 @@ const bal_decoder_instruction_metadata_t
         { "FNEG",
           0xBFFFFC00,
           0x2EF8F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13514,7 +13514,7 @@ const bal_decoder_instruction_metadata_t
         { "FNEG",
           0xFFFFFC00,
           0x1E214000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13526,7 +13526,7 @@ const bal_decoder_instruction_metadata_t
         { "FNEG",
           0xFFFFFC00,
           0x1E614000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13538,7 +13538,7 @@ const bal_decoder_instruction_metadata_t
         { "FNEG",
           0xFFFFFC00,
           0x1EE14000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13574,7 +13574,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMADD",
           0xFFE08000,
           0x1F200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13586,7 +13586,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMADD",
           0xFFE08000,
           0x1F600000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13598,7 +13598,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMADD",
           0xFFE08000,
           0x1FE00000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13646,7 +13646,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMSUB",
           0xFFE08000,
           0x1F208000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13658,7 +13658,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMSUB",
           0xFFE08000,
           0x1F608000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13670,7 +13670,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMSUB",
           0xFFE08000,
           0x1FE08000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13682,7 +13682,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMUL",
           0xFFE0FC00,
           0x1E208800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13694,7 +13694,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMUL",
           0xFFE0FC00,
           0x1E608800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13706,7 +13706,7 @@ const bal_decoder_instruction_metadata_t
         { "FNMUL",
           0xFFE0FC00,
           0x1EE08800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13718,7 +13718,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPE",
           0xBFBFFC00,
           0x0EA1D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13730,7 +13730,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPE",
           0xBFFFFC00,
           0x0EF9D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13742,7 +13742,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPE",
           0xFFBFFC00,
           0x5EA1D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13754,7 +13754,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPE",
           0xFFFFFC00,
           0x5EF9D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13778,7 +13778,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPS",
           0xBFA0FC00,
           0x0E20FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13790,7 +13790,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPS",
           0xBFE0FC00,
           0x0E403C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13802,7 +13802,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPS",
           0xFFA0FC00,
           0x5E20FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13814,7 +13814,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPS",
           0xFFE0FC00,
           0x5E403C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13838,7 +13838,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPX",
           0xFFBFFC00,
           0x5EA1F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13850,7 +13850,7 @@ const bal_decoder_instruction_metadata_t
         { "FRECPX",
           0xFFFFFC00,
           0x5EF9F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13874,7 +13874,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32X",
           0xBFBFFC00,
           0x2E21E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13886,7 +13886,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32X",
           0xFFFFFC00,
           0x1E28C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13898,7 +13898,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32X",
           0xFFFFFC00,
           0x1E68C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13910,7 +13910,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32Z",
           0xBFBFFC00,
           0x0E21E800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13922,7 +13922,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32Z",
           0xFFFFFC00,
           0x1E284000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13934,7 +13934,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT32Z",
           0xFFFFFC00,
           0x1E684000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13946,7 +13946,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64X",
           0xBFBFFC00,
           0x2E21F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13958,7 +13958,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64X",
           0xFFFFFC00,
           0x1E29C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -13970,7 +13970,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64X",
           0xFFFFFC00,
           0x1E69C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13982,7 +13982,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64Z",
           0xBFBFFC00,
           0x0E21F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -13994,7 +13994,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64Z",
           0xFFFFFC00,
           0x1E294000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14006,7 +14006,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINT64Z",
           0xFFFFFC00,
           0x1E694000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14018,7 +14018,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTA",
           0xBFBFFC00,
           0x2E218800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14030,7 +14030,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTA",
           0xBFFFFC00,
           0x2E798800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14042,7 +14042,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTA",
           0xFFFFFC00,
           0x1E264000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14054,7 +14054,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTA",
           0xFFFFFC00,
           0x1E664000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14066,7 +14066,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTA",
           0xFFFFFC00,
           0x1EE64000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14186,7 +14186,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTI",
           0xBFBFFC00,
           0x2EA19800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14198,7 +14198,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTI",
           0xBFFFFC00,
           0x2EF99800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14210,7 +14210,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTI",
           0xFFFFFC00,
           0x1E27C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14222,7 +14222,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTI",
           0xFFFFFC00,
           0x1E67C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14234,7 +14234,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTI",
           0xFFFFFC00,
           0x1EE7C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14246,7 +14246,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTM",
           0xBFBFFC00,
           0x0E219800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14258,7 +14258,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTM",
           0xBFFFFC00,
           0x0E799800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14270,7 +14270,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTM",
           0xFFFFFC00,
           0x1E254000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14282,7 +14282,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTM",
           0xFFFFFC00,
           0x1E654000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14294,7 +14294,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTM",
           0xFFFFFC00,
           0x1EE54000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14330,7 +14330,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTN",
           0xBFBFFC00,
           0x0E218800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14342,7 +14342,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTN",
           0xBFFFFC00,
           0x0E798800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14354,7 +14354,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTN",
           0xFFFFFC00,
           0x1E244000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14366,7 +14366,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTN",
           0xFFFFFC00,
           0x1E644000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14378,7 +14378,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTN",
           0xFFFFFC00,
           0x1EE44000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14414,7 +14414,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTP",
           0xBFBFFC00,
           0x0EA18800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14426,7 +14426,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTP",
           0xBFFFFC00,
           0x0EF98800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14438,7 +14438,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTP",
           0xFFFFFC00,
           0x1E24C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14450,7 +14450,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTP",
           0xFFFFFC00,
           0x1E64C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14462,7 +14462,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTP",
           0xFFFFFC00,
           0x1EE4C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14498,7 +14498,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTX",
           0xBFBFFC00,
           0x2E219800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14510,7 +14510,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTX",
           0xBFFFFC00,
           0x2E799800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14522,7 +14522,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTX",
           0xFFFFFC00,
           0x1E274000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14534,7 +14534,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTX",
           0xFFFFFC00,
           0x1E674000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14546,7 +14546,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTX",
           0xFFFFFC00,
           0x1EE74000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14558,7 +14558,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTZ",
           0xBFBFFC00,
           0x0EA19800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14570,7 +14570,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTZ",
           0xBFFFFC00,
           0x0EF99800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14582,7 +14582,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTZ",
           0xFFFFFC00,
           0x1E25C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14594,7 +14594,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTZ",
           0xFFFFFC00,
           0x1E65C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14606,7 +14606,7 @@ const bal_decoder_instruction_metadata_t
         { "FRINTZ",
           0xFFFFFC00,
           0x1EE5C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14618,7 +14618,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTE",
           0xBFBFFC00,
           0x2EA1D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14630,7 +14630,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTE",
           0xBFFFFC00,
           0x2EF9D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14642,7 +14642,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTE",
           0xFFBFFC00,
           0x7EA1D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14654,7 +14654,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTE",
           0xFFFFFC00,
           0x7EF9D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14678,7 +14678,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTS",
           0xBFA0FC00,
           0x0EA0FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14690,7 +14690,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTS",
           0xBFE0FC00,
           0x0EC03C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14702,7 +14702,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTS",
           0xFFA0FC00,
           0x5EA0FC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14714,7 +14714,7 @@ const bal_decoder_instruction_metadata_t
         { "FRSQRTS",
           0xFFE0FC00,
           0x5EC03C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14750,7 +14750,7 @@ const bal_decoder_instruction_metadata_t
         { "FSQRT",
           0xBFBFFC00,
           0x2EA1F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14762,7 +14762,7 @@ const bal_decoder_instruction_metadata_t
         { "FSQRT",
           0xBFFFFC00,
           0x2EF9F800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14774,7 +14774,7 @@ const bal_decoder_instruction_metadata_t
         { "FSQRT",
           0xFFFFFC00,
           0x1E21C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14786,7 +14786,7 @@ const bal_decoder_instruction_metadata_t
         { "FSQRT",
           0xFFFFFC00,
           0x1E61C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14798,7 +14798,7 @@ const bal_decoder_instruction_metadata_t
         { "FSQRT",
           0xFFFFFC00,
           0x1EE1C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14822,7 +14822,7 @@ const bal_decoder_instruction_metadata_t
         { "FSUB",
           0xBFA0FC00,
           0x0EA0D400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14834,7 +14834,7 @@ const bal_decoder_instruction_metadata_t
         { "FSUB",
           0xBFE0FC00,
           0x0EC01400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14846,7 +14846,7 @@ const bal_decoder_instruction_metadata_t
         { "FSUB",
           0xFFE0FC00,
           0x1E203800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -14858,7 +14858,7 @@ const bal_decoder_instruction_metadata_t
         { "FSUB",
           0xFFE0FC00,
           0x1E603800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -14870,7 +14870,7 @@ const bal_decoder_instruction_metadata_t
         { "FSUB",
           0xFFE0FC00,
           0x1EE03800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -15350,7 +15350,7 @@ const bal_decoder_instruction_metadata_t
         { "INS",
           0xFFE08400,
           0x6E000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -15362,7 +15362,7 @@ const bal_decoder_instruction_metadata_t
         { "INS",
           0xFFE0FC00,
           0x4E001C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15410,7 +15410,7 @@ const bal_decoder_instruction_metadata_t
         { "ISB",
           0xFFFFF0FF,
           0xD50330DF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -15470,7 +15470,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0F000,
           0x0CC02000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15482,7 +15482,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0F000,
           0x0CC06000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15494,7 +15494,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0F000,
           0x0CC07000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15506,7 +15506,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0F000,
           0x0CC0A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15518,7 +15518,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0C402000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15530,7 +15530,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0C406000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15542,7 +15542,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0C407000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15554,7 +15554,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0C40A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15566,7 +15566,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0CDF2000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15578,7 +15578,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0CDF6000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15590,7 +15590,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0CDF7000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15602,7 +15602,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFF000,
           0x0CDFA000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15614,7 +15614,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0E000,
           0x0DC00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15626,7 +15626,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0E400,
           0x0DC04000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15638,7 +15638,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0EC00,
           0x0DC08000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15650,7 +15650,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFE0FC00,
           0x0DC08400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15662,7 +15662,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFE000,
           0x0D400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15674,7 +15674,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFE000,
           0x0DDF0000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15686,7 +15686,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFE400,
           0x0D404000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15698,7 +15698,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFE400,
           0x0DDF4000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15710,7 +15710,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFEC00,
           0x0D408000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15722,7 +15722,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFEC00,
           0x0DDF8000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15734,7 +15734,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFFC00,
           0x0D408400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -15746,7 +15746,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1",
           0xBFFFFC00,
           0x0DDF8400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -16538,7 +16538,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1R",
           0xBFE0F000,
           0x0DC0C000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -16550,7 +16550,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1R",
           0xBFFFF000,
           0x0D40C000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -16562,7 +16562,7 @@ const bal_decoder_instruction_metadata_t
         { "LD1R",
           0xBFFFF000,
           0x0DDFC000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17594,7 +17594,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFE0F000,
           0x0CC08000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17606,7 +17606,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFF000,
           0x0C408000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17618,7 +17618,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFF000,
           0x0CDF8000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17630,7 +17630,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFE0E000,
           0x0DE00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17642,7 +17642,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFE0E400,
           0x0DE04000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17654,7 +17654,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFE0EC00,
           0x0DE08000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17666,7 +17666,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFE0FC00,
           0x0DE08400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17678,7 +17678,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFE000,
           0x0D600000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17690,7 +17690,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFE000,
           0x0DFF0000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17702,7 +17702,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFE400,
           0x0D604000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17714,7 +17714,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFE400,
           0x0DFF4000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17726,7 +17726,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFEC00,
           0x0D608000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17738,7 +17738,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFEC00,
           0x0DFF8000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17750,7 +17750,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFFC00,
           0x0D608400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17762,7 +17762,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2",
           0xBFFFFC00,
           0x0DFF8400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17870,7 +17870,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2R",
           0xBFE0F000,
           0x0DE0C000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17882,7 +17882,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2R",
           0xBFFFF000,
           0x0D60C000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17894,7 +17894,7 @@ const bal_decoder_instruction_metadata_t
         { "LD2R",
           0xBFFFF000,
           0x0DFFC000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17930,7 +17930,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFE0F000,
           0x0CC04000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17942,7 +17942,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFF000,
           0x0C404000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17954,7 +17954,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFF000,
           0x0CDF4000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17966,7 +17966,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFE0E000,
           0x0DC02000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17978,7 +17978,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFE0E400,
           0x0DC06000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -17990,7 +17990,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFE0EC00,
           0x0DC0A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18002,7 +18002,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFE0FC00,
           0x0DC0A400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18014,7 +18014,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFE000,
           0x0D402000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18026,7 +18026,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFE000,
           0x0DDF2000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18038,7 +18038,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFE400,
           0x0D406000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18050,7 +18050,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFE400,
           0x0DDF6000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18062,7 +18062,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFEC00,
           0x0D40A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18074,7 +18074,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFEC00,
           0x0DDFA000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18086,7 +18086,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFFC00,
           0x0D40A400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18098,7 +18098,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3",
           0xBFFFFC00,
           0x0DDFA400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18206,7 +18206,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3R",
           0xBFE0F000,
           0x0DC0E000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18218,7 +18218,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3R",
           0xBFFFF000,
           0x0D40E000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18230,7 +18230,7 @@ const bal_decoder_instruction_metadata_t
         { "LD3R",
           0xBFFFF000,
           0x0DDFE000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18266,7 +18266,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFE0F000,
           0x0CC00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18278,7 +18278,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFF000,
           0x0C400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18290,7 +18290,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFF000,
           0x0CDF0000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18302,7 +18302,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFE0E000,
           0x0DE02000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18314,7 +18314,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFE0E400,
           0x0DE06000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18326,7 +18326,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFE0EC00,
           0x0DE0A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18338,7 +18338,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFE0FC00,
           0x0DE0A400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18350,7 +18350,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFE000,
           0x0D602000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18362,7 +18362,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFE000,
           0x0DFF2000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18374,7 +18374,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFE400,
           0x0D606000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18386,7 +18386,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFE400,
           0x0DFF6000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18398,7 +18398,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFEC00,
           0x0D60A000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18410,7 +18410,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFEC00,
           0x0DFFA000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18422,7 +18422,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFFC00,
           0x0D60A400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18434,7 +18434,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4",
           0xBFFFFC00,
           0x0DFFA400,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18542,7 +18542,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4R",
           0xBFE0F000,
           0x0DE0E000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18554,7 +18554,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4R",
           0xBFFFF000,
           0x0D60E000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18566,7 +18566,7 @@ const bal_decoder_instruction_metadata_t
         { "LD4R",
           0xBFFFF000,
           0x0DFFE000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18614,7 +18614,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADD",
           0xFFE0FC00,
           0xB8200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18626,7 +18626,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADD",
           0xFFE0FC00,
           0xF8200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18638,7 +18638,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDA",
           0xFFE0FC00,
           0xB8A00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18650,7 +18650,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDA",
           0xFFE0FC00,
           0xF8A00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18662,7 +18662,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDAL",
           0xFFE0FC00,
           0xB8E00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18674,7 +18674,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDAL",
           0xFFE0FC00,
           0xF8E00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18686,7 +18686,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDL",
           0xFFE0FC00,
           0xB8600000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18698,7 +18698,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDL",
           0xFFE0FC00,
           0xF8600000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18710,7 +18710,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDAB",
           0xFFE0FC00,
           0x38A00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18722,7 +18722,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDALB",
           0xFFE0FC00,
           0x38E00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18734,7 +18734,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDB",
           0xFFE0FC00,
           0x38200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18746,7 +18746,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDLB",
           0xFFE0FC00,
           0x38600000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18758,7 +18758,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDAH",
           0xFFE0FC00,
           0x78A00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18770,7 +18770,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDALH",
           0xFFE0FC00,
           0x78E00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18782,7 +18782,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDH",
           0xFFE0FC00,
           0x78200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18794,7 +18794,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDLH",
           0xFFE0FC00,
           0x78600000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18818,7 +18818,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPR",
           0xFFFFFC00,
           0x99C00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18830,7 +18830,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPR",
           0xFFFFFC00,
           0xB8BFC000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18842,7 +18842,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPR",
           0xFFFFFC00,
           0xD9C00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18854,7 +18854,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPR",
           0xFFFFFC00,
           0xF8BFC000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18866,7 +18866,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPRB",
           0xFFFFFC00,
           0x38BFC000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18878,7 +18878,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPRH",
           0xFFFFFC00,
           0x78BFC000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18890,7 +18890,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0x1D400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18902,7 +18902,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0x1DC00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18914,7 +18914,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0x5D400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18926,7 +18926,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0x9D400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18938,7 +18938,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0xDD400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18950,7 +18950,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0x99400000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18962,7 +18962,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPUR",
           0xFFE00C00,
           0xD9400000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18974,7 +18974,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURB",
           0xFFE00C00,
           0x19400000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18986,7 +18986,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURH",
           0xFFE00C00,
           0x59400000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -18998,7 +18998,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURSB",
           0xFFE00C00,
           0x19800000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19010,7 +19010,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURSB",
           0xFFE00C00,
           0x19C00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19022,7 +19022,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURSH",
           0xFFE00C00,
           0x59800000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19034,7 +19034,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURSH",
           0xFFE00C00,
           0x59C00000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19046,7 +19046,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAPURSW",
           0xFFE00C00,
           0x99800000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19058,7 +19058,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAR",
           0xFFFFFC00,
           0x88DFFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19070,7 +19070,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAR",
           0xFFFFFC00,
           0xC8DFFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19082,7 +19082,7 @@ const bal_decoder_instruction_metadata_t
         { "LDARB",
           0xFFFFFC00,
           0x08DFFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19094,7 +19094,7 @@ const bal_decoder_instruction_metadata_t
         { "LDARH",
           0xFFFFFC00,
           0x48DFFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19106,7 +19106,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXP",
           0xFFFF8000,
           0x887F8000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19118,7 +19118,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXP",
           0xFFFF8000,
           0xC87F8000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19130,7 +19130,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXR",
           0xFFFFFC00,
           0x885FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19142,7 +19142,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXR",
           0xFFFFFC00,
           0xC85FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19154,7 +19154,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXRB",
           0xFFFFFC00,
           0x085FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19166,7 +19166,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAXRH",
           0xFFFFFC00,
           0x485FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19178,7 +19178,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLR",
           0xFFE0FC00,
           0xB8201000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19190,7 +19190,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLR",
           0xFFE0FC00,
           0xF8201000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19202,7 +19202,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRA",
           0xFFE0FC00,
           0xB8A01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19214,7 +19214,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRA",
           0xFFE0FC00,
           0xF8A01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19226,7 +19226,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRAL",
           0xFFE0FC00,
           0xB8E01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19238,7 +19238,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRAL",
           0xFFE0FC00,
           0xF8E01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19250,7 +19250,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRL",
           0xFFE0FC00,
           0xB8601000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19262,7 +19262,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRL",
           0xFFE0FC00,
           0xF8601000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19274,7 +19274,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRAB",
           0xFFE0FC00,
           0x38A01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19286,7 +19286,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRALB",
           0xFFE0FC00,
           0x38E01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19298,7 +19298,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRB",
           0xFFE0FC00,
           0x38201000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19310,7 +19310,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRLB",
           0xFFE0FC00,
           0x38601000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19322,7 +19322,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRAH",
           0xFFE0FC00,
           0x78A01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19334,7 +19334,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRALH",
           0xFFE0FC00,
           0x78E01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19346,7 +19346,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRH",
           0xFFE0FC00,
           0x78201000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19358,7 +19358,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRLH",
           0xFFE0FC00,
           0x78601000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19418,7 +19418,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEOR",
           0xFFE0FC00,
           0xB8202000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19430,7 +19430,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEOR",
           0xFFE0FC00,
           0xF8202000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19442,7 +19442,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORA",
           0xFFE0FC00,
           0xB8A02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19454,7 +19454,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORA",
           0xFFE0FC00,
           0xF8A02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19466,7 +19466,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORAL",
           0xFFE0FC00,
           0xB8E02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19478,7 +19478,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORAL",
           0xFFE0FC00,
           0xF8E02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19490,7 +19490,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORL",
           0xFFE0FC00,
           0xB8602000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19502,7 +19502,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORL",
           0xFFE0FC00,
           0xF8602000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19514,7 +19514,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORAB",
           0xFFE0FC00,
           0x38A02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19526,7 +19526,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORALB",
           0xFFE0FC00,
           0x38E02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19538,7 +19538,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORB",
           0xFFE0FC00,
           0x38202000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19550,7 +19550,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORLB",
           0xFFE0FC00,
           0x38602000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19562,7 +19562,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORAH",
           0xFFE0FC00,
           0x78A02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19574,7 +19574,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORALH",
           0xFFE0FC00,
           0x78E02000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19586,7 +19586,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORH",
           0xFFE0FC00,
           0x78202000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19598,7 +19598,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORLH",
           0xFFE0FC00,
           0x78602000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20402,7 +20402,7 @@ const bal_decoder_instruction_metadata_t
         { "LDLAR",
           0xFFFFFC00,
           0x88DF7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20414,7 +20414,7 @@ const bal_decoder_instruction_metadata_t
         { "LDLAR",
           0xFFFFFC00,
           0xC8DF7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20426,7 +20426,7 @@ const bal_decoder_instruction_metadata_t
         { "LDLARB",
           0xFFFFFC00,
           0x08DF7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20438,7 +20438,7 @@ const bal_decoder_instruction_metadata_t
         { "LDLARH",
           0xFFFFFC00,
           0x48DF7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20642,7 +20642,7 @@ const bal_decoder_instruction_metadata_t
         { "LDNP",
           0xFFC00000,
           0x2C400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20654,7 +20654,7 @@ const bal_decoder_instruction_metadata_t
         { "LDNP",
           0xFFC00000,
           0x6C400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20666,7 +20666,7 @@ const bal_decoder_instruction_metadata_t
         { "LDNP",
           0xFFC00000,
           0xAC400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20678,7 +20678,7 @@ const bal_decoder_instruction_metadata_t
         { "LDNP",
           0xFFC00000,
           0x28400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20690,7 +20690,7 @@ const bal_decoder_instruction_metadata_t
         { "LDNP",
           0xFFC00000,
           0xA8400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22430,7 +22430,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSET",
           0xFFE0FC00,
           0xB8203000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22442,7 +22442,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSET",
           0xFFE0FC00,
           0xF8203000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22454,7 +22454,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETA",
           0xFFE0FC00,
           0xB8A03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22466,7 +22466,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETA",
           0xFFE0FC00,
           0xF8A03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22478,7 +22478,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETAL",
           0xFFE0FC00,
           0xB8E03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22490,7 +22490,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETAL",
           0xFFE0FC00,
           0xF8E03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22502,7 +22502,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETL",
           0xFFE0FC00,
           0xB8603000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22514,7 +22514,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETL",
           0xFFE0FC00,
           0xF8603000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22526,7 +22526,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETAB",
           0xFFE0FC00,
           0x38A03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22538,7 +22538,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETALB",
           0xFFE0FC00,
           0x38E03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22550,7 +22550,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETB",
           0xFFE0FC00,
           0x38203000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22562,7 +22562,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETLB",
           0xFFE0FC00,
           0x38603000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22574,7 +22574,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETAH",
           0xFFE0FC00,
           0x78A03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22586,7 +22586,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETALH",
           0xFFE0FC00,
           0x78E03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22598,7 +22598,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETH",
           0xFFE0FC00,
           0x78203000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22610,7 +22610,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETLH",
           0xFFE0FC00,
           0x78603000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22670,7 +22670,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAX",
           0xFFE0FC00,
           0xB8204000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22682,7 +22682,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAX",
           0xFFE0FC00,
           0xF8204000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22694,7 +22694,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXA",
           0xFFE0FC00,
           0xB8A04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22706,7 +22706,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXA",
           0xFFE0FC00,
           0xF8A04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22718,7 +22718,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXAL",
           0xFFE0FC00,
           0xB8E04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22730,7 +22730,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXAL",
           0xFFE0FC00,
           0xF8E04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22742,7 +22742,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXL",
           0xFFE0FC00,
           0xB8604000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22754,7 +22754,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXL",
           0xFFE0FC00,
           0xF8604000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22766,7 +22766,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXAB",
           0xFFE0FC00,
           0x38A04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22778,7 +22778,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXALB",
           0xFFE0FC00,
           0x38E04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22790,7 +22790,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXB",
           0xFFE0FC00,
           0x38204000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22802,7 +22802,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXLB",
           0xFFE0FC00,
           0x38604000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22814,7 +22814,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXAH",
           0xFFE0FC00,
           0x78A04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22826,7 +22826,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXALH",
           0xFFE0FC00,
           0x78E04000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22838,7 +22838,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXH",
           0xFFE0FC00,
           0x78204000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22850,7 +22850,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXLH",
           0xFFE0FC00,
           0x78604000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22862,7 +22862,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMIN",
           0xFFE0FC00,
           0xB8205000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22874,7 +22874,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMIN",
           0xFFE0FC00,
           0xF8205000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22886,7 +22886,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINA",
           0xFFE0FC00,
           0xB8A05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22898,7 +22898,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINA",
           0xFFE0FC00,
           0xF8A05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22910,7 +22910,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINAL",
           0xFFE0FC00,
           0xB8E05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22922,7 +22922,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINAL",
           0xFFE0FC00,
           0xF8E05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22934,7 +22934,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINL",
           0xFFE0FC00,
           0xB8605000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22946,7 +22946,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINL",
           0xFFE0FC00,
           0xF8605000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22958,7 +22958,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINAB",
           0xFFE0FC00,
           0x38A05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22970,7 +22970,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINALB",
           0xFFE0FC00,
           0x38E05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22982,7 +22982,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINB",
           0xFFE0FC00,
           0x38205000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22994,7 +22994,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINLB",
           0xFFE0FC00,
           0x38605000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23006,7 +23006,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINAH",
           0xFFE0FC00,
           0x78A05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23018,7 +23018,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINALH",
           0xFFE0FC00,
           0x78E05000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23030,7 +23030,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINH",
           0xFFE0FC00,
           0x78205000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23042,7 +23042,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINLH",
           0xFFE0FC00,
           0x78605000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23054,7 +23054,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTR",
           0xFFE00C00,
           0xB8400800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23066,7 +23066,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTR",
           0xFFE00C00,
           0xF8400800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23078,7 +23078,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRB",
           0xFFE00C00,
           0x38400800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23090,7 +23090,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRH",
           0xFFE00C00,
           0x78400800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23102,7 +23102,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRSB",
           0xFFE00C00,
           0x38800800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23114,7 +23114,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRSB",
           0xFFE00C00,
           0x38C00800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23126,7 +23126,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRSH",
           0xFFE00C00,
           0x78800800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23138,7 +23138,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRSH",
           0xFFE00C00,
           0x78C00800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23150,7 +23150,7 @@ const bal_decoder_instruction_metadata_t
         { "LDTRSW",
           0xFFE00C00,
           0xB8800800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23162,7 +23162,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAX",
           0xFFE0FC00,
           0xB8206000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23174,7 +23174,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAX",
           0xFFE0FC00,
           0xF8206000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23186,7 +23186,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXA",
           0xFFE0FC00,
           0xB8A06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23198,7 +23198,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXA",
           0xFFE0FC00,
           0xF8A06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23210,7 +23210,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXAL",
           0xFFE0FC00,
           0xB8E06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23222,7 +23222,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXAL",
           0xFFE0FC00,
           0xF8E06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23234,7 +23234,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXL",
           0xFFE0FC00,
           0xB8606000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23246,7 +23246,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXL",
           0xFFE0FC00,
           0xF8606000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23258,7 +23258,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXAB",
           0xFFE0FC00,
           0x38A06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23270,7 +23270,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXALB",
           0xFFE0FC00,
           0x38E06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23282,7 +23282,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXB",
           0xFFE0FC00,
           0x38206000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23294,7 +23294,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXLB",
           0xFFE0FC00,
           0x38606000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23306,7 +23306,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXAH",
           0xFFE0FC00,
           0x78A06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23318,7 +23318,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXALH",
           0xFFE0FC00,
           0x78E06000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23330,7 +23330,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXH",
           0xFFE0FC00,
           0x78206000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23342,7 +23342,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXLH",
           0xFFE0FC00,
           0x78606000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23354,7 +23354,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMIN",
           0xFFE0FC00,
           0xB8207000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23366,7 +23366,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMIN",
           0xFFE0FC00,
           0xF8207000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23378,7 +23378,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINA",
           0xFFE0FC00,
           0xB8A07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23390,7 +23390,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINA",
           0xFFE0FC00,
           0xF8A07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23402,7 +23402,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINAL",
           0xFFE0FC00,
           0xB8E07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23414,7 +23414,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINAL",
           0xFFE0FC00,
           0xF8E07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23426,7 +23426,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINL",
           0xFFE0FC00,
           0xB8607000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23438,7 +23438,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINL",
           0xFFE0FC00,
           0xF8607000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23450,7 +23450,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINAB",
           0xFFE0FC00,
           0x38A07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23462,7 +23462,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINALB",
           0xFFE0FC00,
           0x38E07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23474,7 +23474,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINB",
           0xFFE0FC00,
           0x38207000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23486,7 +23486,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINLB",
           0xFFE0FC00,
           0x38607000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23498,7 +23498,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINAH",
           0xFFE0FC00,
           0x78A07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23510,7 +23510,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINALH",
           0xFFE0FC00,
           0x78E07000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23522,7 +23522,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINH",
           0xFFE0FC00,
           0x78207000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23534,7 +23534,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINLH",
           0xFFE0FC00,
           0x78607000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23546,7 +23546,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0x3C400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23558,7 +23558,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0x3CC00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23570,7 +23570,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0x7C400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23582,7 +23582,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0xBC400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23594,7 +23594,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0xFC400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23606,7 +23606,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0xB8400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23618,7 +23618,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUR",
           0xFFE00C00,
           0xF8400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23630,7 +23630,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURB",
           0xFFE00C00,
           0x38400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23642,7 +23642,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURH",
           0xFFE00C00,
           0x78400000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23654,7 +23654,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURSB",
           0xFFE00C00,
           0x38800000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23666,7 +23666,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURSB",
           0xFFE00C00,
           0x38C00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23678,7 +23678,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURSH",
           0xFFE00C00,
           0x78800000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23690,7 +23690,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURSH",
           0xFFE00C00,
           0x78C00000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23702,7 +23702,7 @@ const bal_decoder_instruction_metadata_t
         { "LDURSW",
           0xFFE00C00,
           0xB8800000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23714,7 +23714,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXP",
           0xFFFF8000,
           0x887F0000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23726,7 +23726,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXP",
           0xFFFF8000,
           0xC87F0000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23738,7 +23738,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXR",
           0xFFFFFC00,
           0x885F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23750,7 +23750,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXR",
           0xFFFFFC00,
           0xC85F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23762,7 +23762,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXRB",
           0xFFFFFC00,
           0x085F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -23774,7 +23774,7 @@ const bal_decoder_instruction_metadata_t
         { "LDXRH",
           0xFFFFFC00,
           0x485F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -24242,7 +24242,7 @@ const bal_decoder_instruction_metadata_t
         { "MLA",
           0xBF00F400,
           0x2F000000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24254,7 +24254,7 @@ const bal_decoder_instruction_metadata_t
         { "MLA",
           0xBF20FC00,
           0x0E209400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24314,7 +24314,7 @@ const bal_decoder_instruction_metadata_t
         { "MLS",
           0xBF00F400,
           0x2F004000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24326,7 +24326,7 @@ const bal_decoder_instruction_metadata_t
         { "MLS",
           0xBF20FC00,
           0x2E209400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24494,7 +24494,7 @@ const bal_decoder_instruction_metadata_t
         { "DUP",
           0xFFE0FC00,
           0x5E000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24554,7 +24554,7 @@ const bal_decoder_instruction_metadata_t
         { "INS",
           0xFFE08400,
           0x6E000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -24566,7 +24566,7 @@ const bal_decoder_instruction_metadata_t
         { "INS",
           0xFFE0FC00,
           0x4E001C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -24986,7 +24986,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFE0FC00,
           0x0EA01C00,
-          OPCODE_OR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -25094,7 +25094,7 @@ const bal_decoder_instruction_metadata_t
         { "UMOV",
           0xFFE7FC00,
           0x0E043C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -25106,7 +25106,7 @@ const bal_decoder_instruction_metadata_t
         { "UMOV",
           0xFFEFFC00,
           0x4E083C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -25658,7 +25658,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xBFF89C00,
           0x0F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25670,7 +25670,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xBFF8DC00,
           0x0F008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25682,7 +25682,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xBFF8EC00,
           0x0F00C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25694,7 +25694,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xBFF8FC00,
           0x0F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25706,7 +25706,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xFFF8FC00,
           0x2F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25718,7 +25718,7 @@ const bal_decoder_instruction_metadata_t
         { "MOVI",
           0xFFF8FC00,
           0x6F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -25886,7 +25886,7 @@ const bal_decoder_instruction_metadata_t
         { "MRS",
           0xFFF00000,
           0xD5300000,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
@@ -25910,7 +25910,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFF8F01F,
           0xD500401F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 8, 4 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -25922,7 +25922,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFF00000,
           0xD5100000,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
@@ -25970,7 +25970,7 @@ const bal_decoder_instruction_metadata_t
         { "MUL",
           0xBF00F400,
           0x0F008000,
-          OPCODE_MUL,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -25982,7 +25982,7 @@ const bal_decoder_instruction_metadata_t
         { "MUL",
           0xBF20FC00,
           0x0E209C00,
-          OPCODE_MUL,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26090,7 +26090,7 @@ const bal_decoder_instruction_metadata_t
         { "NOT",
           0xBFFFFC00,
           0x2E205800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26126,7 +26126,7 @@ const bal_decoder_instruction_metadata_t
         { "MVNI",
           0xBFF89C00,
           0x2F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26138,7 +26138,7 @@ const bal_decoder_instruction_metadata_t
         { "MVNI",
           0xBFF8DC00,
           0x2F008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26150,7 +26150,7 @@ const bal_decoder_instruction_metadata_t
         { "MVNI",
           0xBFF8EC00,
           0x2F00C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26198,7 +26198,7 @@ const bal_decoder_instruction_metadata_t
         { "NEG",
           0xBF3FFC00,
           0x2E20B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26210,7 +26210,7 @@ const bal_decoder_instruction_metadata_t
         { "NEG",
           0xFF3FFC00,
           0x7E20B800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26378,7 +26378,7 @@ const bal_decoder_instruction_metadata_t
         { "NOT",
           0xBFFFFC00,
           0x2E205800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26426,7 +26426,7 @@ const bal_decoder_instruction_metadata_t
         { "ORN",
           0xBFE0FC00,
           0x0EE01C00,
-          OPCODE_OR_NOT,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26510,7 +26510,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFF89C00,
           0x0F001400,
-          OPCODE_OR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26522,7 +26522,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFF8DC00,
           0x0F009400,
-          OPCODE_OR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 1 },
@@ -26534,7 +26534,7 @@ const bal_decoder_instruction_metadata_t
         { "ORR",
           0xBFE0FC00,
           0x0EA01C00,
-          OPCODE_OR,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -26990,7 +26990,7 @@ const bal_decoder_instruction_metadata_t
         { "PMUL",
           0xBF20FC00,
           0x2E209C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -27014,7 +27014,7 @@ const bal_decoder_instruction_metadata_t
         { "PMULL",
           0xBF20FC00,
           0x0E20E000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -27338,7 +27338,7 @@ const bal_decoder_instruction_metadata_t
         { "PRFM",
           0xFFC00000,
           0xF9800000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27350,7 +27350,7 @@ const bal_decoder_instruction_metadata_t
         { "PRFM",
           0xFF000000,
           0xD8000000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -27362,7 +27362,7 @@ const bal_decoder_instruction_metadata_t
         { "PRFM",
           0xFFE04C00,
           0xF8A04800,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27374,7 +27374,7 @@ const bal_decoder_instruction_metadata_t
         { "PRFUM",
           0xFFE00C00,
           0xF8800000,
-          OPCODE_TRAP,
+          OPCODE_LOAD,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27494,7 +27494,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFFFFF,
           0xD503349F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -27578,7 +27578,7 @@ const bal_decoder_instruction_metadata_t
         { "RADDHN",
           0xBF20FC00,
           0x2E204000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -27614,7 +27614,7 @@ const bal_decoder_instruction_metadata_t
         { "RAX1",
           0xFFE0FC00,
           0xCE608C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -27638,7 +27638,7 @@ const bal_decoder_instruction_metadata_t
         { "RBIT",
           0xBFFFFC00,
           0x2E605800,
-          OPCODE_REVERSE,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28574,7 +28574,7 @@ const bal_decoder_instruction_metadata_t
         { "REV16",
           0xBF3FFC00,
           0x0E201800,
-          OPCODE_REVERSE,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28610,7 +28610,7 @@ const bal_decoder_instruction_metadata_t
         { "REV32",
           0xBF3FFC00,
           0x2E200800,
-          OPCODE_REVERSE,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28634,7 +28634,7 @@ const bal_decoder_instruction_metadata_t
         { "REV64",
           0xBF3FFC00,
           0x0E200800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28826,7 +28826,7 @@ const bal_decoder_instruction_metadata_t
         { "RSHRN",
           0xBF80FC00,
           0x0F008C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28862,7 +28862,7 @@ const bal_decoder_instruction_metadata_t
         { "RSUBHN",
           0xBF20FC00,
           0x2E206000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28898,7 +28898,7 @@ const bal_decoder_instruction_metadata_t
         { "SABA",
           0xBF20FC00,
           0x0E207C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28922,7 +28922,7 @@ const bal_decoder_instruction_metadata_t
         { "SABAL",
           0xBF20FC00,
           0x0E205000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28958,7 +28958,7 @@ const bal_decoder_instruction_metadata_t
         { "SABD",
           0xBF20FC00,
           0x0E207400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -28982,7 +28982,7 @@ const bal_decoder_instruction_metadata_t
         { "SABDL",
           0xBF20FC00,
           0x0E207000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29018,7 +29018,7 @@ const bal_decoder_instruction_metadata_t
         { "SADALP",
           0xBF3FFC00,
           0x0E206800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29042,7 +29042,7 @@ const bal_decoder_instruction_metadata_t
         { "SADDL",
           0xBF20FC00,
           0x0E200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29078,7 +29078,7 @@ const bal_decoder_instruction_metadata_t
         { "SADDLP",
           0xBF3FFC00,
           0x0E202800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29102,7 +29102,7 @@ const bal_decoder_instruction_metadata_t
         { "SADDLV",
           0xBF3FFC00,
           0x0E303800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29126,7 +29126,7 @@ const bal_decoder_instruction_metadata_t
         { "SADDW",
           0xBF20FC00,
           0x0E201000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29162,7 +29162,7 @@ const bal_decoder_instruction_metadata_t
         { "SB",
           0xFFFFFFFF,
           0xD50330FF,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -29354,7 +29354,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xBF80FC00,
           0x0F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29366,7 +29366,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFF80FC00,
           0x5F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29378,7 +29378,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xBFBFFC00,
           0x0E21D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29390,7 +29390,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xBFFFFC00,
           0x0E79D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29402,7 +29402,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFBFFC00,
           0x5E21D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29414,7 +29414,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x5E79D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29426,7 +29426,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x1E020000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29438,7 +29438,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x1E420000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29450,7 +29450,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x1EC20000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29462,7 +29462,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x9E020000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29474,7 +29474,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x9E420000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29486,7 +29486,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFF0000,
           0x9EC20000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29498,7 +29498,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x1E220000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29510,7 +29510,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x1E620000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29522,7 +29522,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x1EE20000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -29534,7 +29534,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x9E220000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29546,7 +29546,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x9E620000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29558,7 +29558,7 @@ const bal_decoder_instruction_metadata_t
         { "SCVTF",
           0xFFFFFC00,
           0x9EE20000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -29726,7 +29726,7 @@ const bal_decoder_instruction_metadata_t
         { "SDOT",
           0xBF00F400,
           0x0F00E000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -29738,7 +29738,7 @@ const bal_decoder_instruction_metadata_t
         { "SDOT",
           0xBF20FC00,
           0x0E009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30374,7 +30374,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1C",
           0xFFE0FC00,
           0x5E000000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -30386,7 +30386,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1H",
           0xFFFFFC00,
           0x5E280800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -30398,7 +30398,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1M",
           0xFFE0FC00,
           0x5E002000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -30410,7 +30410,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1P",
           0xFFE0FC00,
           0x5E001000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -30422,7 +30422,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1SU0",
           0xFFE0FC00,
           0x5E003000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30434,7 +30434,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA1SU1",
           0xFFFFFC00,
           0x5E281800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30446,7 +30446,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA256H2",
           0xFFE0FC00,
           0x5E005000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30458,7 +30458,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA256H",
           0xFFE0FC00,
           0x5E004000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30470,7 +30470,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA256SU0",
           0xFFFFFC00,
           0x5E282800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30482,7 +30482,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA256SU1",
           0xFFE0FC00,
           0x5E006000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30494,7 +30494,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA512H2",
           0xFFE0FC00,
           0xCE608400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30506,7 +30506,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA512H",
           0xFFE0FC00,
           0xCE608000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30518,7 +30518,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA512SU0",
           0xFFFFFC00,
           0xCEC08000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30530,7 +30530,7 @@ const bal_decoder_instruction_metadata_t
         { "SHA512SU1",
           0xFFE0FC00,
           0xCE608800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30542,7 +30542,7 @@ const bal_decoder_instruction_metadata_t
         { "SHADD",
           0xBF20FC00,
           0x0E200400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30566,7 +30566,7 @@ const bal_decoder_instruction_metadata_t
         { "SHL",
           0xBF80FC00,
           0x0F005400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30578,7 +30578,7 @@ const bal_decoder_instruction_metadata_t
         { "SHL",
           0xFF80FC00,
           0x5F005400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30590,7 +30590,7 @@ const bal_decoder_instruction_metadata_t
         { "SHLL",
           0xBF3FFC00,
           0x2E213800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30602,7 +30602,7 @@ const bal_decoder_instruction_metadata_t
         { "SHRN",
           0xBF80FC00,
           0x0F008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30638,7 +30638,7 @@ const bal_decoder_instruction_metadata_t
         { "SHSUB",
           0xBF20FC00,
           0x0E202400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30674,7 +30674,7 @@ const bal_decoder_instruction_metadata_t
         { "SLI",
           0xBF80FC00,
           0x2F005400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30686,7 +30686,7 @@ const bal_decoder_instruction_metadata_t
         { "SLI",
           0xFF80FC00,
           0x7F005400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30710,7 +30710,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3PARTW1",
           0xFFE0FC00,
           0xCE60C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30722,7 +30722,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3PARTW2",
           0xFFE0FC00,
           0xCE60C400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30734,7 +30734,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3SS1",
           0xFFE08000,
           0xCE400000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30746,7 +30746,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3TT1A",
           0xFFE0CC00,
           0xCE408000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30758,7 +30758,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3TT1B",
           0xFFE0CC00,
           0xCE408400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30770,7 +30770,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3TT2A",
           0xFFE0CC00,
           0xCE408800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30782,7 +30782,7 @@ const bal_decoder_instruction_metadata_t
         { "SM3TT2B",
           0xFFE0CC00,
           0xCE408C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30794,7 +30794,7 @@ const bal_decoder_instruction_metadata_t
         { "SM4E",
           0xFFFFFC00,
           0xCEC08400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30818,7 +30818,7 @@ const bal_decoder_instruction_metadata_t
         { "SM4EKEY",
           0xFFE0FC00,
           0xCE60C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30854,7 +30854,7 @@ const bal_decoder_instruction_metadata_t
         { "SMAX",
           0xBF20FC00,
           0x0E206400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -30986,7 +30986,7 @@ const bal_decoder_instruction_metadata_t
         { "SMAXP",
           0xBF20FC00,
           0x0E20A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31022,7 +31022,7 @@ const bal_decoder_instruction_metadata_t
         { "SMAXV",
           0xBF3FFC00,
           0x0E30A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31058,7 +31058,7 @@ const bal_decoder_instruction_metadata_t
         { "SMIN",
           0xBF20FC00,
           0x0E206C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31190,7 +31190,7 @@ const bal_decoder_instruction_metadata_t
         { "SMINP",
           0xBF20FC00,
           0x0E20AC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31226,7 +31226,7 @@ const bal_decoder_instruction_metadata_t
         { "SMINV",
           0xBF3FFC00,
           0x0E31A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31250,7 +31250,7 @@ const bal_decoder_instruction_metadata_t
         { "SMLAL",
           0xBF00F400,
           0x0F002000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31262,7 +31262,7 @@ const bal_decoder_instruction_metadata_t
         { "SMLAL",
           0xBF20FC00,
           0x0E208000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31574,7 +31574,7 @@ const bal_decoder_instruction_metadata_t
         { "SMLSL",
           0xBF00F400,
           0x0F006000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31586,7 +31586,7 @@ const bal_decoder_instruction_metadata_t
         { "SMLSL",
           0xBF20FC00,
           0x0E20A000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -31898,7 +31898,7 @@ const bal_decoder_instruction_metadata_t
         { "SMMLA",
           0xFFE0FC00,
           0x4E80A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32006,7 +32006,7 @@ const bal_decoder_instruction_metadata_t
         { "SMOV",
           0xFFE0FC00,
           0x0E002C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32018,7 +32018,7 @@ const bal_decoder_instruction_metadata_t
         { "SMOV",
           0xFFE0FC00,
           0x4E002C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32030,7 +32030,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFFFF9FF,
           0xD503417F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -32042,7 +32042,7 @@ const bal_decoder_instruction_metadata_t
         { "MSR",
           0xFFFFF9FF,
           0xD503407F,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -32102,7 +32102,7 @@ const bal_decoder_instruction_metadata_t
         { "SMULL",
           0xBF00F400,
           0x0F00A000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32114,7 +32114,7 @@ const bal_decoder_instruction_metadata_t
         { "SMULL",
           0xBF20FC00,
           0x0E20C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32234,7 +32234,7 @@ const bal_decoder_instruction_metadata_t
         { "SQABS",
           0xBF3FFC00,
           0x0E207800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32246,7 +32246,7 @@ const bal_decoder_instruction_metadata_t
         { "SQABS",
           0xFF3FFC00,
           0x5E207800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32270,7 +32270,7 @@ const bal_decoder_instruction_metadata_t
         { "SQADD",
           0xBF20FC00,
           0x0E200C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32282,7 +32282,7 @@ const bal_decoder_instruction_metadata_t
         { "SQADD",
           0xFF20FC00,
           0x5E200C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32606,7 +32606,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLAL",
           0xBF00F400,
           0x0F003000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32618,7 +32618,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLAL",
           0xFF00F400,
           0x5F003000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32630,7 +32630,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLAL",
           0xBF20FC00,
           0x0E209000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32642,7 +32642,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLAL",
           0xFF20FC00,
           0x5E209000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32738,7 +32738,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLSL",
           0xBF00F400,
           0x0F007000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32750,7 +32750,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLSL",
           0xFF00F400,
           0x5F007000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32762,7 +32762,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLSL",
           0xBF20FC00,
           0x0E20B000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32774,7 +32774,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMLSL",
           0xFF20FC00,
           0x5E20B000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32870,7 +32870,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULH",
           0xBF00F400,
           0x0F00C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32882,7 +32882,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULH",
           0xFF00F400,
           0x5F00C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32894,7 +32894,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULH",
           0xBF20FC00,
           0x0E20B400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -32906,7 +32906,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULH",
           0xFF20FC00,
           0x5E20B400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33014,7 +33014,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULL",
           0xBF00F400,
           0x0F00B000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33026,7 +33026,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULL",
           0xFF00F400,
           0x5F00B000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33038,7 +33038,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULL",
           0xBF20FC00,
           0x0E20D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33050,7 +33050,7 @@ const bal_decoder_instruction_metadata_t
         { "SQDMULL",
           0xFF20FC00,
           0x5E20D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33302,7 +33302,7 @@ const bal_decoder_instruction_metadata_t
         { "SQNEG",
           0xBF3FFC00,
           0x2E207800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33314,7 +33314,7 @@ const bal_decoder_instruction_metadata_t
         { "SQNEG",
           0xFF3FFC00,
           0x7E207800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33374,7 +33374,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLAH",
           0xBF00F400,
           0x2F00D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33386,7 +33386,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLAH",
           0xFF00F400,
           0x7F00D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33398,7 +33398,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLAH",
           0xBF20FC00,
           0x2E008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33410,7 +33410,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLAH",
           0xFF20FC00,
           0x7E008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33470,7 +33470,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLSH",
           0xBF00F400,
           0x2F00F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33482,7 +33482,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLSH",
           0xFF00F400,
           0x7F00F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33494,7 +33494,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLSH",
           0xBF20FC00,
           0x2E008C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33506,7 +33506,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMLSH",
           0xFF20FC00,
           0x7E008C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33566,7 +33566,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMULH",
           0xBF00F400,
           0x0F00D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33578,7 +33578,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMULH",
           0xFF00F400,
           0x5F00D000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33590,7 +33590,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMULH",
           0xBF20FC00,
           0x2E20B400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33602,7 +33602,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRDMULH",
           0xFF20FC00,
           0x7E20B400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33662,7 +33662,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHL",
           0xBF20FC00,
           0x0E205C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33674,7 +33674,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHL",
           0xFF20FC00,
           0x5E205C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33734,7 +33734,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHRN",
           0xBF80FC00,
           0x0F009C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33746,7 +33746,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHRN",
           0xFF80FC00,
           0x5F009C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33830,7 +33830,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHRUN",
           0xBF80FC00,
           0x2F008C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33842,7 +33842,7 @@ const bal_decoder_instruction_metadata_t
         { "SQRSHRUN",
           0xFF80FC00,
           0x7F008C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33902,7 +33902,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHL",
           0xBF80FC00,
           0x0F007400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33914,7 +33914,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHL",
           0xFF80FC00,
           0x5F007400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33926,7 +33926,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHL",
           0xBF20FC00,
           0x0E204C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33938,7 +33938,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHL",
           0xFF20FC00,
           0x5E204C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33986,7 +33986,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHLU",
           0xBF80FC00,
           0x2F006400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -33998,7 +33998,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHLU",
           0xFF80FC00,
           0x7F006400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34022,7 +34022,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHRN",
           0xBF80FC00,
           0x0F009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34034,7 +34034,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHRN",
           0xFF80FC00,
           0x5F009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34070,7 +34070,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHRUN",
           0xBF80FC00,
           0x2F008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34082,7 +34082,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSHRUN",
           0xFF80FC00,
           0x7F008400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34118,7 +34118,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSUB",
           0xBF20FC00,
           0x0E202C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34130,7 +34130,7 @@ const bal_decoder_instruction_metadata_t
         { "SQSUB",
           0xFF20FC00,
           0x5E202C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34190,7 +34190,7 @@ const bal_decoder_instruction_metadata_t
         { "SQXTN",
           0xBF3FFC00,
           0x0E214800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34202,7 +34202,7 @@ const bal_decoder_instruction_metadata_t
         { "SQXTN",
           0xFF3FFC00,
           0x5E214800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34238,7 +34238,7 @@ const bal_decoder_instruction_metadata_t
         { "SQXTUN",
           0xBF3FFC00,
           0x2E212800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34250,7 +34250,7 @@ const bal_decoder_instruction_metadata_t
         { "SQXTUN",
           0xFF3FFC00,
           0x7E212800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34286,7 +34286,7 @@ const bal_decoder_instruction_metadata_t
         { "SRHADD",
           0xBF20FC00,
           0x0E201400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34310,7 +34310,7 @@ const bal_decoder_instruction_metadata_t
         { "SRI",
           0xBF80FC00,
           0x2F004400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34322,7 +34322,7 @@ const bal_decoder_instruction_metadata_t
         { "SRI",
           0xFF80FC00,
           0x7F004400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34346,7 +34346,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSHL",
           0xBF20FC00,
           0x0E205400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34358,7 +34358,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSHL",
           0xFF20FC00,
           0x5E205400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34442,7 +34442,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSHR",
           0xBF80FC00,
           0x0F002400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34454,7 +34454,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSHR",
           0xFF80FC00,
           0x5F002400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34478,7 +34478,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSRA",
           0xBF80FC00,
           0x0F003400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34490,7 +34490,7 @@ const bal_decoder_instruction_metadata_t
         { "SRSRA",
           0xFF80FC00,
           0x5F003400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34514,7 +34514,7 @@ const bal_decoder_instruction_metadata_t
         { "DSB",
           0xFFFFFFFF,
           0xD503309F,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -34526,7 +34526,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHL",
           0xBF20FC00,
           0x0E204400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34538,7 +34538,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHL",
           0xFF20FC00,
           0x5E204400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34550,7 +34550,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHLL",
           0xBF80FC00,
           0x0F00A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34586,7 +34586,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHR",
           0xBF80FC00,
           0x0F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34598,7 +34598,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHR",
           0xFF80FC00,
           0x5F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34610,7 +34610,7 @@ const bal_decoder_instruction_metadata_t
         { "SSRA",
           0xBF80FC00,
           0x0F001400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34622,7 +34622,7 @@ const bal_decoder_instruction_metadata_t
         { "SSRA",
           0xFF80FC00,
           0x5F001400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34646,7 +34646,7 @@ const bal_decoder_instruction_metadata_t
         { "SSUBL",
           0xBF20FC00,
           0x0E202000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34706,7 +34706,7 @@ const bal_decoder_instruction_metadata_t
         { "SSUBW",
           0xBF20FC00,
           0x0E203000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -34742,7 +34742,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0F000,
           0x0C802000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34754,7 +34754,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0F000,
           0x0C806000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34766,7 +34766,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0F000,
           0x0C807000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34778,7 +34778,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0F000,
           0x0C80A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34790,7 +34790,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C002000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34802,7 +34802,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C006000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34814,7 +34814,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C007000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34826,7 +34826,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C00A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34838,7 +34838,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C9F2000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34850,7 +34850,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C9F6000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34862,7 +34862,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C9F7000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34874,7 +34874,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFF000,
           0x0C9FA000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34886,7 +34886,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0E000,
           0x0D800000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34898,7 +34898,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0E400,
           0x0D804000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34910,7 +34910,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0EC00,
           0x0D808000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34922,7 +34922,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFE0FC00,
           0x0D808400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34934,7 +34934,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFE000,
           0x0D000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34946,7 +34946,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFE000,
           0x0D9F0000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34958,7 +34958,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFE400,
           0x0D004000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34970,7 +34970,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFE400,
           0x0D9F4000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34982,7 +34982,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFEC00,
           0x0D008000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -34994,7 +34994,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFEC00,
           0x0D9F8000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35006,7 +35006,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFFC00,
           0x0D008400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35018,7 +35018,7 @@ const bal_decoder_instruction_metadata_t
         { "ST1",
           0xBFFFFC00,
           0x0D9F8400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35942,7 +35942,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFE0F000,
           0x0C808000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35954,7 +35954,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFF000,
           0x0C008000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35966,7 +35966,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFF000,
           0x0C9F8000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35978,7 +35978,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFE0E000,
           0x0DA00000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -35990,7 +35990,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFE0E400,
           0x0DA04000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36002,7 +36002,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFE0EC00,
           0x0DA08000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36014,7 +36014,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFE0FC00,
           0x0DA08400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36026,7 +36026,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFE000,
           0x0D200000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36038,7 +36038,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFE000,
           0x0DBF0000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36050,7 +36050,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFE400,
           0x0D204000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36062,7 +36062,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFE400,
           0x0DBF4000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36074,7 +36074,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFEC00,
           0x0D208000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36086,7 +36086,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFEC00,
           0x0DBF8000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36098,7 +36098,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFFC00,
           0x0D208400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36110,7 +36110,7 @@ const bal_decoder_instruction_metadata_t
         { "ST2",
           0xBFFFFC00,
           0x0DBF8400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36278,7 +36278,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFE0F000,
           0x0C804000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36290,7 +36290,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFF000,
           0x0C004000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36302,7 +36302,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFF000,
           0x0C9F4000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36314,7 +36314,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFE0E000,
           0x0D802000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36326,7 +36326,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFE0E400,
           0x0D806000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36338,7 +36338,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFE0EC00,
           0x0D80A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36350,7 +36350,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFE0FC00,
           0x0D80A400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36362,7 +36362,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFE000,
           0x0D002000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36374,7 +36374,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFE000,
           0x0D9F2000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36386,7 +36386,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFE400,
           0x0D006000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36398,7 +36398,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFE400,
           0x0D9F6000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36410,7 +36410,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFEC00,
           0x0D00A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36422,7 +36422,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFEC00,
           0x0D9FA000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36434,7 +36434,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFFC00,
           0x0D00A400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36446,7 +36446,7 @@ const bal_decoder_instruction_metadata_t
         { "ST3",
           0xBFFFFC00,
           0x0D9FA400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36578,7 +36578,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFE0F000,
           0x0C800000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36590,7 +36590,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFF000,
           0x0C000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36602,7 +36602,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFF000,
           0x0C9F0000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36614,7 +36614,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFE0E000,
           0x0DA02000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36626,7 +36626,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFE0E400,
           0x0DA06000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36638,7 +36638,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFE0EC00,
           0x0DA0A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36650,7 +36650,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFE0FC00,
           0x0DA0A400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36662,7 +36662,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFE000,
           0x0D202000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36674,7 +36674,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFE000,
           0x0DBF2000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36686,7 +36686,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFE400,
           0x0D206000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36698,7 +36698,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFE400,
           0x0DBF6000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36710,7 +36710,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFEC00,
           0x0D20A000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36722,7 +36722,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFEC00,
           0x0DBFA000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36734,7 +36734,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFFC00,
           0x0D20A400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36746,7 +36746,7 @@ const bal_decoder_instruction_metadata_t
         { "ST4",
           0xBFFFFC00,
           0x0DBFA400,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -36914,7 +36914,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADD",
           0xFFE0FC1F,
           0xB820001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -36926,7 +36926,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADD",
           0xFFE0FC1F,
           0xF820001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -36938,7 +36938,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDL",
           0xFFE0FC1F,
           0xB860001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -36950,7 +36950,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDL",
           0xFFE0FC1F,
           0xF860001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -36962,7 +36962,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDB",
           0xFFE0FC1F,
           0x3820001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -36974,7 +36974,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDLB",
           0xFFE0FC1F,
           0x3860001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -36986,7 +36986,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDH",
           0xFFE0FC1F,
           0x7820001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -36998,7 +36998,7 @@ const bal_decoder_instruction_metadata_t
         { "LDADDLH",
           0xFFE0FC1F,
           0x7860001F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37010,7 +37010,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLR",
           0xFFE0FC1F,
           0xB820101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37022,7 +37022,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLR",
           0xFFE0FC1F,
           0xF820101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -37034,7 +37034,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRL",
           0xFFE0FC1F,
           0xB860101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37046,7 +37046,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRL",
           0xFFE0FC1F,
           0xF860101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -37058,7 +37058,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRB",
           0xFFE0FC1F,
           0x3820101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37070,7 +37070,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRLB",
           0xFFE0FC1F,
           0x3860101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37082,7 +37082,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRH",
           0xFFE0FC1F,
           0x7820101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37094,7 +37094,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRLH",
           0xFFE0FC1F,
           0x7860101F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37106,7 +37106,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEOR",
           0xFFE0FC1F,
           0xB820201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37118,7 +37118,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEOR",
           0xFFE0FC1F,
           0xF820201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -37130,7 +37130,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORL",
           0xFFE0FC1F,
           0xB860201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37142,7 +37142,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORL",
           0xFFE0FC1F,
           0xF860201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -37154,7 +37154,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORB",
           0xFFE0FC1F,
           0x3820201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37166,7 +37166,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORLB",
           0xFFE0FC1F,
           0x3860201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37178,7 +37178,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORH",
           0xFFE0FC1F,
           0x7820201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37190,7 +37190,7 @@ const bal_decoder_instruction_metadata_t
         { "LDEORLH",
           0xFFE0FC1F,
           0x7860201F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -37346,7 +37346,7 @@ const bal_decoder_instruction_metadata_t
         { "STLLR",
           0xFFFFFC00,
           0x889F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37358,7 +37358,7 @@ const bal_decoder_instruction_metadata_t
         { "STLLR",
           0xFFFFFC00,
           0xC89F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37370,7 +37370,7 @@ const bal_decoder_instruction_metadata_t
         { "STLLRB",
           0xFFFFFC00,
           0x089F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37382,7 +37382,7 @@ const bal_decoder_instruction_metadata_t
         { "STLLRH",
           0xFFFFFC00,
           0x489F7C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37394,7 +37394,7 @@ const bal_decoder_instruction_metadata_t
         { "STLR",
           0xFFFFFC00,
           0x889FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37406,7 +37406,7 @@ const bal_decoder_instruction_metadata_t
         { "STLR",
           0xFFFFFC00,
           0x99800800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37418,7 +37418,7 @@ const bal_decoder_instruction_metadata_t
         { "STLR",
           0xFFFFFC00,
           0xC89FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37430,7 +37430,7 @@ const bal_decoder_instruction_metadata_t
         { "STLR",
           0xFFFFFC00,
           0xD9800800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37442,7 +37442,7 @@ const bal_decoder_instruction_metadata_t
         { "STLRB",
           0xFFFFFC00,
           0x089FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37454,7 +37454,7 @@ const bal_decoder_instruction_metadata_t
         { "STLRH",
           0xFFFFFC00,
           0x489FFC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37466,7 +37466,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0x1D000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37478,7 +37478,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0x1D800800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37490,7 +37490,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0x5D000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37502,7 +37502,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0x9D000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37514,7 +37514,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0xDD000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37526,7 +37526,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0x99000000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37538,7 +37538,7 @@ const bal_decoder_instruction_metadata_t
         { "STLUR",
           0xFFE00C00,
           0xD9000000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37550,7 +37550,7 @@ const bal_decoder_instruction_metadata_t
         { "STLURB",
           0xFFE00C00,
           0x19000000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37562,7 +37562,7 @@ const bal_decoder_instruction_metadata_t
         { "STLURH",
           0xFFE00C00,
           0x59000000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37574,7 +37574,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXP",
           0xFFE08000,
           0x88208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37586,7 +37586,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXP",
           0xFFE08000,
           0xC8208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37598,7 +37598,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXR",
           0xFFE0FC00,
           0x8800FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37610,7 +37610,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXR",
           0xFFE0FC00,
           0xC800FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37622,7 +37622,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXRB",
           0xFFE0FC00,
           0x0800FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37634,7 +37634,7 @@ const bal_decoder_instruction_metadata_t
         { "STLXRH",
           0xFFE0FC00,
           0x4800FC00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37646,7 +37646,7 @@ const bal_decoder_instruction_metadata_t
         { "STNP",
           0xFFC00000,
           0x2C000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37658,7 +37658,7 @@ const bal_decoder_instruction_metadata_t
         { "STNP",
           0xFFC00000,
           0x6C000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37670,7 +37670,7 @@ const bal_decoder_instruction_metadata_t
         { "STNP",
           0xFFC00000,
           0xAC000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37682,7 +37682,7 @@ const bal_decoder_instruction_metadata_t
         { "STNP",
           0xFFC00000,
           0x28000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37694,7 +37694,7 @@ const bal_decoder_instruction_metadata_t
         { "STNP",
           0xFFC00000,
           0xA8000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -38954,7 +38954,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSET",
           0xFFE0FC1F,
           0xB820301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -38966,7 +38966,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSET",
           0xFFE0FC1F,
           0xF820301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -38978,7 +38978,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETL",
           0xFFE0FC1F,
           0xB860301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -38990,7 +38990,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETL",
           0xFFE0FC1F,
           0xF860301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39002,7 +39002,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETB",
           0xFFE0FC1F,
           0x3820301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39014,7 +39014,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETLB",
           0xFFE0FC1F,
           0x3860301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39026,7 +39026,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETH",
           0xFFE0FC1F,
           0x7820301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39038,7 +39038,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETLH",
           0xFFE0FC1F,
           0x7860301F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39050,7 +39050,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAX",
           0xFFE0FC1F,
           0xB820401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39062,7 +39062,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAX",
           0xFFE0FC1F,
           0xF820401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39074,7 +39074,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXL",
           0xFFE0FC1F,
           0xB860401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39086,7 +39086,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXL",
           0xFFE0FC1F,
           0xF860401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39098,7 +39098,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXB",
           0xFFE0FC1F,
           0x3820401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39110,7 +39110,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXLB",
           0xFFE0FC1F,
           0x3860401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39122,7 +39122,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXH",
           0xFFE0FC1F,
           0x7820401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39134,7 +39134,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMAXLH",
           0xFFE0FC1F,
           0x7860401F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39146,7 +39146,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMIN",
           0xFFE0FC1F,
           0xB820501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39158,7 +39158,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMIN",
           0xFFE0FC1F,
           0xF820501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39170,7 +39170,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINL",
           0xFFE0FC1F,
           0xB860501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39182,7 +39182,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINL",
           0xFFE0FC1F,
           0xF860501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39194,7 +39194,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINB",
           0xFFE0FC1F,
           0x3820501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39206,7 +39206,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINLB",
           0xFFE0FC1F,
           0x3860501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39218,7 +39218,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINH",
           0xFFE0FC1F,
           0x7820501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39230,7 +39230,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSMINLH",
           0xFFE0FC1F,
           0x7860501F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39242,7 +39242,7 @@ const bal_decoder_instruction_metadata_t
         { "STTR",
           0xFFE00C00,
           0xB8000800,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39254,7 +39254,7 @@ const bal_decoder_instruction_metadata_t
         { "STTR",
           0xFFE00C00,
           0xF8000800,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39266,7 +39266,7 @@ const bal_decoder_instruction_metadata_t
         { "STTRB",
           0xFFE00C00,
           0x38000800,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39278,7 +39278,7 @@ const bal_decoder_instruction_metadata_t
         { "STTRH",
           0xFFE00C00,
           0x78000800,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39290,7 +39290,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAX",
           0xFFE0FC1F,
           0xB820601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39302,7 +39302,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAX",
           0xFFE0FC1F,
           0xF820601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39314,7 +39314,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXL",
           0xFFE0FC1F,
           0xB860601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39326,7 +39326,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXL",
           0xFFE0FC1F,
           0xF860601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39338,7 +39338,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXB",
           0xFFE0FC1F,
           0x3820601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39350,7 +39350,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXLB",
           0xFFE0FC1F,
           0x3860601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39362,7 +39362,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXH",
           0xFFE0FC1F,
           0x7820601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39374,7 +39374,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMAXLH",
           0xFFE0FC1F,
           0x7860601F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39386,7 +39386,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMIN",
           0xFFE0FC1F,
           0xB820701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39398,7 +39398,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMIN",
           0xFFE0FC1F,
           0xF820701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39410,7 +39410,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINL",
           0xFFE0FC1F,
           0xB860701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39422,7 +39422,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINL",
           0xFFE0FC1F,
           0xF860701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 16, 5 },
@@ -39434,7 +39434,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINB",
           0xFFE0FC1F,
           0x3820701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39446,7 +39446,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINLB",
           0xFFE0FC1F,
           0x3860701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39458,7 +39458,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINH",
           0xFFE0FC1F,
           0x7820701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39470,7 +39470,7 @@ const bal_decoder_instruction_metadata_t
         { "LDUMINLH",
           0xFFE0FC1F,
           0x7860701F,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 16, 5 },
@@ -39482,7 +39482,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0x3C000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39494,7 +39494,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0x3C800000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39506,7 +39506,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0x7C000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39518,7 +39518,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0xBC000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39530,7 +39530,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0xFC000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39542,7 +39542,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0xB8000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39554,7 +39554,7 @@ const bal_decoder_instruction_metadata_t
         { "STUR",
           0xFFE00C00,
           0xF8000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39566,7 +39566,7 @@ const bal_decoder_instruction_metadata_t
         { "STURB",
           0xFFE00C00,
           0x38000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39578,7 +39578,7 @@ const bal_decoder_instruction_metadata_t
         { "STURH",
           0xFFE00C00,
           0x78000000,
-          OPCODE_TRAP,
+          OPCODE_STORE,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39590,7 +39590,7 @@ const bal_decoder_instruction_metadata_t
         { "STXP",
           0xFFE08000,
           0x88200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39602,7 +39602,7 @@ const bal_decoder_instruction_metadata_t
         { "STXP",
           0xFFE08000,
           0xC8200000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39614,7 +39614,7 @@ const bal_decoder_instruction_metadata_t
         { "STXR",
           0xFFE0FC00,
           0x88007C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39626,7 +39626,7 @@ const bal_decoder_instruction_metadata_t
         { "STXR",
           0xFFE0FC00,
           0xC8007C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39638,7 +39638,7 @@ const bal_decoder_instruction_metadata_t
         { "STXRB",
           0xFFE0FC00,
           0x08007C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39650,7 +39650,7 @@ const bal_decoder_instruction_metadata_t
         { "STXRH",
           0xFFE0FC00,
           0x48007C00,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -39818,7 +39818,7 @@ const bal_decoder_instruction_metadata_t
         { "SUB",
           0xBF20FC00,
           0x2E208400,
-          OPCODE_SUB,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -39830,7 +39830,7 @@ const bal_decoder_instruction_metadata_t
         { "SUB",
           0xFF20FC00,
           0x7E208400,
-          OPCODE_SUB,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -39962,7 +39962,7 @@ const bal_decoder_instruction_metadata_t
         { "SUBHN",
           0xBF20FC00,
           0x0E206000,
-          OPCODE_SUB,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40118,7 +40118,7 @@ const bal_decoder_instruction_metadata_t
         { "SUDOT",
           0xBFC0F400,
           0x0F00F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40346,7 +40346,7 @@ const bal_decoder_instruction_metadata_t
         { "SUQADD",
           0xBF3FFC00,
           0x0E203800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40358,7 +40358,7 @@ const bal_decoder_instruction_metadata_t
         { "SUQADD",
           0xFF3FFC00,
           0x5E203800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40442,7 +40442,7 @@ const bal_decoder_instruction_metadata_t
         { "SWP",
           0xFFE0FC00,
           0xB8208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40454,7 +40454,7 @@ const bal_decoder_instruction_metadata_t
         { "SWP",
           0xFFE0FC00,
           0xF8208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40466,7 +40466,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPA",
           0xFFE0FC00,
           0xB8A08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40478,7 +40478,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPA",
           0xFFE0FC00,
           0xF8A08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40490,7 +40490,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPAL",
           0xFFE0FC00,
           0xB8E08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40502,7 +40502,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPAL",
           0xFFE0FC00,
           0xF8E08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40514,7 +40514,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPL",
           0xFFE0FC00,
           0xB8608000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40526,7 +40526,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPL",
           0xFFE0FC00,
           0xF8608000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40538,7 +40538,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPAB",
           0xFFE0FC00,
           0x38A08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40550,7 +40550,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPALB",
           0xFFE0FC00,
           0x38E08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40562,7 +40562,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPB",
           0xFFE0FC00,
           0x38208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40574,7 +40574,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPLB",
           0xFFE0FC00,
           0x38608000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40586,7 +40586,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPAH",
           0xFFE0FC00,
           0x78A08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40598,7 +40598,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPALH",
           0xFFE0FC00,
           0x78E08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40610,7 +40610,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPH",
           0xFFE0FC00,
           0x78208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40622,7 +40622,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPLH",
           0xFFE0FC00,
           0x78608000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40766,7 +40766,7 @@ const bal_decoder_instruction_metadata_t
         { "SSHLL",
           0xBF87FC00,
           0x0F00A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40826,7 +40826,7 @@ const bal_decoder_instruction_metadata_t
         { "TBL",
           0xBFE0FC00,
           0x0E000000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40838,7 +40838,7 @@ const bal_decoder_instruction_metadata_t
         { "TBL",
           0xBFE0FC00,
           0x0E002000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40850,7 +40850,7 @@ const bal_decoder_instruction_metadata_t
         { "TBL",
           0xBFE0FC00,
           0x0E004000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40862,7 +40862,7 @@ const bal_decoder_instruction_metadata_t
         { "TBL",
           0xBFE0FC00,
           0x0E006000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40922,7 +40922,7 @@ const bal_decoder_instruction_metadata_t
         { "TBX",
           0xBFE0FC00,
           0x0E001000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40934,7 +40934,7 @@ const bal_decoder_instruction_metadata_t
         { "TBX",
           0xBFE0FC00,
           0x0E003000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40946,7 +40946,7 @@ const bal_decoder_instruction_metadata_t
         { "TBX",
           0xBFE0FC00,
           0x0E005000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -40958,7 +40958,7 @@ const bal_decoder_instruction_metadata_t
         { "TBX",
           0xBFE0FC00,
           0x0E007000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41066,7 +41066,7 @@ const bal_decoder_instruction_metadata_t
         { "TRN1",
           0xBF20FC00,
           0x0E002800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41150,7 +41150,7 @@ const bal_decoder_instruction_metadata_t
         { "TRN2",
           0xBF20FC00,
           0x0E006800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41246,7 +41246,7 @@ const bal_decoder_instruction_metadata_t
         { "UABA",
           0xBF20FC00,
           0x2E207C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41270,7 +41270,7 @@ const bal_decoder_instruction_metadata_t
         { "UABAL",
           0xBF20FC00,
           0x2E205000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41306,7 +41306,7 @@ const bal_decoder_instruction_metadata_t
         { "UABD",
           0xBF20FC00,
           0x2E207400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41330,7 +41330,7 @@ const bal_decoder_instruction_metadata_t
         { "UABDL",
           0xBF20FC00,
           0x2E207000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41366,7 +41366,7 @@ const bal_decoder_instruction_metadata_t
         { "UADALP",
           0xBF3FFC00,
           0x2E206800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41390,7 +41390,7 @@ const bal_decoder_instruction_metadata_t
         { "UADDL",
           0xBF20FC00,
           0x2E200000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41414,7 +41414,7 @@ const bal_decoder_instruction_metadata_t
         { "UADDLP",
           0xBF3FFC00,
           0x2E202800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41438,7 +41438,7 @@ const bal_decoder_instruction_metadata_t
         { "UADDLV",
           0xBF3FFC00,
           0x2E303800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41462,7 +41462,7 @@ const bal_decoder_instruction_metadata_t
         { "UADDW",
           0xBF20FC00,
           0x2E201000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41606,7 +41606,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xBF80FC00,
           0x2F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41618,7 +41618,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFF80FC00,
           0x7F00E400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41630,7 +41630,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xBFBFFC00,
           0x2E21D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41642,7 +41642,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xBFFFFC00,
           0x2E79D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41654,7 +41654,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFBFFC00,
           0x7E21D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41666,7 +41666,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x7E79D800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -41678,7 +41678,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x1E030000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41690,7 +41690,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x1E430000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41702,7 +41702,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x1EC30000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41714,7 +41714,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x9E030000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41726,7 +41726,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x9E430000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41738,7 +41738,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFF0000,
           0x9EC30000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41750,7 +41750,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x1E230000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41762,7 +41762,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x1E630000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41774,7 +41774,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x1EE30000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_32, 5, 5 },
@@ -41786,7 +41786,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x9E230000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41798,7 +41798,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x9E630000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41810,7 +41810,7 @@ const bal_decoder_instruction_metadata_t
         { "UCVTF",
           0xFFFFFC00,
           0x9EE30000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -41990,7 +41990,7 @@ const bal_decoder_instruction_metadata_t
         { "UDOT",
           0xBF00F400,
           0x2F00E000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42002,7 +42002,7 @@ const bal_decoder_instruction_metadata_t
         { "UDOT",
           0xBF20FC00,
           0x2E009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42242,7 +42242,7 @@ const bal_decoder_instruction_metadata_t
         { "UHADD",
           0xBF20FC00,
           0x2E200400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42266,7 +42266,7 @@ const bal_decoder_instruction_metadata_t
         { "UHSUB",
           0xBF20FC00,
           0x2E202400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42314,7 +42314,7 @@ const bal_decoder_instruction_metadata_t
         { "UMAX",
           0xBF20FC00,
           0x2E206400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42446,7 +42446,7 @@ const bal_decoder_instruction_metadata_t
         { "UMAXP",
           0xBF20FC00,
           0x2E20A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42482,7 +42482,7 @@ const bal_decoder_instruction_metadata_t
         { "UMAXV",
           0xBF3FFC00,
           0x2E30A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42506,7 +42506,7 @@ const bal_decoder_instruction_metadata_t
         { "UMIN",
           0xBF20FC00,
           0x2E206C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42638,7 +42638,7 @@ const bal_decoder_instruction_metadata_t
         { "UMINP",
           0xBF20FC00,
           0x2E20AC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42674,7 +42674,7 @@ const bal_decoder_instruction_metadata_t
         { "UMINV",
           0xBF3FFC00,
           0x2E31A800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42698,7 +42698,7 @@ const bal_decoder_instruction_metadata_t
         { "UMLAL",
           0xBF00F400,
           0x2F002000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -42710,7 +42710,7 @@ const bal_decoder_instruction_metadata_t
         { "UMLAL",
           0xBF20FC00,
           0x2E208000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43022,7 +43022,7 @@ const bal_decoder_instruction_metadata_t
         { "UMLSL",
           0xBF00F400,
           0x2F006000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43034,7 +43034,7 @@ const bal_decoder_instruction_metadata_t
         { "UMLSL",
           0xBF20FC00,
           0x2E20A000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43346,7 +43346,7 @@ const bal_decoder_instruction_metadata_t
         { "UMMLA",
           0xFFE0FC00,
           0x6E80A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43454,7 +43454,7 @@ const bal_decoder_instruction_metadata_t
         { "UMOV",
           0xFFE0FC00,
           0x0E003C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43466,7 +43466,7 @@ const bal_decoder_instruction_metadata_t
         { "UMOV",
           0xFFEFFC00,
           0x4E083C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43526,7 +43526,7 @@ const bal_decoder_instruction_metadata_t
         { "UMULL",
           0xBF00F400,
           0x2F00A000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43538,7 +43538,7 @@ const bal_decoder_instruction_metadata_t
         { "UMULL",
           0xBF20FC00,
           0x2E20C000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43634,7 +43634,7 @@ const bal_decoder_instruction_metadata_t
         { "UQADD",
           0xBF20FC00,
           0x2E200C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -43646,7 +43646,7 @@ const bal_decoder_instruction_metadata_t
         { "UQADD",
           0xFF20FC00,
           0x7E200C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44078,7 +44078,7 @@ const bal_decoder_instruction_metadata_t
         { "UQRSHL",
           0xBF20FC00,
           0x2E205C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44090,7 +44090,7 @@ const bal_decoder_instruction_metadata_t
         { "UQRSHL",
           0xFF20FC00,
           0x7E205C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44150,7 +44150,7 @@ const bal_decoder_instruction_metadata_t
         { "UQRSHRN",
           0xBF80FC00,
           0x2F009C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44162,7 +44162,7 @@ const bal_decoder_instruction_metadata_t
         { "UQRSHRN",
           0xFF80FC00,
           0x7F009C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44222,7 +44222,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHL",
           0xBF80FC00,
           0x2F007400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44234,7 +44234,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHL",
           0xFF80FC00,
           0x7F007400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44246,7 +44246,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHL",
           0xBF20FC00,
           0x2E204C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44258,7 +44258,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHL",
           0xFF20FC00,
           0x7E204C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44306,7 +44306,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHRN",
           0xBF80FC00,
           0x2F009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44318,7 +44318,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSHRN",
           0xFF80FC00,
           0x7F009400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44354,7 +44354,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSUB",
           0xBF20FC00,
           0x2E202C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44366,7 +44366,7 @@ const bal_decoder_instruction_metadata_t
         { "UQSUB",
           0xFF20FC00,
           0x7E202C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44426,7 +44426,7 @@ const bal_decoder_instruction_metadata_t
         { "UQXTN",
           0xBF3FFC00,
           0x2E214800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44438,7 +44438,7 @@ const bal_decoder_instruction_metadata_t
         { "UQXTN",
           0xFF3FFC00,
           0x7E214800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44474,7 +44474,7 @@ const bal_decoder_instruction_metadata_t
         { "URECPE",
           0xBFBFFC00,
           0x0EA1C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44498,7 +44498,7 @@ const bal_decoder_instruction_metadata_t
         { "URHADD",
           0xBF20FC00,
           0x2E201400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44522,7 +44522,7 @@ const bal_decoder_instruction_metadata_t
         { "URSHL",
           0xBF20FC00,
           0x2E205400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44534,7 +44534,7 @@ const bal_decoder_instruction_metadata_t
         { "URSHL",
           0xFF20FC00,
           0x7E205400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44618,7 +44618,7 @@ const bal_decoder_instruction_metadata_t
         { "URSHR",
           0xBF80FC00,
           0x2F002400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44630,7 +44630,7 @@ const bal_decoder_instruction_metadata_t
         { "URSHR",
           0xFF80FC00,
           0x7F002400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44654,7 +44654,7 @@ const bal_decoder_instruction_metadata_t
         { "URSQRTE",
           0xBFBFFC00,
           0x2EA1C800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44678,7 +44678,7 @@ const bal_decoder_instruction_metadata_t
         { "URSRA",
           0xBF80FC00,
           0x2F003400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44690,7 +44690,7 @@ const bal_decoder_instruction_metadata_t
         { "URSRA",
           0xFF80FC00,
           0x7F003400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44714,7 +44714,7 @@ const bal_decoder_instruction_metadata_t
         { "USDOT",
           0xBFC0F400,
           0x0F80F000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44726,7 +44726,7 @@ const bal_decoder_instruction_metadata_t
         { "USDOT",
           0xBFE0FC00,
           0x0E809C00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44834,7 +44834,7 @@ const bal_decoder_instruction_metadata_t
         { "USHL",
           0xBF20FC00,
           0x2E204400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44846,7 +44846,7 @@ const bal_decoder_instruction_metadata_t
         { "USHL",
           0xFF20FC00,
           0x7E204400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44858,7 +44858,7 @@ const bal_decoder_instruction_metadata_t
         { "USHLL",
           0xBF80FC00,
           0x2F00A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44894,7 +44894,7 @@ const bal_decoder_instruction_metadata_t
         { "USHR",
           0xBF80FC00,
           0x2F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -44906,7 +44906,7 @@ const bal_decoder_instruction_metadata_t
         { "USHR",
           0xFF80FC00,
           0x7F000400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45014,7 +45014,7 @@ const bal_decoder_instruction_metadata_t
         { "USMMLA",
           0xFFE0FC00,
           0x4E80AC00,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45086,7 +45086,7 @@ const bal_decoder_instruction_metadata_t
         { "USQADD",
           0xBF3FFC00,
           0x2E203800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45098,7 +45098,7 @@ const bal_decoder_instruction_metadata_t
         { "USQADD",
           0xFF3FFC00,
           0x7E203800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45122,7 +45122,7 @@ const bal_decoder_instruction_metadata_t
         { "USRA",
           0xBF80FC00,
           0x2F001400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45134,7 +45134,7 @@ const bal_decoder_instruction_metadata_t
         { "USRA",
           0xFF80FC00,
           0x7F001400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45158,7 +45158,7 @@ const bal_decoder_instruction_metadata_t
         { "USUBL",
           0xBF20FC00,
           0x2E202000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45194,7 +45194,7 @@ const bal_decoder_instruction_metadata_t
         { "USUBW",
           0xBF20FC00,
           0x2E203000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45386,7 +45386,7 @@ const bal_decoder_instruction_metadata_t
         { "USHLL",
           0xBF87FC00,
           0x2F00A400,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45398,7 +45398,7 @@ const bal_decoder_instruction_metadata_t
         { "UZP1",
           0xBF20FC00,
           0x0E001800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45482,7 +45482,7 @@ const bal_decoder_instruction_metadata_t
         { "UZP2",
           0xBF20FC00,
           0x0E005800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -45950,7 +45950,7 @@ const bal_decoder_instruction_metadata_t
         { "XAR",
           0xFFE00000,
           0xCE800000,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -46010,7 +46010,7 @@ const bal_decoder_instruction_metadata_t
         { "XTN",
           0xBF3FFC00,
           0x0E212800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -46154,7 +46154,7 @@ const bal_decoder_instruction_metadata_t
         { "ZIP1",
           0xBF20FC00,
           0x0E003800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },
@@ -46238,7 +46238,7 @@ const bal_decoder_instruction_metadata_t
         { "ZIP2",
           0xBF20FC00,
           0x0E007800,
-          OPCODE_TRAP,
+          OPCODE_FLOAT,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_128, 5, 5 },

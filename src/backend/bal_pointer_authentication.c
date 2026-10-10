@@ -1,5 +1,6 @@
 #include "backend/bal_pointer_authentication.h"
 
+#include "bal_attributes.h"
 #include <string.h>
 
 /// SCTLR_EL1 bits that enable the instruction and data keys.
@@ -19,20 +20,73 @@
 #define MAXIMUM_TSZ 39U
 
 // QARMA5 as ComputePAC() specifies it. The 64-bit state is sixteen 4-bit cells, cell 0 being
-// bits 63:60 and cell 15 bits 3:0.
+// bits 63:60 and cell 15 bits 3:0; the four rows of the 4x4 cell matrix are its 16-bit quarters,
+// row 0 the top one. Every step works on all cells at once.
 
-static const uint8_t SUBSTITUTION[16] = { 0xBU, 0x6U, 0x8U, 0xFU, 0xCU, 0x0U, 0x9U, 0xEU,
-                                          0x3U, 0x7U, 0x4U, 0x5U, 0xDU, 0x2U, 0x1U, 0xAU };
+/// The S-box applied to both cells of a byte, and its inverse.
+static const uint8_t SUBSTITUTION[256] = {
+    0xBBU, 0xB6U, 0xB8U, 0xBFU, 0xBCU, 0xB0U, 0xB9U, 0xBEU, 0xB3U, 0xB7U, 0xB4U, 0xB5U, 0xBDU,
+    0xB2U, 0xB1U, 0xBAU, 0x6BU, 0x66U, 0x68U, 0x6FU, 0x6CU, 0x60U, 0x69U, 0x6EU, 0x63U, 0x67U,
+    0x64U, 0x65U, 0x6DU, 0x62U, 0x61U, 0x6AU, 0x8BU, 0x86U, 0x88U, 0x8FU, 0x8CU, 0x80U, 0x89U,
+    0x8EU, 0x83U, 0x87U, 0x84U, 0x85U, 0x8DU, 0x82U, 0x81U, 0x8AU, 0xFBU, 0xF6U, 0xF8U, 0xFFU,
+    0xFCU, 0xF0U, 0xF9U, 0xFEU, 0xF3U, 0xF7U, 0xF4U, 0xF5U, 0xFDU, 0xF2U, 0xF1U, 0xFAU, 0xCBU,
+    0xC6U, 0xC8U, 0xCFU, 0xCCU, 0xC0U, 0xC9U, 0xCEU, 0xC3U, 0xC7U, 0xC4U, 0xC5U, 0xCDU, 0xC2U,
+    0xC1U, 0xCAU, 0x0BU, 0x06U, 0x08U, 0x0FU, 0x0CU, 0x00U, 0x09U, 0x0EU, 0x03U, 0x07U, 0x04U,
+    0x05U, 0x0DU, 0x02U, 0x01U, 0x0AU, 0x9BU, 0x96U, 0x98U, 0x9FU, 0x9CU, 0x90U, 0x99U, 0x9EU,
+    0x93U, 0x97U, 0x94U, 0x95U, 0x9DU, 0x92U, 0x91U, 0x9AU, 0xEBU, 0xE6U, 0xE8U, 0xEFU, 0xECU,
+    0xE0U, 0xE9U, 0xEEU, 0xE3U, 0xE7U, 0xE4U, 0xE5U, 0xEDU, 0xE2U, 0xE1U, 0xEAU, 0x3BU, 0x36U,
+    0x38U, 0x3FU, 0x3CU, 0x30U, 0x39U, 0x3EU, 0x33U, 0x37U, 0x34U, 0x35U, 0x3DU, 0x32U, 0x31U,
+    0x3AU, 0x7BU, 0x76U, 0x78U, 0x7FU, 0x7CU, 0x70U, 0x79U, 0x7EU, 0x73U, 0x77U, 0x74U, 0x75U,
+    0x7DU, 0x72U, 0x71U, 0x7AU, 0x4BU, 0x46U, 0x48U, 0x4FU, 0x4CU, 0x40U, 0x49U, 0x4EU, 0x43U,
+    0x47U, 0x44U, 0x45U, 0x4DU, 0x42U, 0x41U, 0x4AU, 0x5BU, 0x56U, 0x58U, 0x5FU, 0x5CU, 0x50U,
+    0x59U, 0x5EU, 0x53U, 0x57U, 0x54U, 0x55U, 0x5DU, 0x52U, 0x51U, 0x5AU, 0xDBU, 0xD6U, 0xD8U,
+    0xDFU, 0xDCU, 0xD0U, 0xD9U, 0xDEU, 0xD3U, 0xD7U, 0xD4U, 0xD5U, 0xDDU, 0xD2U, 0xD1U, 0xDAU,
+    0x2BU, 0x26U, 0x28U, 0x2FU, 0x2CU, 0x20U, 0x29U, 0x2EU, 0x23U, 0x27U, 0x24U, 0x25U, 0x2DU,
+    0x22U, 0x21U, 0x2AU, 0x1BU, 0x16U, 0x18U, 0x1FU, 0x1CU, 0x10U, 0x19U, 0x1EU, 0x13U, 0x17U,
+    0x14U, 0x15U, 0x1DU, 0x12U, 0x11U, 0x1AU, 0xABU, 0xA6U, 0xA8U, 0xAFU, 0xACU, 0xA0U, 0xA9U,
+    0xAEU, 0xA3U, 0xA7U, 0xA4U, 0xA5U, 0xADU, 0xA2U, 0xA1U, 0xAAU,
+};
 
-/// The cell permutation: output cell i is input cell CELL_SHUFFLE[i].
+static const uint8_t INVERSE_SUBSTITUTION[256] = {
+    0x55U, 0x5EU, 0x5DU, 0x58U, 0x5AU, 0x5BU, 0x51U, 0x59U, 0x52U, 0x56U, 0x5FU, 0x50U, 0x54U,
+    0x5CU, 0x57U, 0x53U, 0xE5U, 0xEEU, 0xEDU, 0xE8U, 0xEAU, 0xEBU, 0xE1U, 0xE9U, 0xE2U, 0xE6U,
+    0xEFU, 0xE0U, 0xE4U, 0xECU, 0xE7U, 0xE3U, 0xD5U, 0xDEU, 0xDDU, 0xD8U, 0xDAU, 0xDBU, 0xD1U,
+    0xD9U, 0xD2U, 0xD6U, 0xDFU, 0xD0U, 0xD4U, 0xDCU, 0xD7U, 0xD3U, 0x85U, 0x8EU, 0x8DU, 0x88U,
+    0x8AU, 0x8BU, 0x81U, 0x89U, 0x82U, 0x86U, 0x8FU, 0x80U, 0x84U, 0x8CU, 0x87U, 0x83U, 0xA5U,
+    0xAEU, 0xADU, 0xA8U, 0xAAU, 0xABU, 0xA1U, 0xA9U, 0xA2U, 0xA6U, 0xAFU, 0xA0U, 0xA4U, 0xACU,
+    0xA7U, 0xA3U, 0xB5U, 0xBEU, 0xBDU, 0xB8U, 0xBAU, 0xBBU, 0xB1U, 0xB9U, 0xB2U, 0xB6U, 0xBFU,
+    0xB0U, 0xB4U, 0xBCU, 0xB7U, 0xB3U, 0x15U, 0x1EU, 0x1DU, 0x18U, 0x1AU, 0x1BU, 0x11U, 0x19U,
+    0x12U, 0x16U, 0x1FU, 0x10U, 0x14U, 0x1CU, 0x17U, 0x13U, 0x95U, 0x9EU, 0x9DU, 0x98U, 0x9AU,
+    0x9BU, 0x91U, 0x99U, 0x92U, 0x96U, 0x9FU, 0x90U, 0x94U, 0x9CU, 0x97U, 0x93U, 0x25U, 0x2EU,
+    0x2DU, 0x28U, 0x2AU, 0x2BU, 0x21U, 0x29U, 0x22U, 0x26U, 0x2FU, 0x20U, 0x24U, 0x2CU, 0x27U,
+    0x23U, 0x65U, 0x6EU, 0x6DU, 0x68U, 0x6AU, 0x6BU, 0x61U, 0x69U, 0x62U, 0x66U, 0x6FU, 0x60U,
+    0x64U, 0x6CU, 0x67U, 0x63U, 0xF5U, 0xFEU, 0xFDU, 0xF8U, 0xFAU, 0xFBU, 0xF1U, 0xF9U, 0xF2U,
+    0xF6U, 0xFFU, 0xF0U, 0xF4U, 0xFCU, 0xF7U, 0xF3U, 0x05U, 0x0EU, 0x0DU, 0x08U, 0x0AU, 0x0BU,
+    0x01U, 0x09U, 0x02U, 0x06U, 0x0FU, 0x00U, 0x04U, 0x0CU, 0x07U, 0x03U, 0x45U, 0x4EU, 0x4DU,
+    0x48U, 0x4AU, 0x4BU, 0x41U, 0x49U, 0x42U, 0x46U, 0x4FU, 0x40U, 0x44U, 0x4CU, 0x47U, 0x43U,
+    0xC5U, 0xCEU, 0xCDU, 0xC8U, 0xCAU, 0xCBU, 0xC1U, 0xC9U, 0xC2U, 0xC6U, 0xCFU, 0xC0U, 0xC4U,
+    0xCCU, 0xC7U, 0xC3U, 0x75U, 0x7EU, 0x7DU, 0x78U, 0x7AU, 0x7BU, 0x71U, 0x79U, 0x72U, 0x76U,
+    0x7FU, 0x70U, 0x74U, 0x7CU, 0x77U, 0x73U, 0x35U, 0x3EU, 0x3DU, 0x38U, 0x3AU, 0x3BU, 0x31U,
+    0x39U, 0x32U, 0x36U, 0x3FU, 0x30U, 0x34U, 0x3CU, 0x37U, 0x33U,
+};
+/// The cell permutation: output cell i is input cell CELL_SHUFFLE[i], and the inverse.
 static const uint8_t CELL_SHUFFLE[16]
     = { 0U, 11U, 6U, 13U, 10U, 1U, 12U, 7U, 5U, 14U, 3U, 8U, 15U, 4U, 9U, 2U };
+static const uint8_t INVERSE_CELL_SHUFFLE[16]
+    = { 0U, 5U, 15U, 10U, 13U, 8U, 2U, 7U, 11U, 14U, 4U, 1U, 6U, 3U, 9U, 12U };
 
-/// The tweak permutation, and the output cells the tweak's LFSR then steps.
+/// The tweak permutation and its inverse, and the cells the tweak's LFSR steps after it.
 static const uint8_t TWEAK_SHUFFLE[16]
     = { 6U, 5U, 14U, 15U, 0U, 1U, 2U, 3U, 7U, 12U, 13U, 4U, 8U, 9U, 10U, 11U };
-static const uint16_t TWEAK_ROTATED_CELLS
-    = (1U << 0U) | (1U << 1U) | (1U << 3U) | (1U << 4U) | (1U << 8U) | (1U << 11U) | (1U << 13U);
+static const uint8_t INVERSE_TWEAK_SHUFFLE[16]
+    = { 4U, 5U, 6U, 7U, 11U, 1U, 0U, 8U, 12U, 13U, 14U, 15U, 9U, 10U, 2U, 3U };
+
+/// Cells 0, 1, 3, 4, 8, 11 and 13.
+#define TWEAK_ROTATED_CELLS 0xFF0FF000F00F0F00ULL
+
+/// Every cell's lowest bit, and its three highest.
+#define CELL_LOW_BITS  0x1111111111111111ULL
+#define CELL_HIGH_BITS 0xEEEEEEEEEEEEEEEEULL
 
 static const uint64_t ROUND_CONSTANTS[5] = {
     0x0000000000000000ULL, 0x13198A2E03707344ULL, 0xA4093822299F31D0ULL,
@@ -40,143 +94,78 @@ static const uint64_t ROUND_CONSTANTS[5] = {
 };
 static const uint64_t ALPHA = 0xC0AC29B7C97C50DDULL;
 
-static uint32_t
-get_cell(const uint64_t state, const uint32_t cell)
-{
-    return (uint32_t)(state >> (60U - 4U * cell)) & 0xFU;
-}
-
 static uint64_t
-with_cell(const uint64_t state, const uint32_t cell, const uint32_t value)
-{
-    const uint32_t shift = 60U - 4U * cell;
-    return (state & ~(0xFULL << shift)) | ((uint64_t)(value & 0xFU) << shift);
-}
-
-static uint64_t
-substitute(const uint64_t state, const bool is_inverse)
+substitute(const uint64_t state, const uint8_t table[256])
 {
     uint64_t result = 0U;
 
-    for (uint32_t cell = 0U; cell < 16U; ++cell)
+    for (uint32_t byte = 0U; byte < 64U; byte += 8U)
     {
-        const uint32_t value = get_cell(state, cell);
-        uint32_t       out   = SUBSTITUTION[value];
-
-        if (true == is_inverse)
-        {
-            for (uint32_t i = 0U; i < 16U; ++i)
-            {
-                if (SUBSTITUTION[i] == value)
-                {
-                    out = i;
-                }
-            }
-        }
-
-        result = with_cell(result, cell, out);
+        result |= (uint64_t)table[(state >> byte) & 0xFFU] << byte;
     }
 
     return result;
 }
 
 static uint64_t
-shuffle_cells(const uint64_t state, const bool is_inverse)
+permute_cells(const uint64_t state, const uint8_t permutation[16])
 {
     uint64_t result = 0U;
 
     for (uint32_t cell = 0U; cell < 16U; ++cell)
     {
-        if (true == is_inverse)
-        {
-            result = with_cell(result, CELL_SHUFFLE[cell], get_cell(state, cell));
-        }
-        else
-        {
-            result = with_cell(result, cell, get_cell(state, CELL_SHUFFLE[cell]));
-        }
+        const uint64_t value = (state >> (60U - 4U * permutation[cell])) & 0xFU;
+        result |= value << (60U - 4U * cell);
     }
 
     return result;
 }
 
-static uint32_t
-rotate_cell(const uint32_t cell, const uint32_t amount)
+static uint64_t
+rotate_left_64(const uint64_t value, const uint32_t amount)
 {
-    return ((cell << amount) | (cell >> (4U - amount))) & 0xFU;
+    return (value << amount) | (value >> (64U - amount));
 }
 
-/// PACMult: each column times the involutory matrix circ(0, rho, rho^2, rho), rho being a one
-/// bit rotation of a cell.
+/// PACMult: each column times the involutory matrix circ(0, rho, rho^2, rho), rho rotating a
+/// cell left by one bit. Rotating the state left by 16 bits brings row r + 1 into row r.
 static uint64_t
 multiply_columns(const uint64_t state)
 {
-    uint64_t result = 0U;
-
-    for (uint32_t column = 0U; column < 4U; ++column)
-    {
-        uint32_t rows[4];
-
-        for (uint32_t row = 0U; row < 4U; ++row)
-        {
-            rows[row] = get_cell(state, 4U * row + column);
-        }
-
-        for (uint32_t row = 0U; row < 4U; ++row)
-        {
-            const uint32_t value = rotate_cell(rows[(row + 1U) % 4U], 1U)
-                                   ^ rotate_cell(rows[(row + 2U) % 4U], 2U)
-                                   ^ rotate_cell(rows[(row + 3U) % 4U], 1U);
-            result = with_cell(result, 4U * row + column, value);
-        }
-    }
-
-    return result;
+    const uint64_t rho1 = ((state << 1U) & CELL_HIGH_BITS) | ((state >> 3U) & CELL_LOW_BITS);
+    const uint64_t rho2
+        = ((state << 2U) & 0xCCCCCCCCCCCCCCCCULL) | ((state >> 2U) & 0x3333333333333333ULL);
+    return rotate_left_64(rho1, 16U) ^ rotate_left_64(rho2, 32U) ^ rotate_left_64(rho1, 48U);
 }
 
-/// TweakShuffle and its inverse: the tweak permutation with an LFSR step on some cells.
+/// TweakShuffle: the tweak permutation, then an LFSR step (b3, b2, b1, b0) to
+/// (b0 ^ b1, b3, b2, b1) on some cells.
 static uint64_t
-shuffle_tweak(const uint64_t tweak, const bool is_inverse)
+shuffle_tweak(const uint64_t tweak)
 {
-    uint64_t result = 0U;
+    const uint64_t shuffled = permute_cells(tweak, TWEAK_SHUFFLE);
+    const uint64_t stepped  = ((shuffled >> 1U) & 0x7777777777777777ULL)
+                             | (((shuffled ^ (shuffled >> 1U)) & CELL_LOW_BITS) << 3U);
+    return (shuffled & ~TWEAK_ROTATED_CELLS) | (stepped & TWEAK_ROTATED_CELLS);
+}
 
-    if (false == is_inverse)
-    {
-        for (uint32_t cell = 0U; cell < 16U; ++cell)
-        {
-            uint32_t value = get_cell(tweak, TWEAK_SHUFFLE[cell]);
-
-            if (0U != ((TWEAK_ROTATED_CELLS >> cell) & 1U))
-            {
-                // (b3, b2, b1, b0) becomes (b0 ^ b1, b3, b2, b1).
-                value = (value >> 1U) | (((value ^ (value >> 1U)) & 1U) << 3U);
-            }
-
-            result = with_cell(result, cell, value);
-        }
-
-        return result;
-    }
-
-    for (uint32_t cell = 0U; cell < 16U; ++cell)
-    {
-        uint32_t value = get_cell(tweak, cell);
-
-        if (0U != ((TWEAK_ROTATED_CELLS >> cell) & 1U))
-        {
-            value = ((value << 1U) & 0xEU) | (((value >> 3U) ^ value) & 1U);
-        }
-
-        result = with_cell(result, TWEAK_SHUFFLE[cell], value);
-    }
-
-    return result;
+/// TweakInvShuffle: the inverse LFSR step, then the inverse permutation.
+static uint64_t
+unshuffle_tweak(const uint64_t tweak)
+{
+    const uint64_t stepped
+        = ((tweak << 1U) & CELL_HIGH_BITS) | (((tweak >> 3U) ^ tweak) & CELL_LOW_BITS);
+    const uint64_t unstepped = (tweak & ~TWEAK_ROTATED_CELLS) | (stepped & TWEAK_ROTATED_CELLS);
+    return permute_cells(unstepped, INVERSE_TWEAK_SHUFFLE);
 }
 
 /// ComputePAC(): QARMA5 encryption of `data` under the tweak `modifier` and the key halves
 /// `key0` (the high half) and `key1` (the low half).
 static uint64_t
-compute_pac(const uint64_t data, const uint64_t modifier, const uint64_t key0, const uint64_t key1)
+compute_pac_uncached(const uint64_t data,
+                     const uint64_t modifier,
+                     const uint64_t key0,
+                     const uint64_t key1)
 {
     const uint64_t modified_key0
         = (key0 << 63U) | ((key0 >> 2U) << 1U) | (((key0 >> 63U) ^ (key0 >> 1U)) & 1U);
@@ -189,35 +178,72 @@ compute_pac(const uint64_t data, const uint64_t modifier, const uint64_t key0, c
 
         if (i > 0U)
         {
-            state = multiply_columns(shuffle_cells(state, false));
+            state = multiply_columns(permute_cells(state, CELL_SHUFFLE));
         }
 
-        state = substitute(state, false);
-        tweak = shuffle_tweak(tweak, false);
+        state = substitute(state, SUBSTITUTION);
+        tweak = shuffle_tweak(tweak);
     }
 
     state ^= modified_key0 ^ tweak;
-    state = substitute(multiply_columns(shuffle_cells(state, false)), false);
-    state = multiply_columns(shuffle_cells(state, false));
+    state = substitute(multiply_columns(permute_cells(state, CELL_SHUFFLE)), SUBSTITUTION);
+    state = multiply_columns(permute_cells(state, CELL_SHUFFLE));
     state ^= key1;
-    state = shuffle_cells(state, true);
-    state = shuffle_cells(multiply_columns(substitute(state, true)), true);
+    state = permute_cells(state, INVERSE_CELL_SHUFFLE);
+    state = permute_cells(multiply_columns(substitute(state, INVERSE_SUBSTITUTION)),
+                          INVERSE_CELL_SHUFFLE);
     state ^= key0 ^ tweak;
 
     for (uint32_t i = 0U; i < 5U; ++i)
     {
-        state = substitute(state, true);
+        state = substitute(state, INVERSE_SUBSTITUTION);
 
         if (i < 4U)
         {
-            state = shuffle_cells(multiply_columns(state), true);
+            state = permute_cells(multiply_columns(state), INVERSE_CELL_SHUFFLE);
         }
 
-        tweak = shuffle_tweak(tweak, true);
+        tweak = unshuffle_tweak(tweak);
         state ^= ROUND_CONSTANTS[4U - i] ^ key1 ^ tweak ^ ALPHA;
     }
 
     return state ^ modified_key0;
+}
+
+/// A recently computed code. Games sign the same return addresses at the same stack depths over
+/// and over, so a small cache saves most of the cipher's work.
+typedef struct
+{
+    uint64_t data;
+    uint64_t modifier;
+    uint64_t key0;
+    uint64_t key1;
+    uint64_t pac;
+} pac_cache_entry_t;
+
+#define PAC_CACHE_ENTRIES 256U
+
+static BAL_THREAD_LOCAL pac_cache_entry_t g_pac_cache[PAC_CACHE_ENTRIES];
+
+/// ComputePAC(), through the per-thread cache. The zero-initialised entries hold the code of all
+/// zeroes, which is computed rather than assumed, so the cache needs no valid bit.
+static uint64_t
+compute_pac(const uint64_t data, const uint64_t modifier, const uint64_t key0, const uint64_t key1)
+{
+    const uint64_t     hash  = (data ^ (modifier * 0x9E3779B97F4A7C15ULL)) * 0xBF58476D1CE4E5B9ULL;
+    pac_cache_entry_t *entry = &g_pac_cache[hash >> 56U];
+
+    if (entry->data != data || entry->modifier != modifier || entry->key0 != key0
+        || entry->key1 != key1 || (0U == (data | modifier | key0 | key1) && 0U == entry->pac))
+    {
+        entry->data     = data;
+        entry->modifier = modifier;
+        entry->key0     = key0;
+        entry->key1     = key1;
+        entry->pac      = compute_pac_uncached(data, modifier, key0, key1);
+    }
+
+    return entry->pac;
 }
 
 typedef enum

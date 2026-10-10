@@ -144,8 +144,9 @@ extern "C"
         uint32_t instruction_barrier;
 
         /// PSTATE.DIT (bit 24) and PSTATE.SSBS (bit 12), as MRS DIT and MRS SSBS read them.
-        /// Translated code always runs in constant time with respect to data and never
-        /// speculates past stores in a way the guest can see, so neither changes how it runs.
+        /// They are kept for the guest to read back only: Ballistic does not make translated
+        /// code data-independent in timing when DIT is set, and the host CPU decides how loads
+        /// speculate past stores whatever SSBS says.
         uint64_t dit;
         uint64_t ssbs;
 

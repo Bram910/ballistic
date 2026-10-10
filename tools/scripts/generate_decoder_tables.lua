@@ -84,19 +84,6 @@ local function derive_opcode(mnemonic)
         return "OPCODE_ATOMIC"
     end
 
-    -- Scalar floating point, executed by the runtime floating-point helper. The vector forms
-    -- share these mnemonics; tier 1 rejects them until it implements them.
-    for _, name in ipairs({ "FMOV", "FABS", "FNEG", "FSQRT", "FADD", "FSUB", "FMUL", "FNMUL",
-                            "FDIV", "FMAX", "FMIN", "FMAXNM", "FMINNM", "FCMP", "FCMPE", "FCCMP",
-                            "FCCMPE", "FCSEL", "FCVT", "FRINTN", "FRINTP", "FRINTM", "FRINTZ",
-                            "FRINTA", "FRINTX", "FRINTI", "SCVTF", "UCVTF", "FCVTZS", "FCVTZU",
-                            "FCVTNS", "FCVTNU", "FCVTPS", "FCVTPU", "FCVTMS", "FCVTMU", "FCVTAS",
-                            "FCVTAU", "FMADD", "FMSUB", "FNMADD", "FNMSUB" }) do
-        if m == name then
-            return "OPCODE_FLOAT"
-        end
-    end
-
     for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
                               "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
         if m:sub(1, #prefix) == prefix then
@@ -1201,6 +1188,13 @@ local function main(...)
         local top_bits = bit.band(bit.rshift(inst.value, 25), 0xF)
         if top_bits <= 0x3 then
             inst.opcode_override = "OPCODE_TRAP"
+        end
+
+        -- op0 = x111 is the scalar floating-point and Advanced SIMD data processing space, which
+        -- the floating-point and SIMD helpers decode themselves. Its mnemonics overlap with
+        -- integer ones such as ADD and ORR, so it is routed by encoding.
+        if bit.band(top_bits, 0x7) == 0x7 then
+            inst.opcode_override = "OPCODE_FLOAT"
         end
         table.insert(filtered, inst)
     end

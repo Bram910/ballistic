@@ -321,6 +321,88 @@ polynomial_multiply(const uint64_t a,
     return result & mask_of(result_bits);
 }
 
+/// SQDMULH and SQRDMULH (`is_rounding`) on 16- or 32-bit elements: the high half of twice the
+/// product.
+static uint64_t
+doubling_multiply_high(
+    simd_t *simd, const uint64_t a, const uint64_t b, const uint32_t esize, const bool is_rounding)
+{
+    // (2 * a * b + round) >> esize, halved so that it fits in 64 bits.
+    const int64_t product = sign_extend(a, esize) * sign_extend(b, esize);
+    const int64_t round   = true == is_rounding ? (int64_t)1 << (esize - 2U) : 0;
+    return saturate_signed(simd, (product + round) >> (esize - 1U), esize);
+}
+
+/// SQRDMLAH and SQRDMLSH (`is_subtract`): the accumulator plus or minus the rounded high half
+/// of twice the product, saturated once.
+static uint64_t
+doubling_multiply_accumulate(simd_t        *simd,
+                             const uint64_t accumulator,
+                             const uint64_t a,
+                             const uint64_t b,
+                             const uint32_t esize,
+                             const bool     is_subtract)
+{
+    // ((accumulator << esize) +/- 2 * a * b + (1 << (esize - 1))) >> esize, halved.
+    const int64_t product = sign_extend(a, esize) * sign_extend(b, esize);
+    const int64_t base    = sign_extend(accumulator, esize) * ((int64_t)1 << (esize - 1U));
+    const int64_t sum
+        = (true == is_subtract ? base - product : base + product) + ((int64_t)1 << (esize - 2U));
+    return saturate_signed(simd, sum >> (esize - 1U), esize);
+}
+
+/// SQDMULL on 16- or 32-bit elements: twice the product, as a double-width element.
+static uint64_t
+doubling_multiply_long(simd_t *simd, const uint64_t a, const uint64_t b, const uint32_t esize)
+{
+    const int64_t product = sign_extend(a, esize) * sign_extend(b, esize);
+
+    // Only the square of the most negative value overflows when doubled.
+    if (product == (int64_t)1 << (2U * esize - 2U))
+    {
+        simd->flags |= FPSR_QC;
+        return mask_of(2U * esize) >> 1U;
+    }
+
+    return (uint64_t)(product * 2) & mask_of(2U * esize);
+}
+
+/// SQDMULL, SQDMLAL and SQDMLSL by their three different opcode (1101, 1001, 1011): the
+/// doubled product, alone or saturating-added to or subtracted from the wide accumulator.
+static uint64_t
+doubling_long_operation(simd_t        *simd,
+                        const uint32_t opcode,
+                        const uint64_t accumulator,
+                        const uint64_t a,
+                        const uint64_t b,
+                        const uint32_t esize)
+{
+    const uint64_t product = doubling_multiply_long(simd, a, b, esize);
+
+    if (0xDU == opcode)
+    {
+        return product;
+    }
+
+    return saturating_add(simd, accumulator, product, 2U * esize, false, 0xBU == opcode);
+}
+
+/// SDOT and UDOT on one 32-bit element: the accumulator plus the four byte products.
+static uint64_t
+dot_product(const uint64_t accumulator, const uint64_t a, const uint64_t b, const bool is_unsigned)
+{
+    uint64_t sum = accumulator;
+
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+        const uint64_t x = (a >> (8U * i)) & 0xFFU;
+        const uint64_t y = (b >> (8U * i)) & 0xFFU;
+        sum += true == is_unsigned ? x * y : (uint64_t)(sign_extend(x, 8U) * sign_extend(y, 8U));
+    }
+
+    return sum & 0xFFFFFFFFU;
+}
+
 /// Evaluates the integer comparisons CMGT, CMGE, CMHI, CMHS, CMEQ and CMTST.
 static uint64_t
 compare_integers(const uint32_t kind, const uint64_t a, const uint64_t b, const uint32_t esize)
@@ -459,6 +541,9 @@ integer_three_same_element(simd_t        *simd,
             *result
                 = true == is_unsigned ? polynomial_multiply(a, b, esize, esize) : (a * b) & mask;
             return true;
+        case 0x16U: // SQDMULH, SQRDMULH
+            *result = doubling_multiply_high(simd, a, b, esize, is_unsigned);
+            return true;
         default:
             return false;
     }
@@ -483,6 +568,8 @@ is_scalar_three_same(const uint32_t u, const uint32_t opcode, const uint32_t siz
         case 0x10U: // ADD, SUB
         case 0x11U: // CMTST, CMEQ
             return 3U == size;
+        case 0x16U: // SQDMULH, SQRDMULH
+            return 1U == size || 2U == size;
         default:
             (void)u;
             return false;
@@ -812,12 +899,18 @@ three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
 
     const uint32_t elements = datasize / esize;
 
-    // Pairwise integer operations: SMAXP, SMINP, UMAXP, UMINP and ADDP.
-    if (opcode >= 0x14U && opcode <= 0x17U)
+    // SQDMULH and SQRDMULH only exist for halfwords and words.
+    if (0x16U == opcode && (0U == size || 3U == size))
     {
-        if (0x16U == opcode || (0x17U == opcode && 1U == u))
+        return false;
+    }
+
+    // Pairwise integer operations: SMAXP, SMINP, UMAXP, UMINP and ADDP.
+    if (opcode >= 0x14U && opcode <= 0x17U && opcode != 0x16U)
+    {
+        if (0x17U == opcode && 1U == u)
         {
-            return false; // SQDMULH, SQRDMULH and the U = 1 form of ADDP are not implemented.
+            return false; // ADDP has no U = 1 form.
         }
 
         if (3U == size && opcode != 0x17U)
@@ -888,6 +981,103 @@ three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     }
 
     write_vector(simd, rd, result, datasize);
+    return true;
+}
+
+/// Advanced SIMD three same extra, vector and scalar: SQRDMLAH, SQRDMLSH and the vector SDOT and
+/// UDOT.
+static bool
+three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t rm       = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode   = (instruction >> 11U) & 0xFU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t m        = read_vector(simd, rm);
+    const vector_t d        = read_vector(simd, rd);
+    vector_t       result   = { { 0U, 0U } };
+
+    // SQRDMLAH (0000) and SQRDMLSH (0001) on halfwords and words.
+    if (1U == u && opcode <= 0x1U && (1U == size || 2U == size))
+    {
+        const uint32_t esize    = 8U << size;
+        const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            set_element(&result,
+                        e,
+                        esize,
+                        doubling_multiply_accumulate(simd,
+                                                     get_element(&d, e, esize),
+                                                     get_element(&n, e, esize),
+                                                     get_element(&m, e, esize),
+                                                     esize,
+                                                     0x1U == opcode));
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+        return true;
+    }
+
+    // SDOT and UDOT (0010) on words.
+    if (false == is_scalar && 0x2U == opcode && 2U == size)
+    {
+        for (uint32_t e = 0U; e < datasize / 32U; ++e)
+        {
+            set_element(&result,
+                        e,
+                        32U,
+                        dot_product(get_element(&d, e, 32U),
+                                    get_element(&n, e, 32U),
+                                    get_element(&m, e, 32U),
+                                    1U == u));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    return false;
+}
+
+/// Advanced SIMD scalar three different: SQDMLAL, SQDMLSL and SQDMULL.
+static bool
+scalar_three_different(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t u      = (instruction >> 29U) & 1U;
+    const uint32_t size   = (instruction >> 22U) & 0x3U;
+    const uint32_t rm     = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode = (instruction >> 12U) & 0xFU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t m      = read_vector(simd, rm);
+    const vector_t d      = read_vector(simd, rd);
+    vector_t       result = { { 0U, 0U } };
+
+    if (u != 0U || (size != 1U && size != 2U)
+        || (opcode != 0x9U && opcode != 0xBU && opcode != 0xDU))
+    {
+        return false;
+    }
+
+    const uint32_t esize = 8U << size;
+    set_element(&result,
+                0U,
+                2U * esize,
+                doubling_long_operation(simd,
+                                        opcode,
+                                        get_element(&d, 0U, 2U * esize),
+                                        get_element(&n, 0U, esize),
+                                        get_element(&m, 0U, esize),
+                                        esize));
+    write_vector(simd, rd, result, 2U * esize);
     return true;
 }
 
@@ -2008,8 +2198,9 @@ shift_immediate(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     return true;
 }
 
-/// Advanced SIMD vector x indexed element, vector and scalar: FMUL, FMLA, FMLS, FMULX and
-/// MUL, MLA, MLS, SMULL, UMULL, SMLAL, UMLAL, SMLSL, UMLSL.
+/// Advanced SIMD vector x indexed element, vector and scalar: FMUL, FMLA, FMLS, FMULX, MUL, MLA,
+/// MLS, SMULL, UMULL, SMLAL, UMLAL, SMLSL, UMLSL, the saturating doubling multiplies, SDOT and
+/// UDOT.
 static bool
 indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
 {
@@ -2086,7 +2277,7 @@ indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
         return true;
     }
 
-    if (true == is_scalar || 0U == size || 3U == size)
+    if (0U == size || 3U == size)
     {
         return false;
     }
@@ -2096,6 +2287,75 @@ indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     const uint32_t rm      = 1U == size ? rm_low : (m_bit << 4U) | rm_low;
     const vector_t m       = read_vector(simd, rm);
     const uint64_t element = get_element(&m, index, esize);
+
+    // SQDMULH (U = 0, 1100), SQRDMULH (U = 0, 1101), SQRDMLAH (U = 1, 1101) and SQRDMLSH
+    // (U = 1, 1111).
+    if ((0U == u && (0xCU == opcode || 0xDU == opcode))
+        || (1U == u && (0xDU == opcode || 0xFU == opcode)))
+    {
+        const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t a = get_element(&n, e, esize);
+            const uint64_t value
+                = 0U == u ? doubling_multiply_high(simd, a, element, esize, 0xDU == opcode)
+                          : doubling_multiply_accumulate(
+                                simd, get_element(&d, e, esize), a, element, esize, 0xFU == opcode);
+            set_element(&result, e, esize, value);
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+        return true;
+    }
+
+    // SQDMLAL (0011), SQDMLSL (0111) and SQDMULL (1011), with the "2" forms taking the upper
+    // half of n.
+    if (0U == u && (0x3U == opcode || 0x7U == opcode || 0xBU == opcode))
+    {
+        // The matching three different opcodes: 1001, 1011 and 1101.
+        const uint32_t long_opcode = 0x3U == opcode ? 0x9U : (0x7U == opcode ? 0xBU : 0xDU);
+        const uint32_t wide        = esize * 2U;
+        const uint32_t elements    = true == is_scalar ? 1U : 64U / esize;
+        const uint32_t part        = true == is_scalar ? 0U : q * elements;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            set_element(&result,
+                        e,
+                        wide,
+                        doubling_long_operation(simd,
+                                                long_opcode,
+                                                get_element(&d, e, wide),
+                                                get_element(&n, part + e, esize),
+                                                element,
+                                                esize));
+        }
+
+        write_vector(simd, rd, result, true == is_scalar ? wide : 128U);
+        return true;
+    }
+
+    // SDOT and UDOT (1110) on words, with a 32-bit index H:L into a 32-register Rm.
+    if (false == is_scalar && 0xEU == opcode && 2U == size)
+    {
+        for (uint32_t e = 0U; e < datasize / 32U; ++e)
+        {
+            set_element(
+                &result,
+                e,
+                32U,
+                dot_product(get_element(&d, e, 32U), get_element(&n, e, 32U), element, 1U == u));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    if (true == is_scalar)
+    {
+        return false;
+    }
 
     // MUL (U = 0, 1000), MLA (U = 1, 0000), MLS (U = 1, 0100).
     if ((0U == u && 0x8U == opcode) || (1U == u && (0x0U == opcode || 0x4U == opcode)))
@@ -2190,10 +2450,34 @@ three_different(simd_t *simd, const uint32_t instruction)
         return true;
     }
 
-    if (0x9U == opcode || 0xBU == opcode || 0xDU == opcode || 0xFU == opcode
-        || (0xEU == opcode && (1U == u || size != 0U)))
+    // SQDMLAL (1001), SQDMLSL (1011) and SQDMULL (1101) on halfwords and words.
+    if (0x9U == opcode || 0xBU == opcode || 0xDU == opcode)
     {
-        return false; // The saturating doubling multiplies and the wider PMULL are not implemented.
+        if (1U == u || 0U == size)
+        {
+            return false;
+        }
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            set_element(&result,
+                        e,
+                        wide,
+                        doubling_long_operation(simd,
+                                                opcode,
+                                                get_element(&d, e, wide),
+                                                get_element(&n, part + e, esize),
+                                                get_element(&m, part + e, esize),
+                                                esize));
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    if (0xFU == opcode || (0xEU == opcode && (1U == u || size != 0U)))
+    {
+        return false; // PMULL on doublewords is a cryptographic instruction, handled elsewhere.
     }
 
     for (uint32_t e = 0U; e < elements; ++e)
@@ -2356,6 +2640,16 @@ execute(simd_t *simd, const uint32_t instruction)
             return scalar_pairwise(simd, instruction);
         }
 
+        if (0x5E008400U == (instruction & 0xDF208400U))
+        {
+            return three_same_extra(simd, instruction, true);
+        }
+
+        if (0x5E200000U == (instruction & 0xDF200C00U))
+        {
+            return scalar_three_different(simd, instruction);
+        }
+
         if (0x5E000400U == (instruction & 0xFFE0FC00U))
         {
             return copy(simd, instruction, true);
@@ -2409,6 +2703,11 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x0E200000U == (instruction & 0x9F200C00U))
     {
         return three_different(simd, instruction);
+    }
+
+    if (0x0E008400U == (instruction & 0x9F208400U))
+    {
+        return three_same_extra(simd, instruction, false);
     }
 
     if (0x0E000400U == (instruction & 0x9FE08400U))

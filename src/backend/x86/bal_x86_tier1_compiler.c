@@ -2,6 +2,7 @@
 #include "backend/bal_atomic.h"
 #include "backend/bal_cpu.h"
 #include "backend/bal_float.h"
+#include "backend/bal_pointer_authentication.h"
 #include "backend/bal_simd.h"
 #include "backend/bal_system.h"
 #include "bal_decoder.h"
@@ -90,10 +91,7 @@ static bool emit_fast_float(bal_tier1_compiler_t *compiler, uint32_t instruction
 
 static uint32_t extract_operand_value(uint32_t instruction, const bal_decoder_operand_t *operand);
 
-static void translate_add_sub_imm(bal_tier1_compiler_t                     *compiler,
-                                  const bal_decoder_instruction_metadata_t *metadata,
-                                  uint32_t                                  instruction,
-                                  bool                                      is_sub);
+static void translate_add_sub_imm(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static bal_x86_register_t read_shifted_register(bal_tier1_compiler_t *compiler,
                                                 uint8_t               arm_register,
@@ -144,6 +142,10 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+static bool translate_pointer_authentication(bal_tier1_compiler_t         *compiler,
+                                             const bal_memory_interface_t *memory_interface,
+                                             uint32_t                      instruction,
+                                             bal_guest_address_t           guest_address);
 
 static void emit_register_helper_call(bal_tier1_compiler_t *compiler,
                                       uint32_t              instruction,
@@ -554,9 +556,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     // ADD/SUB (immediate): bits 28:23 = 100010.
                     if (0x22U == ((instruction >> 23U) & 0x3FU))
                     {
-                        const bool is_sub = (OPCODE_SUB == metadata->ir_opcode)
-                                            || (OPCODE_CMP == metadata->ir_opcode);
-                        translate_add_sub_imm(compiler, metadata, instruction, is_sub);
+                        translate_add_sub_imm(compiler, instruction);
                         break;
                     }
 
@@ -660,6 +660,16 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_INTEGER_HELPER:
                     translate_integer_helper(compiler, instruction);
+                    break;
+                case OPCODE_POINTER_AUTHENTICATION:
+                    // The authenticated branches leave their target in the guest PC.
+                    if (true
+                        == translate_pointer_authentication(
+                            compiler, memory_interface, instruction, guest_address))
+                    {
+                        is_pc_dynamic       = true;
+                        is_block_terminated = true;
+                    }
                     break;
                 case OPCODE_EXCEPTION:
                     // SVC resumes after itself; BRK and the undefined instructions report their
@@ -1315,23 +1325,19 @@ extract_operand_value(const uint32_t instruction, const bal_decoder_operand_t *o
     return bits;
 }
 
+/// Translates ADD, ADDS, SUB and SUBS (immediate): sf op S 100010 sh imm12 Rn Rd. The fields come
+/// from the encoding, since the decoder's alias entries (CMP, CMN, MOV to or from SP) list fewer
+/// operands.
 void
-translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT                     compiler,
-                      const bal_decoder_instruction_metadata_t *BAL_RESTRICT metadata,
-                      const uint32_t                                         instruction,
-                      const bool                                             is_sub)
+translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
-    const bal_decoder_operand_t *BAL_RESTRICT operand_cursor = metadata->operands;
-    const uint8_t  rd           = (uint8_t)extract_operand_value(instruction, &operand_cursor[0]);
-    const uint8_t  rn           = (uint8_t)extract_operand_value(instruction, &operand_cursor[1]);
-    const uint32_t imm12        = extract_operand_value(instruction, &operand_cursor[2]);
-    const uint32_t shift        = extract_operand_value(instruction, &operand_cursor[3]);
-    const uint64_t shift_amount = 1 == shift ? 12 : 0;
-    uint64_t       value        = (uint64_t)imm12 << shift_amount;
-
-    // Does this instruction set flags?
-    const bool is_setting_flags = (OPCODE_CMP == metadata->ir_opcode) || ('S' == metadata->name[3])
-                                  || ('N' == metadata->name[2]);
+    const uint8_t            rd                  = (uint8_t)(instruction & 0x1FU);
+    const uint8_t            rn                  = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint32_t           imm12               = (instruction >> 10U) & 0xFFFU;
+    const uint64_t           shift_amount        = 1U == ((instruction >> 22U) & 1U) ? 12U : 0U;
+    uint64_t                 value               = (uint64_t)imm12 << shift_amount;
+    const bool               is_sub              = 1U == ((instruction >> 30U) & 1U);
+    const bool               is_setting_flags    = 1U == ((instruction >> 29U) & 1U);
     const bool               is_discarded_result = is_setting_flags && (31 == rd);
     const bool               skip_load_rn        = false;
     const bal_x86_register_t x86_rn = allocate_x86_register(compiler, rn, skip_load_rn);
@@ -1362,7 +1368,7 @@ translate_add_sub_imm(bal_tier1_compiler_t *BAL_RESTRICT                     com
             bal_sliding_window_push(&compiler->window, mov_macro);
         }
     }
-    const bool             is_32bit = BAL_OPERAND_TYPE_REGISTER_32 == operand_cursor[0].type;
+    const bool             is_32bit = 0U == (instruction >> 31U);
     bal_x86_macro_opcode_t arithmetic_opcode;
 
     if (true == is_sub)
@@ -4980,6 +4986,53 @@ translate_integer_helper(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
 
     emit_register_helper_call(
         compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_integer_helper);
+}
+
+/// Translates pointer authentication: LDRAA and LDRAB through bal_execute_authenticated_load(),
+/// which raises a data abort for an address that failed authentication, and everything else
+/// through bal_execute_pointer_authentication(). Returns true for the authenticated branches, whose
+/// helper stores the target to the guest PC.
+static bool
+translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                                 const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                                 const uint32_t                             instruction,
+                                 const bal_guest_address_t                  guest_address)
+{
+    if (true == bal_is_authenticated_load(instruction))
+    {
+        emit_memory_helper_call(compiler,
+                                memory_interface,
+                                instruction,
+                                guest_address,
+                                (uint64_t)(uintptr_t)&bal_execute_authenticated_load);
+        return false;
+    }
+
+    if (BAL_UNLIKELY(false == bal_is_pointer_authentication_supported(instruction)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: unsupported pointer authentication encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return false;
+    }
+
+    emit_register_helper_call(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
+
+    if (false == bal_is_authenticated_branch(instruction))
+    {
+        return false;
+    }
+
+    // BLRAA, BLRAB and their Z forms link once the helper has read the target, so BLRAA X30
+    // branches to the old X30.
+    if (1U == ((instruction >> 21U) & 0x3U))
+    {
+        write_link_register(compiler, guest_address + 4U);
+    }
+
+    return true;
 }
 
 /// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception

@@ -58,6 +58,26 @@ main(void)
         return 1;
     }
 
+    // Run in the non-secure state with SCR_EL3.API/APK and HCR_EL2.API/APK set, so that pointer
+    // authentication does not trap to EL2 or EL3. The keys stay disabled, as in Ballistic's
+    // default state.
+    const uc_arm64_cp_reg scr_el3 = { .crn = 1,
+                                      .crm = 1,
+                                      .op0 = 3,
+                                      .op1 = 6,
+                                      .op2 = 0,
+                                      .val = (3ULL << 16U) | (1ULL << 10U) | 1ULL };
+    const uc_arm64_cp_reg hcr_el2 = {
+        .crn = 1, .crm = 1, .op0 = 3, .op1 = 4, .op2 = 0, .val = (3ULL << 40U) | (1ULL << 31U)
+    };
+
+    if (uc_reg_write(engine, UC_ARM64_REG_CP_REG, &scr_el3) != UC_ERR_OK
+        || uc_reg_write(engine, UC_ARM64_REG_CP_REG, &hcr_el2) != UC_ERR_OK)
+    {
+        (void)fprintf(stderr, "writing SCR_EL3 and HCR_EL2 failed\n");
+        return 1;
+    }
+
     while (true)
     {
         if (bal_fuzzer_ipc_receive(STDIN_FILENO, &input, sizeof(input)) != BAL_SUCCESS)

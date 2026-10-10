@@ -94,6 +94,14 @@ local function derive_opcode(mnemonic)
         return "OPCODE_INTEGER_HELPER"
     end
 
+    -- Pointer authentication, executed by a runtime helper: the PAC*, AUT* and XPAC* instructions
+    -- with their hint-space forms, PACGA, the authenticated branches and LDRAA/LDRAB. ERETAA and
+    -- ERETAB stay undefined at EL0.
+    if m:match("^PAC") or m:match("^AUT") or m:match("^XPAC") or m:match("^BL?RA[AB]Z?$")
+        or m:match("^RETA[AB]$") or m:match("^LDRA[AB]$") then
+        return "OPCODE_POINTER_AUTHENTICATION"
+    end
+
     -- SYS: the cache maintenance operations EL0 may execute.
     if m == "SYS" then
         return "OPCODE_SYSTEM_REGISTER"
@@ -206,7 +214,9 @@ local function derive_opcode(mnemonic)
 
     -- The unscaled, unprivileged and non-temporal forms, and the prefetches, which tier 1 treats as
     -- loads that do nothing.
-    if m:sub(1, 4) == "LDUR" or m:sub(1, 4) == "LDTR" or m == "LDNP" or m == "PRFM" or m == "PRFUM" then
+    -- RPRFM (FEAT_RPRFM) encodings are PRFM hints on CPUs without it.
+    if m:sub(1, 4) == "LDUR" or m:sub(1, 4) == "LDTR" or m == "LDNP" or m == "PRFM" or m == "PRFUM"
+        or m == "RPRFM" then
         return "OPCODE_LOAD"
     end
 
@@ -737,10 +747,12 @@ local function parse_xml_file(filepath, arch)
 
                         if encoding_ok then
                             local operands = parse_operands(asmtemplate, field_map, explanation_map)
+                            -- The number of fixed bits. The bit operations return signed values, so
+                            -- a mask with bit 31 set is negative; rshift() is a logical shift.
                             local priority = 0
                             local tmp = encoding_mask
 
-                            while tmp > 0 do
+                            while tmp ~= 0 do
                                 priority = priority + band(tmp, 1)
                                 tmp = rshift(tmp, 1)
                             end
@@ -1215,6 +1227,14 @@ local function main(...)
         -- translates.
         if top_bits <= 0x3 and inst.mnemonic ~= "UDF" then
             inst.opcode_override = "OPCODE_TRAP"
+        end
+
+        -- Hints the guest CPU does not implement execute as NOP. Their own entries are more
+        -- specific than HINT, so they need the same routing.
+        local is_hint = bit.band(inst.value, bit.tobit(0xFFFFF01F)) == bit.tobit(0xD503201F)
+
+        if is_hint and derive_opcode(inst.mnemonic) == "OPCODE_TRAP" then
+            inst.opcode_override = "OPCODE_NOP"
         end
 
         -- op0 = x111 is the scalar floating-point and Advanced SIMD data processing space, which

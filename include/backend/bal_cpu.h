@@ -38,6 +38,16 @@ extern "C"
         BAL_EXCEPTION_UNDEFINED_INSTRUCTION = 4,
     } bal_exception_t;
 
+    /// The pointer authentication keys in bal_cpu_t::pac_keys.
+    typedef enum
+    {
+        BAL_PAC_KEY_IA,
+        BAL_PAC_KEY_IB,
+        BAL_PAC_KEY_DA,
+        BAL_PAC_KEY_DB,
+        BAL_PAC_KEY_GA,
+    } bal_pac_key_t;
+
     BAL_ALIGNED(64) typedef struct
     {
         uint64_t                 x[32];
@@ -102,8 +112,23 @@ extern "C"
         uint32_t jit_host_mxcsr;
         uint32_t jit_mxcsr;
 
+        /// The pointer authentication keys, indexed by bal_pac_key_t: [key][0] holds the
+        /// APxxKeyLo_EL1 half and [key][1] the APxxKeyHi_EL1 half.
+        uint64_t pac_keys[5][2];
+
+        /// The SCTLR_EL1 bits EnIA (31), EnIB (30), EnDA (27) and EnDB (13), which enable the
+        /// instruction and data keys. With a key disabled, the instructions that sign or
+        /// authenticate with it leave the pointer unchanged; zero disables pointer authentication,
+        /// and PACIASP and the other hint-space forms then execute as NOP.
+        uint64_t sctlr_el1;
+
+        /// The TCR_EL1 fields that place the pointer authentication code: T0SZ (5:0) and T1SZ
+        /// (21:16) for addresses with bit 55 clear and set, TBI0 (37), TBI1 (38), TBID0 (51) and
+        /// TBID1 (52). A TxSZ below 16 counts as 16, so zero gives 48-bit addresses.
+        uint64_t tcr_el1;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[56];
+        uint8_t reserved[24];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

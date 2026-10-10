@@ -41930,7 +41930,7 @@ const bal_decoder_instruction_metadata_t
         { "UDF",
           0xFFFF0000,
           0x00000000,
-          OPCODE_TRAP,
+          OPCODE_EXCEPTION,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 0, 16 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

@@ -94,6 +94,14 @@ local function derive_opcode(mnemonic)
         return "OPCODE_INTEGER_HELPER"
     end
 
+    -- Pointer authentication, executed by a runtime helper: the PAC*, AUT* and XPAC* instructions
+    -- with their hint-space forms, PACGA, the authenticated branches and LDRAA/LDRAB. ERETAA and
+    -- ERETAB stay undefined at EL0.
+    if m:match("^PAC") or m:match("^AUT") or m:match("^XPAC") or m:match("^BL?RA[AB]Z?$")
+        or m:match("^RETA[AB]$") or m:match("^LDRA[AB]$") then
+        return "OPCODE_POINTER_AUTHENTICATION"
+    end
+
     -- SYS: the cache maintenance operations EL0 may execute.
     if m == "SYS" then
         return "OPCODE_SYSTEM_REGISTER"

@@ -1,6 +1,6 @@
 //! Runs small guest programs through the engine to check the system level behaviour that has no
 //! deterministic reference in Unicorn: the generic timer, guest exceptions and resuming after them,
-//! and the CRC32 and DC ZVA results against fixed values.
+//! the CRC32 and DC ZVA results against fixed values, and pointer authentication round trips.
 
 #include "bal_engine.h"
 #include "bal_engine_flags.h"
@@ -222,6 +222,84 @@ test_DcZva_UnmappedBlockRaisesDataAbort(void)
     TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.pc);
 }
 
+/// Enables the A instruction key with the keys and layout the known answers were computed with:
+/// APIAKey = 0x2222:0x1111 and 48-bit addresses in both ranges, without top-byte-ignore.
+static void
+enable_instruction_key_a(void)
+{
+    g_cpu.pac_keys[BAL_PAC_KEY_IA][0] = 0x1111U;
+    g_cpu.pac_keys[BAL_PAC_KEY_IA][1] = 0x2222U;
+    g_cpu.sctlr_el1                   = 1ULL << 31U;
+    g_cpu.tcr_el1                     = 0x100010U;
+}
+
+static void
+test_Pacia_MatchesKnownCode(void)
+{
+    // PACIA X0, X1. The code is the one QEMU computes for the same key, pointer and modifier.
+    const uint32_t program[] = { 0xDAC10020U };
+    load_program(program, 1U);
+    enable_instruction_key_a();
+    g_cpu.x[0] = 0x0000123456789ABCULL;
+    g_cpu.x[1] = 0x55U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0xEA06123456789ABCULL, g_cpu.x[0]);
+}
+
+static void
+test_Autia_FailureMakesThePointerNonCanonical(void)
+{
+    // AUTIA X0, X1 on a pointer without a code: the A-key error code lands in bits 62:61.
+    const uint32_t program[] = { 0xDAC11020U };
+    load_program(program, 1U);
+    enable_instruction_key_a();
+    g_cpu.x[0] = 0x0000123456789ABCULL;
+    g_cpu.x[1] = 0x55U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x2000123456789ABCULL, g_cpu.x[0]);
+}
+
+static void
+test_Paciasp_AutiaspRestoreTheLinkRegister(void)
+{
+    // PACIASP; MOV X1, X30; AUTIASP; then the RET to the sentinel needs the restored X30.
+    const uint32_t program[] = { 0xD503233FU, 0xAA1E03E1U, 0xD50323BFU };
+    load_program(program, 3U);
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
+static void
+test_PointerAuthenticationHints_AreNopsWhileDisabled(void)
+{
+    // PACIASP; MOV X1, X30.
+    const uint32_t program[] = { 0xD503233FU, 0xAA1E03E1U };
+    load_program(program, 2U);
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+}
+
+static void
+test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
+{
+    // PACIASP; RETAA.
+    const uint32_t program[] = { 0xD503233FU, 0xD65F0BFFU };
+    (void)memcpy(g_memory, program, sizeof(program));
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    // RETAA authenticates X30 into the PC and leaves X30 signed.
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
 int
 main(void)
 {
@@ -237,5 +315,10 @@ main(void)
     RUN_TEST(test_Crc32c_MatchesTheStandardCheckValue);
     RUN_TEST(test_DcZva_ZeroesTheAlignedBlock);
     RUN_TEST(test_DcZva_UnmappedBlockRaisesDataAbort);
+    RUN_TEST(test_Pacia_MatchesKnownCode);
+    RUN_TEST(test_Autia_FailureMakesThePointerNonCanonical);
+    RUN_TEST(test_Paciasp_AutiaspRestoreTheLinkRegister);
+    RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
+    RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
     return UNITY_END();
 }

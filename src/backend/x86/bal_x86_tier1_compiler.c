@@ -2,6 +2,7 @@
 #include "backend/bal_atomic.h"
 #include "backend/bal_cpu.h"
 #include "backend/bal_float.h"
+#include "backend/bal_pointer_authentication.h"
 #include "backend/bal_simd.h"
 #include "backend/bal_system.h"
 #include "bal_decoder.h"
@@ -141,6 +142,10 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+static bool translate_pointer_authentication(bal_tier1_compiler_t         *compiler,
+                                             const bal_memory_interface_t *memory_interface,
+                                             uint32_t                      instruction,
+                                             bal_guest_address_t           guest_address);
 
 static void emit_register_helper_call(bal_tier1_compiler_t *compiler,
                                       uint32_t              instruction,
@@ -655,6 +660,16 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_INTEGER_HELPER:
                     translate_integer_helper(compiler, instruction);
+                    break;
+                case OPCODE_POINTER_AUTHENTICATION:
+                    // The authenticated branches leave their target in the guest PC.
+                    if (true
+                        == translate_pointer_authentication(
+                            compiler, memory_interface, instruction, guest_address))
+                    {
+                        is_pc_dynamic       = true;
+                        is_block_terminated = true;
+                    }
                     break;
                 case OPCODE_EXCEPTION:
                     // SVC resumes after itself; BRK and the undefined instructions report their
@@ -4971,6 +4986,53 @@ translate_integer_helper(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
 
     emit_register_helper_call(
         compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_integer_helper);
+}
+
+/// Translates pointer authentication: LDRAA and LDRAB through bal_execute_authenticated_load(),
+/// which raises a data abort for an address that failed authentication, and everything else
+/// through bal_execute_pointer_authentication(). Returns true for the authenticated branches, whose
+/// helper stores the target to the guest PC.
+static bool
+translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                                 const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                                 const uint32_t                             instruction,
+                                 const bal_guest_address_t                  guest_address)
+{
+    if (true == bal_is_authenticated_load(instruction))
+    {
+        emit_memory_helper_call(compiler,
+                                memory_interface,
+                                instruction,
+                                guest_address,
+                                (uint64_t)(uintptr_t)&bal_execute_authenticated_load);
+        return false;
+    }
+
+    if (BAL_UNLIKELY(false == bal_is_pointer_authentication_supported(instruction)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: unsupported pointer authentication encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return false;
+    }
+
+    emit_register_helper_call(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
+
+    if (false == bal_is_authenticated_branch(instruction))
+    {
+        return false;
+    }
+
+    // BLRAA, BLRAB and their Z forms link once the helper has read the target, so BLRAA X30
+    // branches to the old X30.
+    if (1U == ((instruction >> 21U) & 0x3U))
+    {
+        write_link_register(compiler, guest_address + 4U);
+    }
+
+    return true;
 }
 
 /// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception

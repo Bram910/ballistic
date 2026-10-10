@@ -1166,7 +1166,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTDA",
           0xFFFFFC00,
           0xDAC11800,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1178,7 +1178,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTDZA",
           0xFFFFFFE0,
           0xDAC13BE0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1190,7 +1190,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTDB",
           0xFFFFFC00,
           0xDAC11C00,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1202,7 +1202,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTDZB",
           0xFFFFFFE0,
           0xDAC13FE0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1214,7 +1214,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIA",
           0xFFFFFC00,
           0xDAC11000,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1226,7 +1226,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIA1716",
           0xFFFFFFFF,
           0xD503219F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1238,7 +1238,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIASP",
           0xFFFFFFFF,
           0xD50323BF,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1250,7 +1250,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIAZ",
           0xFFFFFFFF,
           0xD503239F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1262,7 +1262,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIZA",
           0xFFFFFFE0,
           0xDAC133E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1274,7 +1274,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIB",
           0xFFFFFC00,
           0xDAC11400,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -1286,7 +1286,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIB1716",
           0xFFFFFFFF,
           0xD50321DF,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1298,7 +1298,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIBSP",
           0xFFFFFFFF,
           0xD50323FF,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1310,7 +1310,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIBZ",
           0xFFFFFFFF,
           0xD50323DF,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -1322,7 +1322,7 @@ const bal_decoder_instruction_metadata_t
         { "AUTIZB",
           0xFFFFFFE0,
           0xDAC137E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -2918,7 +2918,7 @@ const bal_decoder_instruction_metadata_t
         { "BLRAA",
           0xFFFFFC00,
           0xD73F0800,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -2930,7 +2930,7 @@ const bal_decoder_instruction_metadata_t
         { "BLRAAZ",
           0xFFFFFC1F,
           0xD63F081F,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -2942,7 +2942,7 @@ const bal_decoder_instruction_metadata_t
         { "BLRAB",
           0xFFFFFC00,
           0xD73F0C00,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -2954,7 +2954,7 @@ const bal_decoder_instruction_metadata_t
         { "BLRABZ",
           0xFFFFFC1F,
           0xD63F0C1F,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -3002,7 +3002,7 @@ const bal_decoder_instruction_metadata_t
         { "BRAA",
           0xFFFFFC00,
           0xD71F0800,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3014,7 +3014,7 @@ const bal_decoder_instruction_metadata_t
         { "BRAAZ",
           0xFFFFFC1F,
           0xD61F081F,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -3026,7 +3026,7 @@ const bal_decoder_instruction_metadata_t
         { "BRAB",
           0xFFFFFC00,
           0xD71F0C00,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -3038,7 +3038,7 @@ const bal_decoder_instruction_metadata_t
         { "BRABZ",
           0xFFFFFC1F,
           0xD61F0C1F,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -21998,7 +21998,7 @@ const bal_decoder_instruction_metadata_t
         { "LDRAA",
           0xFFA00C00,
           0xF8200400,
-          OPCODE_LOAD,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22010,7 +22010,7 @@ const bal_decoder_instruction_metadata_t
         { "LDRAA",
           0xFFA00C00,
           0xF8200C00,
-          OPCODE_LOAD,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22022,7 +22022,7 @@ const bal_decoder_instruction_metadata_t
         { "LDRAB",
           0xFFA00C00,
           0xF8A00400,
-          OPCODE_LOAD,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22034,7 +22034,7 @@ const bal_decoder_instruction_metadata_t
         { "LDRAB",
           0xFFA00C00,
           0xF8A00C00,
-          OPCODE_LOAD,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26666,7 +26666,7 @@ const bal_decoder_instruction_metadata_t
         { "PACDA",
           0xFFFFFC00,
           0xDAC10800,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26678,7 +26678,7 @@ const bal_decoder_instruction_metadata_t
         { "PACDZA",
           0xFFFFFFE0,
           0xDAC12BE0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26690,7 +26690,7 @@ const bal_decoder_instruction_metadata_t
         { "PACDB",
           0xFFFFFC00,
           0xDAC10C00,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26702,7 +26702,7 @@ const bal_decoder_instruction_metadata_t
         { "PACDZB",
           0xFFFFFFE0,
           0xDAC12FE0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26714,7 +26714,7 @@ const bal_decoder_instruction_metadata_t
         { "PACGA",
           0xFFE0FC00,
           0x9AC03000,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26726,7 +26726,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIA",
           0xFFFFFC00,
           0xDAC10000,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26738,7 +26738,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIA1716",
           0xFFFFFFFF,
           0xD503211F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26750,7 +26750,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIASP",
           0xFFFFFFFF,
           0xD503233F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26762,7 +26762,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIAZ",
           0xFFFFFFFF,
           0xD503231F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26774,7 +26774,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIZA",
           0xFFFFFFE0,
           0xDAC123E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26786,7 +26786,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIB",
           0xFFFFFC00,
           0xDAC10400,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -26798,7 +26798,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIB1716",
           0xFFFFFFFF,
           0xD503215F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26810,7 +26810,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIBSP",
           0xFFFFFFFF,
           0xD503237F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26822,7 +26822,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIBZ",
           0xFFFFFFFF,
           0xD503235F,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -26834,7 +26834,7 @@ const bal_decoder_instruction_metadata_t
         { "PACIZB",
           0xFFFFFFE0,
           0xDAC127E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -28526,7 +28526,7 @@ const bal_decoder_instruction_metadata_t
         { "RETAA",
           0xFFFFFFFF,
           0xD65F0BFF,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -28538,7 +28538,7 @@ const bal_decoder_instruction_metadata_t
         { "RETAB",
           0xFFFFFFFF,
           0xD65F0FFF,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45974,7 +45974,7 @@ const bal_decoder_instruction_metadata_t
         { "XPACD",
           0xFFFFFFE0,
           0xDAC147E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45986,7 +45986,7 @@ const bal_decoder_instruction_metadata_t
         { "XPACI",
           0xFFFFFFE0,
           0xDAC143E0,
-          OPCODE_TRAP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45998,7 +45998,7 @@ const bal_decoder_instruction_metadata_t
         { "XPACLRI",
           0xFFFFFFFF,
           0xD50320FF,
-          OPCODE_NOP,
+          OPCODE_POINTER_AUTHENTICATION,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

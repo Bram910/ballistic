@@ -87,7 +87,11 @@ main(const int argc, const char **argv)
 
         // MRS of CNTFRQ_EL0, CNTPCT_EL0 or CNTVCT_EL0 reads the host's counter in each engine, so
         // the results cannot match; the engine's unit tests check those registers instead.
-        if (0xD53BE000U == (*seed_cursor & 0xFFFFFF80U))
+        //
+        // With every pointer authentication key disabled, as here, Unicorn leaves the pointer of
+        // XPACI, XPACD and XPACLRI alone, where the architecture strips it.
+        if (0xD53BE000U == (*seed_cursor & 0xFFFFFF80U)
+            || 0xDAC143E0U == (*seed_cursor & 0xFFFFFBE0U) || 0xD50320FFU == *seed_cursor)
         {
             ++seeds_skipped;
             ++seed_cursor;

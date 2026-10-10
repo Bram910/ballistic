@@ -131,12 +131,18 @@ add_library(Ballistic STATIC
         src/bal_memory.c
         src/generated/decoder_table.c
         src/backend/bal_atomic.c
+        src/backend/bal_float.c
         src/backend/x86/bal_x86_assembler.c
         src/backend/x86/bal_x86_sliding_window.c
         src/backend/x86/bal_x86_tier1_compiler.c
 )
 
 target_include_directories(Ballistic PUBLIC include)
+
+# The floating-point helper uses the C math library, which is separate on Unix.
+if (UNIX)
+    target_link_libraries(Ballistic PUBLIC m)
+endif ()
 target_include_directories(Ballistic PRIVATE src)
 target_compile_definitions(Ballistic PUBLIC BAL_MAX_LOG_LEVEL=4)
 add_strict_compiler_flags(Ballistic)

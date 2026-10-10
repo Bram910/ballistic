@@ -1,6 +1,7 @@
 #include "backend/x86/bal_x86_tier1_compiler.h"
 #include "backend/bal_atomic.h"
 #include "backend/bal_cpu.h"
+#include "backend/bal_float.h"
 #include "bal_decoder.h"
 #include "bal_engine.h"
 #include "bal_engine_flags.h"
@@ -123,6 +124,8 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
                              const bal_memory_interface_t *memory_interface,
                              uint32_t                      instruction,
                              bal_guest_address_t           guest_address);
+
+static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
@@ -597,6 +600,9 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_ATOMIC:
                     translate_atomic(compiler, memory_interface, instruction, guest_address);
+                    break;
+                case OPCODE_FLOAT:
+                    translate_float(compiler, instruction);
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -4727,4 +4733,38 @@ translate_atomic(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
 
     emit_runtime_call(compiler, (uint64_t)(uintptr_t)&bal_execute_atomic);
     emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
+}
+
+/// Translates the scalar floating-point instructions: moves, arithmetic, comparisons, conditional
+/// select, rounding and the conversions to and from integers.
+///
+/// Tier 1 calls bal_execute_float() for each one with the guest registers flushed, so every
+/// instruction gets the exact AArch64 behaviour: NaN propagation, FPCR.DN, FPCR.FZ, the FPCR
+/// rounding mode and the FPSR flags. Inline fast paths for the common cases can sit in front of
+/// it later.
+static void
+translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    if (BAL_UNLIKELY(false == bal_is_float_supported(instruction)))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger,
+                      "Aborting function: unsupported floating-point encoding %08x",
+                      instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+
+    const bal_x86_macro_t instruction_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG2,
+        .immediate_or_offset = instruction,
+    };
+    bal_sliding_window_push(&compiler->window, instruction_macro);
+
+    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&bal_execute_float);
 }

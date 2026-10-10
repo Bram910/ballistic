@@ -1775,13 +1775,7 @@ translate_logical(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t in
     // Rd is the stack pointer for AND/ORR/EOR (immediate) and the zero register otherwise.
     const bool is_rd_stack_pointer = true == is_immediate && false == is_setting_flags;
     const bool is_discarded_result = 31U == rd && false == is_rd_stack_pointer;
-
-    if (true == is_discarded_result && false == is_setting_flags)
-    {
-        return;
-    }
-
-    uint64_t bit_mask = 0U;
+    uint64_t   bit_mask            = 0U;
 
     if (true == is_immediate)
     {
@@ -1805,6 +1799,13 @@ translate_logical(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t in
                       "Aborting function: reserved logical shifted register encoding %08x",
                       instruction);
         compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    // Only once the encoding is known to be allocated: a write to the zero register that sets no
+    // flags does nothing.
+    if (true == is_discarded_result && false == is_setting_flags)
+    {
         return;
     }
 

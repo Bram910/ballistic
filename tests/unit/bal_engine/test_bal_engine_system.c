@@ -287,6 +287,76 @@ test_PointerAuthenticationHints_AreNopsWhileDisabled(void)
 }
 
 static void
+test_Pacibsp_FollowsTheBKeyEnable(void)
+{
+    // PACIBSP; MOV X1, X30; AUTIBSP, with only the A key enabled and then with the B key too.
+    const uint32_t program[] = { 0xD503237FU, 0xAA1E03E1U, 0xD50323FFU };
+    load_program(program, 3U);
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+
+    g_cpu.pc        = 0U;
+    g_cpu.x[30]     = BAL_ENGINE_SENTINEL;
+    g_cpu.sctlr_el1 = 1ULL << 30U;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
+static void
+test_IcIvauAndIsb_RunTheCodeTheGuestWrote(void)
+{
+    // Calls a function returning 1, overwrites its first instruction with MOVZ X0, #2, and
+    // calls it again after IC IVAU and ISB.
+    const uint32_t program[] = {
+        0xAA1E03E5U, // MOV X5, X30
+        0x9400003FU, // BL 0x100
+        0xAA0003E3U, // MOV X3, X0
+        0xB9000041U, // STR W1, [X2]
+        0xD50B7522U, // IC IVAU, X2
+        0xD5033FDFU, // ISB
+        0x9400003AU, // BL 0x100
+        0xAA0503FEU, // MOV X30, X5
+        RET,
+    };
+    const uint32_t function[] = { 0xD2800020U, RET }; // MOVZ X0, #1; RET
+    (void)memcpy(g_memory, program, sizeof(program));
+    (void)memcpy(g_memory + 0x100U, function, sizeof(function));
+    g_cpu.x[1] = 0xD2800040U;
+    g_cpu.x[2] = 0x100U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+}
+
+static void
+test_ClearCache_RetranslatesTheGuestCode(void)
+{
+    // MOVZ X0, #1, run once; then MOVZ X0, #2 in its place after bal_engine_clear_cache().
+    const uint32_t program[] = { 0xD2800020U };
+    load_program(program, 1U);
+    bal_engine_t engine;
+    (void)memset(&engine, 0, sizeof(engine));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS,
+                      bal_engine_init(&engine, &g_cpu, &g_allocator, &g_memory_interface));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+
+    const uint32_t replacement = 0xD2800040U;
+    (void)memcpy(g_memory, &replacement, sizeof(replacement));
+    bal_engine_clear_cache(&engine);
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+    bal_engine_destroy(&engine);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -319,6 +389,9 @@ main(void)
     RUN_TEST(test_Autia_FailureMakesThePointerNonCanonical);
     RUN_TEST(test_Paciasp_AutiaspRestoreTheLinkRegister);
     RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
+    RUN_TEST(test_Pacibsp_FollowsTheBKeyEnable);
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
+    RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
+    RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     return UNITY_END();
 }

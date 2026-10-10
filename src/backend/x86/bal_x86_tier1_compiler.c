@@ -142,6 +142,7 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+static void emit_store_cpu_word(bal_tier1_compiler_t *compiler, int32_t offset, uint32_t value);
 static bool translate_pointer_authentication(bal_tier1_compiler_t         *compiler,
                                              const bal_memory_interface_t *memory_interface,
                                              uint32_t                      instruction,
@@ -637,9 +638,19 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                         break;
                     }
 
+                    // ISB ends the block and tells the engine to discard its translations if an
+                    // IC IVAU said the guest has written code; see bal_cpu_t::instruction_barrier.
+                    if (0xD50330DFU == (instruction & 0xFFFFF0FFU))
+                    {
+                        emit_store_cpu_word(
+                            compiler, (int32_t)offsetof(bal_cpu_t, instruction_barrier), 1U);
+                        is_block_terminated = true;
+                        break;
+                    }
+
                     // DMB and DSB order memory accesses for other observers. x86 keeps loads and
                     // stores in order except for a load passing an earlier store, so a full fence
-                    // is always sufficient. ISB, SB, CLREX and the hints need nothing here.
+                    // is always sufficient. SB, CLREX and the hints need nothing here.
                     if (0xD503309FU == (instruction & 0xFFFFF0DFU))
                     {
                         const bal_x86_macro_t fence_macro = {
@@ -5017,6 +5028,33 @@ translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         comp
         return false;
     }
 
+    // The hint-space forms other than XPACLRI do nothing while their key is disabled, which is
+    // the common case, so they test the enable bit and skip the call. The test happens at run time
+    // because the host may enable the keys after the code is translated.
+    const bool is_keyed_hint
+        = 0xD503201FU == (instruction & 0xFFFFF01FU) && instruction != 0xD50320FFU;
+
+    if (true == is_keyed_hint)
+    {
+        flush_dirty_registers(compiler);
+        reset_register_allocator(compiler);
+        bal_sliding_window_flush_all(&compiler->window);
+
+        // op2 bit 1 picks the B key, enabled by SCTLR_EL1.EnIB (bit 30) rather than EnIA (31).
+        bal_x86_assembler_t *BAL_RESTRICT assembler  = &compiler->assembler;
+        const uint8_t                     enable_bit = 0U != ((instruction >> 6U) & 1U) ? 30U : 31U;
+        bal_x86_emit_load_r64_rbp_offset(
+            assembler, BAL_X86_REGISTER_DISCARD_RESULT, (int32_t)offsetof(bal_cpu_t, sctlr_el1));
+        bal_x86_emit_bt_r64_imm8(assembler, BAL_X86_REGISTER_DISCARD_RESULT, enable_bit);
+        const size_t skip = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+
+        emit_register_helper_call(
+            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
+        bal_sliding_window_flush_all(&compiler->window);
+        patch_forward_jump(assembler, skip, true);
+        return false;
+    }
+
     emit_register_helper_call(
         compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
 
@@ -5105,9 +5143,22 @@ emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
 }
 
+/// Stores `value` to the 32-bit field of the cpu structure at `offset`.
+static void
+emit_store_cpu_word(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                    const int32_t                      offset,
+                    const uint32_t                     value)
+{
+    bal_sliding_window_flush_all(&compiler->window);
+    bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_REGISTER_DISCARD_RESULT, value);
+    bal_x86_emit_store_r32_rbp_offset(
+        &compiler->assembler, BAL_X86_REGISTER_DISCARD_RESULT, offset);
+}
+
 /// Translates the SYS instructions EL0 can execute: DC ZVA zeroes a 64-byte block through
-/// bal_execute_cache_zero(), and the cache maintenance operations DC CVAC, CVAU, CVAP, CVADP,
-/// CIVAC and IC IVAU do nothing, since translated code never caches guest memory.
+/// bal_execute_cache_zero(), IC IVAU records in bal_cpu_t::instruction_cache_invalidated that the
+/// guest has written code, and the data cache maintenance operations DC CVAC, CVAU, CVAP, CVADP
+/// and CIVAC do nothing, since translated code never caches guest memory.
 static void
 translate_system(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                  const bal_memory_interface_t *BAL_RESTRICT memory_interface,
@@ -5131,7 +5182,10 @@ translate_system(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         case (3U << 11U) | (7U << 7U) | (12U << 3U) | 1U: // DC CVAP
         case (3U << 11U) | (7U << 7U) | (13U << 3U) | 1U: // DC CVADP
         case (3U << 11U) | (7U << 7U) | (14U << 3U) | 1U: // DC CIVAC
-        case (3U << 11U) | (7U << 7U) | (5U << 3U) | 1U:  // IC IVAU
+            return;
+        case (3U << 11U) | (7U << 7U) | (5U << 3U) | 1U: // IC IVAU
+            emit_store_cpu_word(
+                compiler, (int32_t)offsetof(bal_cpu_t, instruction_cache_invalidated), 1U);
             return;
         default:
             BAL_LOG_ERROR(&bal_thread_logger,

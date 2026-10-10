@@ -423,7 +423,15 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
                 cpu->exclusive_state    = 1U;
                 cpu->exclusive_address  = address;
                 cpu->exclusive_value[0] = value[0];
-                cpu->exclusive_value[1] = value[1];
+
+                // Only a 16-byte load-exclusive replaces the high half of the reserved value, as
+                // in QEMU, so a 16-byte store-exclusive after a narrower load-exclusive, which is
+                // CONSTRAINED UNPREDICTABLE, compares against the same value as Unicorn.
+                if (16U == bytes)
+                {
+                    cpu->exclusive_value[1] = value[1];
+                }
+
                 return 1U;
             }
 

@@ -307,6 +307,29 @@ test_Pacibsp_FollowsTheBKeyEnable(void)
 }
 
 static void
+test_ClearCache_RetranslatesTheGuestCode(void)
+{
+    // MOVZ X0, #1, run once; then MOVZ X0, #2 in its place after bal_engine_clear_cache().
+    const uint32_t program[] = { 0xD2800020U };
+    load_program(program, 1U);
+    bal_engine_t engine;
+    (void)memset(&engine, 0, sizeof(engine));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS,
+                      bal_engine_init(&engine, &g_cpu, &g_allocator, &g_memory_interface));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+
+    const uint32_t replacement = 0xD2800040U;
+    (void)memcpy(g_memory, &replacement, sizeof(replacement));
+    bal_engine_clear_cache(&engine);
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+    bal_engine_destroy(&engine);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -341,5 +364,6 @@ main(void)
     RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
     RUN_TEST(test_Pacibsp_FollowsTheBKeyEnable);
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
+    RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     return UNITY_END();
 }

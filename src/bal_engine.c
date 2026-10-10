@@ -286,6 +286,11 @@ bal_engine_run_thread(bal_engine_t *engine)
         {
             BAL_LOG_INFO(&bal_thread_logger,
                          "Clear cache requested. Resetting JIT layout and block cache.");
+
+            // Resetting clears the code buffer, which is executable-only between translations.
+            engine->allocator->protect_rw(engine->allocator->context,
+                                          internal_engine_state->tier1_buffer,
+                                          internal_engine_state->tier1_buffer_size);
             bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
             (void)memset(
                 internal_engine_state->block_cache, 0, sizeof(internal_engine_state->block_cache));

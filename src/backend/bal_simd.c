@@ -1138,12 +1138,6 @@ float_two_register_misc(simd_t        *simd,
         return false;
     }
 
-    // The estimates have no half precision implementation yet.
-    if (16U == esize && 0x1DU == opcode && 1U == a)
-    {
-        return false;
-    }
-
     for (uint32_t e = 0U; e < elements; ++e)
     {
         const uint64_t x     = get_element(&n, e, esize);
@@ -1205,6 +1199,14 @@ float_two_register_misc(simd_t        *simd,
                                           x,
                                           0U,
                                           0U);
+                break;
+            case 0x3FU: // FRECPX
+                if (false == is_scalar)
+                {
+                    return false;
+                }
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_RECIPROCAL_EXPONENT, x, 0U, 0U);
                 break;
             case 0x18U: // FRINTN
             case 0x19U: // FRINTM
@@ -1287,11 +1289,30 @@ two_register_misc(simd_t *simd, const uint32_t instruction, const bool is_scalar
     // between single and double precision, sz = 0 between half and single.
     if (0x16U == opcode || 0x17U == opcode)
     {
+        // FCVTXN and FCVTXN2: double to single precision, rounding to odd.
+        if (1U == u && 0x16U == opcode && 1U == size)
+        {
+            const uint32_t count = true == is_scalar ? 1U : 2U;
+            const uint32_t part  = true == is_scalar ? 0U : q * count;
+            result               = false == is_scalar && 1U == q ? d : result;
+
+            for (uint32_t e = 0U; e < count; ++e)
+            {
+                set_element(&result,
+                            part + e,
+                            32U,
+                            bal_float_narrow_odd_element(fpcr, &simd->flags, n.d[e]));
+            }
+
+            write_vector(simd, rd, result, true == is_scalar ? 32U : (1U == q ? 128U : 64U));
+            return true;
+        }
+
         // With size<1> set these encodings are BFCVTN (FEAT_BF16, which the guest CPU lacks) or
         // unallocated.
         if (true == is_scalar || 1U == u || 1U == (size >> 1U))
         {
-            return false; // FCVTXN is not implemented.
+            return false;
         }
 
         const uint32_t wide   = 1U == (size & 1U) ? 64U : 32U;

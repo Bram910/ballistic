@@ -53,6 +53,8 @@ extern "C"
         /// FRECPE and FRSQRTE: the architected 8-bit estimates of 1/a and 1/sqrt(a).
         BAL_FLOAT_RECIPROCAL_ESTIMATE,
         BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE,
+        /// FRECPX: a power of two near 1/a, from the inverted exponent.
+        BAL_FLOAT_RECIPROCAL_EXPONENT,
         /// Comparisons return all ones when they hold and zero otherwise, as FCMEQ, FCMGE,
         /// FCMGT, FACGE and FACGT do.
         BAL_FLOAT_COMPARE_EQUAL,
@@ -64,7 +66,6 @@ extern "C"
 
     /// Applies `operation` to half, single or double precision operands (`esize` 16, 32 or 64)
     /// under `fpcr`, accumulating the FPSR flags it raises into `fpsr`. Unary operations use `a`.
-    /// The estimates do not take half precision.
     uint64_t bal_float_element(uint64_t              fpcr,
                                uint64_t             *fpsr,
                                uint32_t              esize,
@@ -103,6 +104,9 @@ extern "C"
                                        uint32_t  source_esize,
                                        uint32_t  target_esize,
                                        uint64_t  value);
+
+    /// FCVTXN on one element: double to single precision, rounding to odd.
+    uint64_t bal_float_narrow_odd_element(uint64_t fpcr, uint64_t *fpsr, uint64_t value);
 
 #ifdef __cplusplus
 }

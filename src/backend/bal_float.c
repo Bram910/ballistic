@@ -1736,6 +1736,7 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
     uint64_t       result      = 0U;
     const uint64_t sign        = value & layout->sign_mask;
     const bool     is_double   = PRECISION_DOUBLE == context->precision;
+    const bool     is_half     = PRECISION_HALF == context->precision;
 
     if (true == process_nans(context, operands, 1U, &result))
     {
@@ -1769,14 +1770,16 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
     // The fraction is held in 52 bits whatever the precision.
     uint64_t fraction = value & layout->fraction_mask;
     int64_t  exponent = (int64_t)((value & layout->exponent_mask) >> layout->fraction_bits);
-    fraction          = true == is_double ? fraction : fraction << 29U;
+    fraction          = fraction << (52U - layout->fraction_bits);
 
     if (false == is_square_root)
     {
-        // Too small a value overflows: to infinity or the largest normal, by rounding mode.
+        // Too small a value (below 2^-16, 2^-128 or 2^-1024) overflows: to infinity or the
+        // largest normal, by rounding mode.
         const uint64_t magnitude = value & ~layout->sign_mask;
-        const bool     is_tiny
-            = true == is_double ? magnitude < 0x0004000000000000ULL : magnitude < 0x00200000ULL;
+        const bool     is_tiny   = true == is_double ? magnitude < 0x0004000000000000ULL
+                                   : true == is_half ? magnitude < 0x0100U
+                                                     : magnitude < 0x00200000ULL;
 
         if (true == is_tiny)
         {
@@ -1790,10 +1793,13 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
                              | layout->fraction_mask;
         }
 
-        const bool is_huge
-            = true == is_double ? magnitude >= 0x7FD0000000000000ULL : magnitude >= 0x7E800000ULL;
+        // At or above 2^14, 2^126 or 2^1022 the result is a denormal, which flushes to zero.
+        const bool is_huge     = true == is_double ? magnitude >= 0x7FD0000000000000ULL
+                                 : true == is_half ? magnitude >= 0x7400U
+                                                   : magnitude >= 0x7E800000ULL;
+        const bool is_flushing = 0U != (context->fpcr & (true == is_half ? FPCR_FZ16 : FPCR_FZ));
 
-        if (0U != (context->fpcr & FPCR_FZ) && true == is_huge)
+        if (true == is_flushing && true == is_huge)
         {
             context->flags |= FPSR_UFC;
             return sign;
@@ -1812,9 +1818,10 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
             }
         }
 
-        const uint64_t scaled          = 0x100U | (fraction >> 44U);
-        int64_t        result_exponent = (true == is_double ? 2045 : 253) - exponent;
-        uint64_t       result_fraction = (reciprocal_estimate_table(scaled) & 0xFFU) << 44U;
+        const uint64_t scaled = 0x100U | (fraction >> 44U);
+        int64_t        result_exponent
+            = (true == is_double ? 2045 : (true == is_half ? 29 : 253)) - exponent;
+        uint64_t result_fraction = (reciprocal_estimate_table(scaled) & 0xFFU) << 44U;
 
         if (0 == result_exponent)
         {
@@ -1826,7 +1833,7 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
             result_exponent = 0;
         }
 
-        result_fraction = true == is_double ? result_fraction : result_fraction >> 29U;
+        result_fraction >>= 52U - layout->fraction_bits;
         return sign | ((uint64_t)result_exponent << layout->fraction_bits) | result_fraction;
     }
 
@@ -1844,11 +1851,36 @@ estimate(context_t *context, uint64_t value, const bool is_square_root)
     // An even exponent scales to [256, 512), an odd one to [128, 256).
     const uint64_t scaled
         = 0 == (exponent & 1) ? 0x100U | (fraction >> 44U) : 0x80U | (fraction >> 45U);
-    const int64_t  result_exponent = ((true == is_double ? 3068 : 380) - exponent) / 2;
+    const int64_t result_exponent
+        = ((true == is_double ? 3068 : (true == is_half ? 44 : 380)) - exponent) / 2;
     const uint64_t estimate_bits   = reciprocal_square_root_estimate_table(scaled) & 0xFFU;
-    const uint64_t result_fraction
-        = true == is_double ? estimate_bits << 44U : estimate_bits << 15U;
+    const uint64_t result_fraction = estimate_bits << (layout->fraction_bits - 8U);
     return ((uint64_t)result_exponent << layout->fraction_bits) | result_fraction;
+}
+
+/// FRECPX, following FPRecpX(): the sign with the inverted exponent and a zero fraction, or the
+/// largest normal exponent for zeros and denormals.
+static uint64_t
+reciprocal_exponent(context_t *context, const uint64_t value)
+{
+    const layout_t *layout      = &context->layout;
+    const uint64_t  operands[1] = { flush_input(context, value) };
+    uint64_t        result      = 0U;
+
+    if (true == process_nans(context, operands, 1U, &result))
+    {
+        return result;
+    }
+
+    const uint64_t sign     = value & layout->sign_mask;
+    const uint64_t exponent = value & layout->exponent_mask;
+
+    if (0U == exponent)
+    {
+        return sign | (layout->exponent_mask - (1ULL << layout->fraction_bits));
+    }
+
+    return sign | (~exponent & layout->exponent_mask);
 }
 
 /// FCMEQ, FCMGE, FCMGT, FACGE and FACGT: all ones when the comparison holds.
@@ -2002,6 +2034,9 @@ bal_float_element(const uint64_t              fpcr,
         case BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE:
             result = estimate(&context, a, true);
             break;
+        case BAL_FLOAT_RECIPROCAL_EXPONENT:
+            result = reciprocal_exponent(&context, a);
+            break;
         default:
             result = compare_mask(&context, a, b, operation);
             break;
@@ -2067,6 +2102,24 @@ bal_float_convert_element(const uint64_t fpcr,
     context_t      context = element_context(fpcr, source_esize);
     const uint64_t result  = convert_precision(&context, value, precision_of(target_esize));
     *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_narrow_odd_element(const uint64_t fpcr, uint64_t *fpsr, const uint64_t value)
+{
+    // Rounding to odd truncates and then sets the lowest bit of an inexact result. Overflow
+    // gives the largest normal as truncation does, and a flushed result is exact zero.
+    context_t      context = element_context((fpcr & ~(3ULL << 22U)) | (3ULL << 22U), 64U);
+    uint64_t       result  = convert_precision(&context, value, PRECISION_SINGLE);
+    const uint64_t flags   = context.flags;
+
+    if (0U != (flags & FPSR_IXC))
+    {
+        result |= 1U;
+    }
+
+    *fpsr |= flags;
     return result;
 }
 

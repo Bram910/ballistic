@@ -12,6 +12,10 @@ extern "C"
 {
 #endif // __cplusplus
 
+    /// The generic timer frequency of the Nintendo Switch, 19.2 MHz, which CNTFRQ_EL0 reports
+    /// when bal_cpu_t::counter_frequency is zero.
+#define BAL_DEFAULT_COUNTER_FREQUENCY 19200000ULL
+
     /// Guest exceptions reported through [`bal_cpu_t::exception`].
     typedef enum
     {
@@ -83,8 +87,15 @@ extern "C"
         /// The immediate of the SVC, BRK or undefined instruction that raised `exception`.
         uint64_t exception_immediate;
 
-        /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[24];
+        /// CNTFRQ_EL0: the frequency of the generic timer in Hz. Zero selects
+        /// BAL_DEFAULT_COUNTER_FREQUENCY.
+        uint64_t counter_frequency;
+
+        /// Returns the generic timer count that CNTPCT_EL0 and CNTVCT_EL0 read, ticking at the
+        /// counter frequency, given `counter_context`. When NULL, the count comes from the host's
+        /// monotonic clock.
+        uint64_t (*read_counter)(void *context);
+        void *counter_context;
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

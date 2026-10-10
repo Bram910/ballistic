@@ -131,6 +131,10 @@ static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void emit_register_helper_call(bal_tier1_compiler_t *compiler,
+                                      uint32_t              instruction,
+                                      uint64_t              function);
+
 static void emit_guest_exception(bal_tier1_compiler_t *compiler,
                                  bal_exception_t       exception,
                                  uint64_t              immediate);
@@ -3848,6 +3852,9 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define SYSTEM_REGISTER_TPIDRRO_EL0 SYSTEM_REGISTER(3U, 3U, 13U, 0U, 3U)
 #define SYSTEM_REGISTER_CTR_EL0     SYSTEM_REGISTER(3U, 3U, 0U, 0U, 1U)
 #define SYSTEM_REGISTER_DCZID_EL0   SYSTEM_REGISTER(3U, 3U, 0U, 0U, 7U)
+#define SYSTEM_REGISTER_CNTFRQ_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 0U)
+#define SYSTEM_REGISTER_CNTPCT_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 1U)
+#define SYSTEM_REGISTER_CNTVCT_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 2U)
 
 /// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, FZ16, Len) and FPSR (N, Z, C, V, QC and
 /// the cumulative exception flags), as implemented by Unicorn's reference model. FZ16 is writable
@@ -3860,8 +3867,9 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define DCZID_EL0_VALUE 0x4ULL
 
 /// Translates MRS and MSR for the system registers an EL0 program uses: NZCV, FPCR, FPSR,
-/// TPIDR_EL0, TPIDRRO_EL0 (read only) and the CTR_EL0 and DCZID_EL0 identification registers.
-/// Other registers are rejected as unknown instructions.
+/// TPIDR_EL0, TPIDRRO_EL0 (read only), the CTR_EL0 and DCZID_EL0 identification registers, and the
+/// generic timer's CNTFRQ_EL0, CNTPCT_EL0 and CNTVCT_EL0 (read only), which a runtime helper reads
+/// from the host's counter. Other registers are rejected as unknown instructions.
 ///
 /// NZCV is converted between the A64 bit layout (N, Z, C and V in bits 31:28) and the four flag
 /// bytes of bal_cpu_t. Each bit is isolated by shifting it to bit 63 and back down to bit 0, which
@@ -3876,6 +3884,16 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
     // A64 bit of each flag, and its byte in the word at flag_c.
     static const uint32_t FLAG_BITS[4]      = { 29U, 30U, 31U, 28U };
     static const uint32_t FLAG_BYTE_BITS[4] = { 0U, 8U, 16U, 24U };
+
+    if (true == is_read
+        && (SYSTEM_REGISTER_CNTFRQ_EL0 == system_register
+            || SYSTEM_REGISTER_CNTPCT_EL0 == system_register
+            || SYSTEM_REGISTER_CNTVCT_EL0 == system_register))
+    {
+        emit_register_helper_call(
+            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_counter_read);
+        return;
+    }
 
     const bal_x86_register_t value       = BAL_X86_REGISTER_ZERO;
     const bal_x86_register_t scratch     = BAL_X86_REGISTER_DISCARD_RESULT;
@@ -4953,7 +4971,10 @@ emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                      const bal_exception_t              exception,
                      const uint64_t                     immediate)
 {
+    // RAX may cache a guest register, so the cache is written back and emptied before RAX is
+    // used; otherwise terminate_block() would write the exception kind into that register.
     flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
     bal_sliding_window_flush_all(&compiler->window);
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
     bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, immediate);

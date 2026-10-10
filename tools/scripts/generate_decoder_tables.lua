@@ -1211,7 +1211,9 @@ local function main(...)
     local filtered = {}
     for _, inst in ipairs(all_instructions) do
         local top_bits = bit.band(bit.rshift(inst.value, 25), 0xF)
-        if top_bits <= 0x3 then
+        -- UDF lives in the reserved part of op0 = 0000 and is the one instruction there tier 1
+        -- translates.
+        if top_bits <= 0x3 and inst.mnemonic ~= "UDF" then
             inst.opcode_override = "OPCODE_TRAP"
         end
 

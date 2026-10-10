@@ -1,6 +1,16 @@
+// clock_gettime() needs POSIX.1b on the hosts that have it.
+#define _POSIX_C_SOURCE 199309L
+
 #include "backend/bal_system.h"
 
+#include "bal_platform.h"
 #include <string.h>
+
+#if BAL_PLATFORM_WINDOWS
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 /// The bit-reversed CRC-32 (ISO-HDLC) and CRC-32C (Castagnoli) polynomials.
 #define CRC32_POLYNOMIAL  0xEDB88320U
@@ -122,6 +132,49 @@ bal_execute_integer_helper(bal_cpu_t *cpu, const uint32_t instruction)
     cpu->flag_n          = (uint8_t)top;
     cpu->flag_z          = (uint8_t)(0U == (value & ((1ULL << bits) - 1U)) ? 1U : 0U);
     cpu->flag_v          = (uint8_t)(((value >> bits) & 1U) ^ top);
+    return 1U;
+}
+
+/// Returns the host's monotonic clock as a count at `frequency` Hz.
+static uint64_t
+read_host_counter(const uint64_t frequency)
+{
+#if BAL_PLATFORM_WINDOWS
+    LARGE_INTEGER count;
+    LARGE_INTEGER host_frequency;
+    (void)QueryPerformanceCounter(&count);
+    (void)QueryPerformanceFrequency(&host_frequency);
+    const uint64_t ticks      = (uint64_t)count.QuadPart;
+    const uint64_t host_hertz = (uint64_t)host_frequency.QuadPart;
+    return (ticks / host_hertz) * frequency + ((ticks % host_hertz) * frequency) / host_hertz;
+#else
+    struct timespec now = { 0 };
+    (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * frequency + ((uint64_t)now.tv_nsec * frequency) / 1000000000U;
+#endif
+}
+
+uint64_t
+bal_execute_counter_read(bal_cpu_t *cpu, const uint32_t instruction)
+{
+    const uint32_t rt = instruction & 0x1FU;
+    const uint64_t frequency
+        = 0U == cpu->counter_frequency ? BAL_DEFAULT_COUNTER_FREQUENCY : cpu->counter_frequency;
+    uint64_t value = frequency;
+
+    // op2 selects CNTFRQ_EL0 (0), CNTPCT_EL0 (1) or CNTVCT_EL0 (2); the virtual counter has no
+    // offset at EL0.
+    if (((instruction >> 5U) & 0x7U) != 0U)
+    {
+        value = NULL != cpu->read_counter ? cpu->read_counter(cpu->counter_context)
+                                          : read_host_counter(frequency);
+    }
+
+    if (rt != 31U)
+    {
+        cpu->x[rt] = value;
+    }
+
     return 1U;
 }
 

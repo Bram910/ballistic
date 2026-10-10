@@ -85,6 +85,15 @@ main(const int argc, const char **argv)
             break;
         }
 
+        // MRS of CNTFRQ_EL0, CNTPCT_EL0 or CNTVCT_EL0 reads the host's counter in each engine, so
+        // the results cannot match; the engine's unit tests check those registers instead.
+        if (0xD53BE000U == (*seed_cursor & 0xFFFFFF80U))
+        {
+            ++seeds_skipped;
+            ++seed_cursor;
+            continue;
+        }
+
         bal_fuzzer_input_t input = {};
 
         // Add 1 because at the start of loop, the ID needs to start at 1 not 0.

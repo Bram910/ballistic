@@ -157,8 +157,12 @@ extern "C"
         uint32_t jit_exit_requested;
         uint32_t jit_pad;
 
+        /// Used by the engine: the table indirect branches look their target block up in, an
+        /// array of BAL_TIER1_LOOKUP_ENTRIES bal_tier1_lookup_entry_t.
+        uint64_t jit_lookup_table;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[48];
+        uint8_t reserved[40];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

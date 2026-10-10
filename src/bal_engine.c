@@ -67,6 +67,9 @@ typedef struct
     } thread_state;
 
     BAL_ALIGNED(64) block_cache_set_t block_cache[BLOCK_CACHE_SETS];
+
+    /// The blocks indirect branches jump to directly; see bal_tier1_lookup_entry_t.
+    BAL_ALIGNED(64) bal_tier1_lookup_entry_t lookup_table[BAL_TIER1_LOOKUP_ENTRIES];
 } internal_engine_state_t;
 
 // Disable address sanitizers when executing jit code because it introduces very subtle but
@@ -277,7 +280,8 @@ bal_engine_run_thread(bal_engine_t *engine)
     }
 
     // The link jump of the exit the last block left through, which the next block is chained to.
-    uint64_t link_site = 0U;
+    uint64_t link_site            = 0U;
+    engine->cpu->jit_lookup_table = (uint64_t)(uintptr_t)internal_engine_state->lookup_table;
 
     while (true)
     {
@@ -319,6 +323,9 @@ bal_engine_run_thread(bal_engine_t *engine)
             bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
             (void)memset(
                 internal_engine_state->block_cache, 0, sizeof(internal_engine_state->block_cache));
+            (void)memset(internal_engine_state->lookup_table,
+                         0,
+                         sizeof(internal_engine_state->lookup_table));
             link_site = 0U;
             atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
                                   false,
@@ -383,6 +390,9 @@ bal_engine_run_thread(bal_engine_t *engine)
                     (void)memset(internal_engine_state->block_cache,
                                  0,
                                  sizeof(internal_engine_state->block_cache));
+                    (void)memset(internal_engine_state->lookup_table,
+                                 0,
+                                 sizeof(internal_engine_state->lookup_table));
                     link_site = 0U;
                     entry_point
                         = bal_tier1_compiler_translate(&internal_engine_state->tier1_compiler,
@@ -432,6 +442,13 @@ bal_engine_run_thread(bal_engine_t *engine)
         if (BAL_LIKELY(!(engine->flags & BAL_ENGINE_FLAG_DISABLE_BLOCK_CACHE)))
         {
             block_cache_insert(internal_engine_state->block_cache, pc, entry_point);
+
+            // Indirect branches to this PC can now jump straight in.
+            bal_tier1_lookup_entry_t *BAL_RESTRICT lookup
+                = &internal_engine_state
+                       ->lookup_table[(pc >> 2U) & (BAL_TIER1_LOOKUP_ENTRIES - 1U)];
+            lookup->guest_address = pc;
+            lookup->host_code     = (uint8_t *)entry_point + BAL_TIER1_BLOCK_PROLOGUE_SIZE;
         }
 
         const bal_jit_block_t compiled_block = (bal_jit_block_t)entry_point;

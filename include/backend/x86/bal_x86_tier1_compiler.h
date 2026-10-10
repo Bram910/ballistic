@@ -61,6 +61,18 @@ extern "C"
     /// this many bytes after its start, where the registers the prologue saves already are.
 #define BAL_TIER1_BLOCK_PROLOGUE_SIZE 12U
 
+    /// A translated block that indirect branches (BR, BLR, RET and their authenticated forms)
+    /// can jump to without returning to the engine: its guest address and the host address just
+    /// past its prologue. The table is direct-mapped on bits 13:2 of the guest address; an
+    /// empty entry has a NULL `host_code`.
+    typedef struct
+    {
+        uint64_t guest_address;
+        void    *host_code;
+    } bal_tier1_lookup_entry_t;
+
+#define BAL_TIER1_LOOKUP_ENTRIES 4096U
+
     BAL_HOT void *bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                                                const bal_memory_interface_t *memory_interface,
                                                bal_guest_address_t           guest_address,

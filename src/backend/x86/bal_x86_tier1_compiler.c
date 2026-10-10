@@ -79,6 +79,8 @@ static void emit_block_exit(bal_tier1_compiler_t *compiler);
 
 static void emit_exit_to(bal_tier1_compiler_t *compiler, bal_guest_address_t next_pc);
 
+static void emit_indirect_exit(bal_tier1_compiler_t *compiler);
+
 static size_t emit_forward_jump(bal_x86_assembler_t *assembler,
                                 bool                 is_conditional,
                                 bal_x86_condition_t  condition);
@@ -1349,8 +1351,7 @@ terminate_block(bal_tier1_compiler_t     *compiler,
         return;
     }
 
-    BAL_LOG_TRACE(&bal_thread_logger, "Restoring callee-saved registers and emitting RET");
-    emit_block_exit(compiler);
+    emit_indirect_exit(compiler);
 }
 
 void
@@ -5519,6 +5520,58 @@ emit_exit_to(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_guest_addres
 
     bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, next_pc);
     bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    emit_epilogue(assembler);
+}
+
+/// Leaves the block for the address in the guest PC, which an indirect branch has stored.
+///
+/// A linkable exit looks the PC up in the engine's table of translated blocks and jumps
+/// straight into the block it finds; on a miss, or when the host has asked for the engine back,
+/// it returns to the engine. Every guest register is in the cpu structure by now, so RAX, RCX
+/// and RDX are free.
+static void
+emit_indirect_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
+{
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        emit_fold_mxcsr_flags(assembler);
+        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
+    }
+
+    if (true == compiler->is_linkable)
+    {
+        bal_x86_emit_cmp_mem8_rbp_offset_imm(
+            assembler, (int32_t)offsetof(bal_cpu_t, jit_exit_requested), 0);
+        const size_t is_exit_requested = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+        // RCX = table + ((pc >> 2) & (entries - 1)) * 16.
+        bal_x86_emit_load_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+        bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RCX, BAL_X86_RAX);
+        bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RCX, 2U);
+        bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RDX, BAL_TIER1_LOOKUP_ENTRIES - 1U);
+        bal_x86_emit_and_r64_r64(assembler, BAL_X86_RCX, BAL_X86_RDX);
+        bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_RCX, 4U);
+        bal_x86_emit_load_r64_rbp_offset(
+            assembler, BAL_X86_RDX, offsetof(bal_cpu_t, jit_lookup_table));
+        bal_x86_emit_add_r64_r64(assembler, BAL_X86_RCX, BAL_X86_RDX);
+
+        // The entry must hold this PC and a block.
+        bal_x86_emit_load_r64_mem64(assembler, BAL_X86_RDX, BAL_X86_RCX);
+        bal_x86_emit_xor_r64_r64(assembler, BAL_X86_RDX, BAL_X86_RAX);
+        const size_t is_other_pc = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+        bal_x86_emit_add_r64_imm32(assembler, BAL_X86_RCX, 8);
+        bal_x86_emit_load_r64_mem64(assembler, BAL_X86_RDX, BAL_X86_RCX);
+        bal_x86_emit_test_r64_r64(assembler, BAL_X86_RDX, BAL_X86_RDX);
+        const size_t is_empty = emit_forward_jump(assembler, true, BAL_X86_COND_E);
+        bal_x86_emit_jmp_r64(assembler, BAL_X86_RDX);
+
+        patch_forward_jump(assembler, is_exit_requested, true);
+        patch_forward_jump(assembler, is_other_pc, true);
+        patch_forward_jump(assembler, is_empty, true);
+    }
+
     emit_epilogue(assembler);
 }
 

@@ -464,6 +464,39 @@ test_ChainedLoop_ComputesTheSameResult(void)
 }
 
 static void
+test_IndirectBranches_ReachTheirTargets(void)
+{
+    // A loop that calls a function with BL and RET and branches through a two-entry jump table
+    // with BR, so the indirect branches look up changing targets.
+    static const uint32_t program[] = {
+        0x94000010U, // 0x00: BL 0x40
+        0x92400026U, // 0x04: AND X6, X1, #1
+        0x8B060D07U, // 0x08: ADD X7, X8, X6, LSL #3
+        0xD61F00E0U, // 0x0C: BR X7
+        0U,          0U, 0U, 0U,
+        0x91000442U, // 0x20: ADD X2, X2, #1
+        0x14000003U, // 0x24: B 0x30
+        0x91000463U, // 0x28: ADD X3, X3, #1
+        0x14000001U, // 0x2C: B 0x30
+        0xF1000421U, // 0x30: SUBS X1, X1, #1
+        0x54FFFE61U, // 0x34: B.NE 0x00
+        0xAA1403FEU, // 0x38: MOV X30, X20
+        RET,         // 0x3C
+        0x91000400U, // 0x40: ADD X0, X0, #1
+        RET,         // 0x44
+    };
+    (void)memcpy(g_memory, program, sizeof(program));
+    g_cpu.x[1]  = 1000U;
+    g_cpu.x[8]  = 0x20U;
+    g_cpu.x[20] = BAL_ENGINE_SENTINEL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_UINT64(1000U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_UINT64(500U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT64(500U, g_cpu.x[3]);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -505,5 +538,6 @@ main(void)
     RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
     RUN_TEST(test_StopThread_LeavesChainedBlocks);
     RUN_TEST(test_ChainedLoop_ComputesTheSameResult);
+    RUN_TEST(test_IndirectBranches_ReachTheirTargets);
     return UNITY_END();
 }

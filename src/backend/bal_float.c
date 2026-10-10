@@ -8,8 +8,10 @@
 // constant-fold, reorder or speculate floating-point operations across the fenv calls.
 #pragma STDC FENV_ACCESS ON
 
+#define FPCR_AHP      (1ULL << 26U)
 #define FPCR_DN       (1ULL << 25U)
 #define FPCR_FZ       (1ULL << 24U)
+#define FPCR_FZ16     (1ULL << 19U)
 #define FPCR_RMODE(x) (((x) >> 22U) & 0x3U)
 
 #define FPSR_IOC (1ULL << 0U)
@@ -149,8 +151,8 @@ bal_is_float_supported(const uint32_t instruction)
             }
 
             // The arithmetic conversions: NS/NU/AS/AU and SCVTF/UCVTF with rmode 00, and the
-            // directed ones with rmode 01-11. Half precision is not implemented yet.
-            if (is_half || PRECISION_INVALID == precision)
+            // directed ones with rmode 01-11.
+            if (PRECISION_INVALID == precision)
             {
                 return false;
             }
@@ -174,7 +176,7 @@ bal_is_float_supported(const uint32_t instruction)
             const uint32_t opcode = (instruction >> 16U) & 0x7U;
             const uint32_t scale  = (instruction >> 10U) & 0x3FU;
 
-            if (is_half || (0U == sf && scale < 32U))
+            if (0U == sf && scale < 32U)
             {
                 return false;
             }
@@ -185,24 +187,18 @@ bal_is_float_supported(const uint32_t instruction)
         case FLOAT_ONE_SOURCE: {
             const uint32_t opcode = (instruction >> 15U) & 0x3FU;
 
-            if (is_half)
-            {
-                return opcode <= 2U; // FMOV, FABS, FNEG
-            }
-
-            // FCVT between single and double precision, not to or from half precision.
+            // FCVT between any two of half, single and double precision.
             if (4U == (opcode & 0x3CU))
             {
                 const uint32_t target = opcode & 0x3U;
-                return target != (uint32_t)precision && target <= 1U;
+                return target != (uint32_t)precision && target != PRECISION_INVALID;
             }
 
             return opcode <= 3U || (opcode >= 8U && opcode <= 15U && opcode != 13U);
         }
 
         case FLOAT_COMPARE:
-            return false == is_half && 0U == ((instruction >> 14U) & 0x3U)
-                   && 0U == (instruction & 0x7U);
+            return 0U == ((instruction >> 14U) & 0x3U) && 0U == (instruction & 0x7U);
 
         case FLOAT_IMMEDIATE:
         case FLOAT_CONDITIONAL_SELECT:
@@ -210,10 +206,10 @@ bal_is_float_supported(const uint32_t instruction)
 
         case FLOAT_CONDITIONAL_COMPARE:
         case FLOAT_THREE_SOURCE:
-            return false == is_half;
+            return true;
 
         case FLOAT_TWO_SOURCE:
-            return false == is_half && ((instruction >> 12U) & 0xFU) <= 8U;
+            return ((instruction >> 12U) & 0xFU) <= 8U;
 
         case FLOAT_UNSUPPORTED:
         default:
@@ -308,10 +304,18 @@ typedef struct
     uint32_t    pad;
 } context_t;
 
-/// Flushes a denormal input to zero when FPCR.FZ is set, raising Input Denormal.
+/// Flushes a denormal input to zero when FPCR.FZ is set, raising Input Denormal. Half precision
+/// uses FPCR.FZ16 instead and raises nothing.
 static uint64_t
 flush_input(context_t *context, const uint64_t value)
 {
+    if (PRECISION_HALF == context->precision)
+    {
+        return 0U != (context->fpcr & FPCR_FZ16) && true == is_denormal(&context->layout, value)
+                   ? value & context->layout.sign_mask
+                   : value;
+    }
+
     if (0U != (context->fpcr & FPCR_FZ) && true == is_denormal(&context->layout, value))
     {
         context->flags |= FPSR_IDC;
@@ -533,6 +537,194 @@ host_compute(const context_t  *context,
     return from_float(value);
 }
 
+/// Converts half precision `bits` to double, exactly. With `is_alternative`, the FPCR.AHP format,
+/// exponent 31 holds normal numbers; otherwise it is an infinity (NaNs are the caller's).
+static double
+half_to_double(const uint64_t bits, const bool is_alternative)
+{
+    const double   sign     = 0U != (bits & 0x8000U) ? -1.0 : 1.0;
+    const uint32_t exponent = (uint32_t)(bits >> 10U) & 0x1FU;
+    const double   fraction = (double)(bits & 0x3FFU);
+
+    if (0U == exponent)
+    {
+        return sign * ldexp(fraction, -24);
+    }
+
+    if (31U == exponent && false == is_alternative)
+    {
+        return sign * INFINITY;
+    }
+
+    return sign * ldexp(1024.0 + fraction, (int)exponent - 25);
+}
+
+/// Rounds a value to half precision as FPRound does, under the guest rounding mode.
+///
+/// `value` is the exact result truncated towards zero, with `sticky` set when that dropped
+/// non-zero bits, so a result rounds once even when computing it took a rounding. `is_negative`
+/// gives the sign, which matters for a zero. `is_alternative` selects the FPCR.AHP format, which
+/// saturates instead of overflowing, and `can_flush` applies FPCR.FZ16, which conversions ignore.
+static uint64_t
+round_to_half(context_t   *context,
+              const double value,
+              const bool   sticky,
+              const bool   is_negative,
+              const bool   is_alternative,
+              const bool   can_flush)
+{
+    const uint64_t sign       = true == is_negative ? 0x8000U : 0U;
+    const double   magnitude  = fabs(value);
+    const double   min_normal = 0x1p-14;
+    const uint32_t rmode      = FPCR_RMODE(context->fpcr);
+
+    if (0.0 == magnitude && false == sticky)
+    {
+        return sign;
+    }
+
+    // Tininess is decided before rounding.
+    if (true == can_flush && 0U != (context->fpcr & FPCR_FZ16) && magnitude < min_normal)
+    {
+        context->flags |= FPSR_UFC;
+        return sign;
+    }
+
+    // The quantum is the weight of the lowest fraction bit, fixed at 2^-24 for denormals.
+    int exponent = 0;
+    (void)frexp(magnitude, &exponent);
+    exponent              = exponent - 1 < -14 ? -14 : exponent - 1;
+    const double quantum  = ldexp(1.0, exponent - 10);
+    const double scaled   = magnitude / quantum;
+    const double integer  = floor(scaled);
+    const double error    = scaled - integer;
+    const bool   inexact  = error > 0.0 || true == sticky;
+    bool         round_up = false;
+
+    switch (rmode)
+    {
+        case 0U: // To nearest, ties to even.
+            round_up
+                = error > 0.5 || (0.5 == error && (true == sticky || 1.0 == fmod(integer, 2.0)));
+            break;
+        case 1U: // Towards +infinity.
+            round_up = true == inexact && false == is_negative;
+            break;
+        case 2U: // Towards -infinity.
+            round_up = true == inexact && true == is_negative;
+            break;
+        default: // Towards zero.
+            break;
+    }
+
+    const double rounded = (integer + (true == round_up ? 1.0 : 0.0)) * quantum;
+    const double maximum = true == is_alternative ? 131008.0 : 65504.0;
+
+    if (rounded > maximum)
+    {
+        // The alternative format has no infinity and saturates with Invalid Operation.
+        if (true == is_alternative)
+        {
+            context->flags |= FPSR_IOC;
+            return sign | 0x7FFFU;
+        }
+
+        context->flags |= FPSR_OFC | FPSR_IXC;
+        const bool is_to_infinity = 0U == rmode || (1U == rmode && false == is_negative)
+                                    || (2U == rmode && true == is_negative);
+        return sign | (true == is_to_infinity ? 0x7C00U : 0x7BFFU);
+    }
+
+    if (true == inexact)
+    {
+        context->flags |= FPSR_IXC | (magnitude < min_normal ? FPSR_UFC : 0U);
+    }
+
+    if (rounded < min_normal)
+    {
+        return sign | (uint64_t)ldexp(rounded, 24);
+    }
+
+    (void)frexp(rounded, &exponent);
+    const double fraction = ldexp(rounded, 1 - exponent) - 1.0; // in [0, 1)
+    return sign | ((uint64_t)(exponent - 1 + 15) << 10U) | (uint64_t)ldexp(fraction, 10);
+}
+
+/// Converts a finite or infinite operand of the context's precision to double, exactly.
+static double
+operand_to_double(const context_t *context, const uint64_t value)
+{
+    switch (context->precision)
+    {
+        case PRECISION_DOUBLE:
+            return to_double(value);
+        case PRECISION_HALF:
+            return half_to_double(value, false);
+        default:
+            return (double)to_float(value);
+    }
+}
+
+/// Computes one operation in double precision under the current host rounding mode.
+static double
+compute_double(const operation_t operation, const double x, const double y, const double z)
+{
+    switch (operation)
+    {
+        case OPERATION_ADD:
+            return x + y;
+        case OPERATION_SUBTRACT:
+            return x - y;
+        case OPERATION_MULTIPLY:
+            return x * y;
+        case OPERATION_DIVIDE:
+            return x / y;
+        case OPERATION_SQUARE_ROOT:
+            return sqrt(x);
+        case OPERATION_FUSED_MULTIPLY_ADD:
+        default:
+            return fma(x, y, z);
+    }
+}
+
+/// host_operation() for half precision: the operation runs in double precision, once under the
+/// guest rounding mode for the sign of a zero, Invalid Operation and Divide by Zero, and once
+/// towards zero, whose result and Inexact flag round_to_half() turns into the half result.
+static uint64_t
+half_operation(context_t        *context,
+               const operation_t operation,
+               const uint64_t    a,
+               const uint64_t    b,
+               const uint64_t    c)
+{
+    const double x             = half_to_double(a, false);
+    const double y             = half_to_double(b, false);
+    const double z             = half_to_double(c, false);
+    const int    previous_mode = fegetround();
+    (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
+    (void)feclearexcept(FE_ALL_EXCEPT);
+    const double   guest_result = compute_double(operation, x, y, z);
+    const uint64_t flags        = host_flags() & (FPSR_IOC | FPSR_DZC);
+    (void)fesetround(FE_TOWARDZERO);
+    (void)feclearexcept(FE_ALL_EXCEPT);
+    const double truncated = compute_double(operation, x, y, z);
+    const bool   sticky    = 0 != fetestexcept(FE_INEXACT);
+    (void)fesetround(previous_mode);
+    context->flags |= flags;
+
+    if (0 != isnan(guest_result))
+    {
+        return default_nan(&context->layout);
+    }
+
+    if (0 != isinf(guest_result))
+    {
+        return (0 != signbit(guest_result) ? 0x8000U : 0U) | 0x7C00U;
+    }
+
+    return round_to_half(context, truncated, sticky, 0 != signbit(guest_result), false, true);
+}
+
 /// Runs one host operation under the guest rounding mode and returns its result and flags.
 static uint64_t
 host_operation(context_t        *context,
@@ -541,6 +733,11 @@ host_operation(context_t        *context,
                const uint64_t    b,
                const uint64_t    c)
 {
+    if (PRECISION_HALF == context->precision)
+    {
+        return half_operation(context, operation, a, b, c);
+    }
+
     const int previous_mode = fegetround();
     (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
     (void)feclearexcept(FE_ALL_EXCEPT);
@@ -655,12 +852,12 @@ set_nzcv(bal_cpu_t *cpu, const uint32_t nzcv)
 static bool
 is_less(const context_t *context, const uint64_t a, const uint64_t b)
 {
-    if (PRECISION_DOUBLE == context->precision)
+    if (PRECISION_SINGLE == context->precision)
     {
-        return to_double(a) < to_double(b);
+        return to_float(a) < to_float(b);
     }
 
-    return to_float(a) < to_float(b);
+    return operand_to_double(context, a) < operand_to_double(context, b);
 }
 
 /// Returns true if `a` equals `b`; neither is a NaN.
@@ -763,7 +960,18 @@ round_to_integral(context_t *context, uint64_t value, const uint32_t rmode, cons
     (void)fesetround(host_rounding_mode(rmode > 3U ? 0U : rmode));
     (void)feclearexcept(FE_ALL_EXCEPT);
 
-    if (PRECISION_DOUBLE == context->precision)
+    if (PRECISION_HALF == context->precision)
+    {
+        // An integral half precision value is exactly representable.
+        const double input   = half_to_double(value, false);
+        const double integer = 4U == rmode ? round(input) : nearbyint(input);
+        result = round_to_half(context, integer, false, 0 != signbit(integer), false, false);
+        if (true == exact && integer != input)
+        {
+            context->flags |= FPSR_IXC;
+        }
+    }
+    else if (PRECISION_DOUBLE == context->precision)
     {
         const double input = to_double(value);
         result             = from_double(4U == rmode ? round(input) : nearbyint(input));
@@ -807,9 +1015,8 @@ convert_to_integer(context_t     *context,
 
     // A float widens to double exactly, and scaling by a power of two is exact until it
     // overflows to infinity, which still saturates.
-    double input
-        = PRECISION_DOUBLE == context->precision ? to_double(value) : (double)to_float(value);
-    input = ldexp(input, (int)fraction_bits);
+    double input = operand_to_double(context, value);
+    input        = ldexp(input, (int)fraction_bits);
 
     double rounded = 0.0;
 
@@ -882,6 +1089,18 @@ convert_from_integer(context_t     *context,
     (void)feclearexcept(FE_ALL_EXCEPT);
     uint64_t result = 0U;
 
+    // Half precision converts to double towards zero, keeping a sticky bit, and rounds once to
+    // half precision; the scaling is exact in double precision.
+    if (PRECISION_HALF == context->precision)
+    {
+        (void)fesetround(FE_TOWARDZERO);
+        const double converted = true == is_unsigned ? (double)value : (double)(int64_t)value;
+        const bool   sticky    = 0 != fetestexcept(FE_INEXACT);
+        (void)fesetround(previous_mode);
+        const double scaled = ldexp(converted, -(int)fraction_bits);
+        return round_to_half(context, scaled, sticky, scaled < 0.0, false, true);
+    }
+
     // The conversion rounds once; the scaling by a power of two that follows is exact, since
     // the result stays far from the denormal range.
     if (PRECISION_DOUBLE == context->precision)
@@ -901,12 +1120,63 @@ convert_from_integer(context_t     *context,
     return result;
 }
 
-/// FCVT between single and double precision.
+/// FCVT between half, single and double precision. Half precision operands are not flushed and
+/// half precision results are not flushed (FPUnpackCV, FPRoundCV), and FPCR.AHP selects the
+/// alternative half-precision format, which has no infinities or NaNs.
 static uint64_t
 convert_precision(context_t *context, uint64_t value, const precision_t target)
 {
-    value                        = flush_input(context, value);
-    const layout_t target_layout = layout_of(target);
+    const layout_t target_layout  = layout_of(target);
+    const bool     is_alternative = 0U != (context->fpcr & FPCR_AHP);
+    const uint64_t source_sign    = value & context->layout.sign_mask;
+
+    if (PRECISION_HALF == context->precision)
+    {
+        const bool is_special
+            = context->layout.exponent_mask == (value & context->layout.exponent_mask);
+
+        if (false == is_special || true == is_alternative)
+        {
+            const double number = half_to_double(value, is_alternative);
+            return PRECISION_DOUBLE == target ? from_double(number) : from_float((float)number);
+        }
+    }
+    else
+    {
+        value = flush_input(context, value);
+
+        if (PRECISION_HALF == target)
+        {
+            if (true == is_nan(&context->layout, value) && true == is_alternative)
+            {
+                context->flags |= FPSR_IOC;
+                return 0U != source_sign ? 0x8000U : 0U;
+            }
+
+            if (true == is_infinity(&context->layout, value))
+            {
+                if (true == is_alternative)
+                {
+                    context->flags |= FPSR_IOC;
+                    return (0U != source_sign ? 0x8000U : 0U) | 0x7FFFU;
+                }
+
+                return (0U != source_sign ? 0x8000U : 0U) | 0x7C00U;
+            }
+
+            if (false == is_nan(&context->layout, value))
+            {
+                const double number = operand_to_double(context, value);
+                return round_to_half(
+                    context, number, false, 0U != source_sign, is_alternative, false);
+            }
+        }
+    }
+
+    if (true == is_infinity(&context->layout, value))
+    {
+        return (0U != source_sign ? target_layout.sign_mask : 0U) | target_layout.exponent_mask;
+    }
 
     if (true == is_nan(&context->layout, value))
     {

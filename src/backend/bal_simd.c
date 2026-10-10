@@ -186,6 +186,54 @@ saturating_add(simd_t        *simd,
     return (uint64_t)result;
 }
 
+/// SUQADD (`is_unsigned` false): the signed accumulator `a` plus the unsigned `b`, saturated to
+/// a signed result; USQADD: the unsigned `a` plus the signed `b`, saturated to an unsigned one.
+static uint64_t
+saturating_accumulate(
+    simd_t *simd, const uint64_t a, const uint64_t b, const uint32_t esize, const bool is_unsigned)
+{
+    if (esize < 64U)
+    {
+        const int64_t sum = true == is_unsigned ? (int64_t)a + sign_extend(b, esize)
+                                                : sign_extend(a, esize) + (int64_t)b;
+        return true == is_unsigned ? saturate_signed_to_unsigned(simd, sum, esize)
+                                   : saturate_signed(simd, sum, esize);
+    }
+
+    if (false == is_unsigned)
+    {
+        // a + b overflows exactly when b exceeds INT64_MAX - a, which fits in 64 bits for any a.
+        if (b > 0x7FFFFFFFFFFFFFFFULL - a)
+        {
+            simd->flags |= FPSR_QC;
+            return 0x7FFFFFFFFFFFFFFFULL;
+        }
+
+        return a + b;
+    }
+
+    if ((int64_t)b < 0)
+    {
+        const uint64_t magnitude = 0U - b;
+
+        if (magnitude > a)
+        {
+            simd->flags |= FPSR_QC;
+            return 0U;
+        }
+
+        return a - magnitude;
+    }
+
+    if (a + b < a)
+    {
+        simd->flags |= FPSR_QC;
+        return ~0ULL;
+    }
+
+    return a + b;
+}
+
 /// Shifts an `esize`-bit element by a signed amount: left when positive, right when negative,
 /// as SSHL, USHL, SRSHL, URSHL, SQSHL, UQSHL, SQRSHL, UQRSHL and the shifts by immediate do.
 /// `saturate_unsigned_result` gives SQSHLU: a signed input saturated to an unsigned result.
@@ -1200,6 +1248,15 @@ float_two_register_misc(simd_t        *simd,
                                           0U,
                                           0U);
                 break;
+            case 0x3CU: // URECPE
+            case 0x7CU: // URSQRTE
+                if (true == is_scalar || esize != 32U)
+                {
+                    return false;
+                }
+                value = bal_unsigned_estimate_element((uint32_t)x,
+                                                      0x7CU == ((u << 6U) | (a << 5U) | opcode));
+                break;
             case 0x3FU: // FRECPX
                 if (false == is_scalar)
                 {
@@ -1538,6 +1595,10 @@ two_register_misc(simd_t *simd, const uint32_t instruction, const bool is_scalar
                 value               = compare_integers(kind, x, 0U, esize);
                 break;
             }
+            case 0x03U: // SUQADD
+            case 0x23U: // USQADD
+                value = saturating_accumulate(simd, get_element(&d, e, esize), x, esize, 1U == u);
+                break;
             case 0x0BU: // ABS
             case 0x2BU: // NEG
                 if (true == is_64bit_only && size != 3U)
@@ -1832,7 +1893,12 @@ modified_immediate(simd_t *simd, const uint32_t instruction)
             {
                 if (1U == o2)
                 {
-                    return false; // FMOV (vector, immediate) with half precision.
+                    // FMOV half: imm8 expanded as VFPExpandImm(imm8, 16), replicated.
+                    const uint64_t b6       = (imm8 >> 6U) & 1U;
+                    const uint64_t halfword = ((imm8 >> 7U) << 15U) | ((b6 ^ 1U) << 14U)
+                                              | ((0U - b6) & 0x3U) << 12U | ((imm8 & 0x3FU) << 6U);
+                    imm64 = halfword * 0x0001000100010001ULL;
+                    break;
                 }
 
                 // FMOV single: imm8 expanded as VFPExpandImm(imm8, 32), replicated.

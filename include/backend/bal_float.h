@@ -105,6 +105,10 @@ extern "C"
                                        uint32_t  target_esize,
                                        uint64_t  value);
 
+    /// URECPE (`is_square_root` false) and URSQRTE on one 32-bit element: the architected 9-bit
+    /// estimate of the reciprocal or reciprocal square root of a fixed-point fraction.
+    uint32_t bal_unsigned_estimate_element(uint32_t value, bool is_square_root);
+
     /// FCVTXN on one element: double to single precision, rounding to odd.
     uint64_t bal_float_narrow_odd_element(uint64_t fpcr, uint64_t *fpsr, uint64_t value);
 

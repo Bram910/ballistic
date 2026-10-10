@@ -2105,6 +2105,22 @@ bal_float_convert_element(const uint64_t fpcr,
     return result;
 }
 
+uint32_t
+bal_unsigned_estimate_element(const uint32_t value, const bool is_square_root)
+{
+    // UnsignedRecipEstimate() saturates below 0.5, UnsignedRSqrtEstimate() below 0.25.
+    if (false == is_square_root)
+    {
+        return 0U == (value >> 31U)
+                   ? 0xFFFFFFFFU
+                   : (uint32_t)(reciprocal_estimate_table(value >> 23U) & 0x1FFU) << 23U;
+    }
+
+    return 0U == (value >> 30U)
+               ? 0xFFFFFFFFU
+               : (uint32_t)(reciprocal_square_root_estimate_table(value >> 23U) & 0x1FFU) << 23U;
+}
+
 uint64_t
 bal_float_narrow_odd_element(const uint64_t fpcr, uint64_t *fpsr, const uint64_t value)
 {

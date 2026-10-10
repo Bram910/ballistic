@@ -384,6 +384,86 @@ test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress(void)
 }
 
 static void
+test_DitAndSsbs_ReadBackWhatWasWritten(void)
+{
+    const uint32_t program[] = {
+        0xD503415FU, // MSR DIT, #1
+        0xD53B42A0U, // MRS X0, DIT
+        0xD503413FU, // MSR SSBS, #1
+        0xD53B42C1U, // MRS X1, SSBS
+        0xD51B42BFU, // MSR DIT, XZR
+        0xD53B42A2U, // MRS X2, DIT
+        0xD51B42C4U, // MSR SSBS, X4
+        0xD53B42C3U, // MRS X3, SSBS
+    };
+    load_program(program, 8U);
+    g_cpu.x[4] = ~0ULL;
+
+    // Only the field's own bit is kept: DIT is bit 24 and SSBS bit 12.
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 24U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 12U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 12U, g_cpu.x[3]);
+}
+
+static bal_engine_t g_looping_engine;
+
+/// Stops g_looping_engine on its 100th counter read.
+static uint64_t
+stop_after_100_reads(void *context)
+{
+    (void)context;
+
+    if (100U == ++g_counter_reads)
+    {
+        bal_engine_stop_thread(&g_looping_engine);
+    }
+
+    return g_counter_reads;
+}
+
+static void
+test_StopThread_LeavesChainedBlocks(void)
+{
+    // MRS X0, CNTPCT_EL0; B back to it. The block chains to itself, so only the stop request
+    // ends the loop.
+    const uint32_t program[] = { 0xD53BE020U, 0x17FFFFFFU };
+    (void)memcpy(g_memory, program, sizeof(program));
+    g_cpu.read_counter = stop_after_100_reads;
+    (void)memset(&g_looping_engine, 0, sizeof(g_looping_engine));
+    TEST_ASSERT_EQUAL(
+        BAL_SUCCESS, bal_engine_init(&g_looping_engine, &g_cpu, &g_allocator, &g_memory_interface));
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&g_looping_engine));
+    TEST_ASSERT_EQUAL_UINT32(100U, g_counter_reads);
+    TEST_ASSERT_EQUAL_UINT64(100U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.pc);
+    bal_engine_destroy(&g_looping_engine);
+}
+
+static void
+test_ChainedLoop_ComputesTheSameResult(void)
+{
+    // A loop whose block chains to itself through B.NE, with inline floating point, so the
+    // chained jump must hand the host MXCSR back as an ordinary exit does.
+    const uint32_t program[] = {
+        0x8B010000U, // ADD X0, X0, X1
+        0x1E212800U, // FADD S0, S0, S1
+        0xF1000421U, // SUBS X1, X1, #1
+        0x54FFFFA1U, // B.NE back to the ADD
+    };
+    load_program(program, 4U);
+    g_cpu.x[1]    = 1000U;
+    g_cpu.v[1][0] = 0x3F800000U; // 1.0
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_UINT64(500500U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x447A0000U, g_cpu.v[0][0]); // 1000.0
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.fpsr);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -422,5 +502,8 @@ main(void)
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);
     RUN_TEST(test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress);
+    RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
+    RUN_TEST(test_StopThread_LeavesChainedBlocks);
+    RUN_TEST(test_ChainedLoop_ComputesTheSameResult);
     return UNITY_END();
 }

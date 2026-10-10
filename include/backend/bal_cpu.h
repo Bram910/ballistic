@@ -143,8 +143,22 @@ extern "C"
         uint32_t instruction_cache_invalidated;
         uint32_t instruction_barrier;
 
+        /// PSTATE.DIT (bit 24) and PSTATE.SSBS (bit 12), as MRS DIT and MRS SSBS read them.
+        /// They are kept for the guest to read back only: Ballistic does not make translated
+        /// code data-independent in timing when DIT is set, and the host CPU decides how loads
+        /// speculate past stores whatever SSBS says.
+        uint64_t dit;
+        uint64_t ssbs;
+
+        /// Used by the engine to chain translated blocks: the host address of the jump a block
+        /// left through, which the engine points at the next block, and a flag the host sets,
+        /// through bal_engine_request_exit(), to make chained blocks return to the engine.
+        uint64_t jit_link_site;
+        uint32_t jit_exit_requested;
+        uint32_t jit_pad;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[16];
+        uint8_t reserved[48];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

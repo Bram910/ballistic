@@ -84,6 +84,10 @@ static void block_cache_insert(block_cache_set_t *BAL_RESTRICT cache,
                                const bal_guest_address_t       pc,
                                void                           *host_code);
 
+static void link_block(internal_engine_state_t *BAL_RESTRICT engine_state,
+                       uint64_t                              link_site,
+                       const void                           *entry_point);
+
 BAL_COLD bal_error_t
 bal_engine_init(bal_engine_t *BAL_RESTRICT                 engine,
                 bal_cpu_t *BAL_RESTRICT                    cpu,
@@ -272,8 +276,14 @@ bal_engine_run_thread(bal_engine_t *engine)
         return BAL_ERROR_ENGINE_ALREADY_RUNNING;
     }
 
+    // The link jump of the exit the last block left through, which the next block is chained to.
+    uint64_t link_site = 0U;
+
     while (true)
     {
+        // The requests that made chained blocks return are looked at below.
+        (void)__atomic_exchange_n(&engine->cpu->jit_exit_requested, 0U, __ATOMIC_ACQUIRE);
+
         if (BAL_UNLIKELY(atomic_load_explicit(&internal_engine_state->thread_state.stop_requested,
                                               memory_order_acquire)))
         {
@@ -309,6 +319,7 @@ bal_engine_run_thread(bal_engine_t *engine)
             bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
             (void)memset(
                 internal_engine_state->block_cache, 0, sizeof(internal_engine_state->block_cache));
+            link_site = 0U;
             atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
                                   false,
                                   memory_order_release);
@@ -369,8 +380,10 @@ bal_engine_run_thread(bal_engine_t *engine)
                     BAL_LOG_INFO(&bal_thread_logger,
                                  "Tier 1 executable buffer full. Resetting JIT layout cache");
                     bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
-
-                    // TODO: When the block cache is implemented, it must be cleared here.
+                    (void)memset(internal_engine_state->block_cache,
+                                 0,
+                                 sizeof(internal_engine_state->block_cache));
+                    link_site = 0U;
                     entry_point
                         = bal_tier1_compiler_translate(&internal_engine_state->tier1_compiler,
                                                        engine->memory_interface,
@@ -401,6 +414,17 @@ bal_engine_run_thread(bal_engine_t *engine)
             }
         }
 
+        // Chain the exit the last block left through to this block, so that it runs without
+        // returning here from now on.
+        if (0U != link_site)
+        {
+            engine->allocator->protect_rw(engine->allocator->context,
+                                          internal_engine_state->tier1_buffer,
+                                          internal_engine_state->tier1_buffer_size);
+            link_block(internal_engine_state, link_site, entry_point);
+            link_site = 0U;
+        }
+
         engine->allocator->protect_rx(engine->allocator->context,
                                       internal_engine_state->tier1_buffer,
                                       internal_engine_state->tier1_buffer_size);
@@ -418,6 +442,8 @@ bal_engine_run_thread(bal_engine_t *engine)
         }
 
         execute_jit_block(compiled_block, engine->cpu);
+        link_site                  = engine->cpu->jit_link_site;
+        engine->cpu->jit_link_site = 0U;
 
         // The block stopped on a guest exception; see bal_exception_t for what pc holds.
         if (BAL_UNLIKELY(engine->cpu->exception != BAL_EXCEPTION_NONE))
@@ -463,6 +489,7 @@ bal_engine_stop_thread(bal_engine_t *BAL_RESTRICT engine)
     internal_engine_state_t *BAL_RESTRICT engine_state
         = (internal_engine_state_t *)engine->engine_state;
     atomic_store_explicit(&engine_state->thread_state.stop_requested, true, memory_order_release);
+    bal_engine_request_exit(engine);
 }
 
 bal_error_t
@@ -575,6 +602,37 @@ bal_engine_clear_cache(bal_engine_t *engine)
         = (internal_engine_state_t *)engine->engine_state;
     atomic_store_explicit(
         &engine_state->thread_state.clear_cache_requested, true, memory_order_release);
+    bal_engine_request_exit(engine);
+}
+
+void
+bal_engine_request_exit(bal_engine_t *engine)
+{
+    if (BAL_UNLIKELY(NULL == engine) || BAL_UNLIKELY(NULL == engine->cpu))
+    {
+        return;
+    }
+
+    __atomic_store_n(&engine->cpu->jit_exit_requested, 1U, __ATOMIC_RELEASE);
+}
+
+/// Points the jump at `link_site`, the host address of an exit's link jump, at the block whose
+/// code starts at `entry_point`, past its prologue. Both are in the code buffer's executable view;
+/// the write goes through its writable one.
+static void
+link_block(internal_engine_state_t *BAL_RESTRICT engine_state,
+           const uint64_t                        link_site,
+           const void                           *entry_point)
+{
+    uint8_t *const rx_base = (uint8_t *)engine_state->tier1_buffer.rx_pointer;
+    uint8_t *const rw_base = (uint8_t *)engine_state->tier1_buffer.rw_pointer;
+    uint8_t *const site    = (uint8_t *)(uintptr_t)link_site;
+    const uint8_t *target  = (const uint8_t *)entry_point + BAL_TIER1_BLOCK_PROLOGUE_SIZE;
+
+    // JMP rel32: E9 and a displacement from the end of the five-byte instruction.
+    const int32_t displacement = (int32_t)(target - (site + 5));
+    uint8_t      *field        = rw_base + (site - rx_base) + 1;
+    (void)memcpy(field, &displacement, sizeof(displacement));
 }
 
 static void

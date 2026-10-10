@@ -77,6 +77,8 @@ static void emit_epilogue(bal_x86_assembler_t *assembler);
 
 static void emit_block_exit(bal_tier1_compiler_t *compiler);
 
+static void emit_exit_to(bal_tier1_compiler_t *compiler, bal_guest_address_t next_pc);
+
 static size_t emit_forward_jump(bal_x86_assembler_t *assembler,
                                 bool                 is_conditional,
                                 bal_x86_condition_t  condition);
@@ -142,6 +144,7 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+static void translate_pstate(bal_tier1_compiler_t *compiler, uint32_t instruction);
 static void emit_store_cpu_word(bal_tier1_compiler_t *compiler, int32_t offset, uint32_t value);
 static bool translate_pointer_authentication(bal_tier1_compiler_t         *compiler,
                                              const bal_memory_interface_t *memory_interface,
@@ -356,6 +359,18 @@ translate_block(bal_tier1_compiler_t         *compiler,
     bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R14);
     bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R15);
     bal_x86_emit_mov_r64_r64(&compiler->assembler, BAL_X86_RBP, BAL_X86_ABI_ARG1);
+
+    if (BAL_UNLIKELY(compiler->assembler.offset - start_x86_block_offset
+                     != BAL_TIER1_BLOCK_PROLOGUE_SIZE))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: unexpected block prologue size");
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return NULL;
+    }
+
+    compiler->is_linkable
+        = 0U
+          == (engine_flags & (BAL_ENGINE_FLAG_SINGLE_STEP | BAL_ENGINE_FLAG_DISABLE_BLOCK_CACHE));
 
     bool   is_block_terminated   = false;
     bool   is_pc_dynamic         = false;
@@ -650,7 +665,8 @@ translate_block(bal_tier1_compiler_t         *compiler,
                     {
                         emit_store_cpu_word(
                             compiler, (int32_t)offsetof(bal_cpu_t, instruction_barrier), 1U);
-                        is_block_terminated = true;
+                        compiler->is_linkable = false;
+                        is_block_terminated   = true;
                         break;
                     }
 
@@ -770,6 +786,13 @@ translate_block(bal_tier1_compiler_t         *compiler,
                     if (0xD5100000U == (instruction & 0xFFD00000U))
                     {
                         translate_system_register(compiler, instruction);
+                        break;
+                    }
+
+                    // MSR (immediate): bits 31:19 = 1101010100000, CRn = 0100 and Rt = 11111.
+                    if (0xD500401FU == (instruction & 0xFFF8F01FU))
+                    {
+                        translate_pstate(compiler, instruction);
                         break;
                     }
 
@@ -1322,10 +1345,8 @@ terminate_block(bal_tier1_compiler_t     *compiler,
 
     if (false == is_pc_dynamic)
     {
-        BAL_LOG_TRACE(&bal_thread_logger, "Updating Guest PC");
-        bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, next_pc);
-        bal_x86_emit_store_r64_rbp_offset(
-            &compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+        emit_exit_to(compiler, next_pc);
+        return;
     }
 
     BAL_LOG_TRACE(&bal_thread_logger, "Restoring callee-saved registers and emitting RET");
@@ -1352,18 +1373,11 @@ terminate_block_conditional(bal_tier1_compiler_t     *compiler,
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
 
-    // Emit fallthrough epilogue.
-    bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, fallthrough_pc);
-    bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_block_exit(compiler);
+    emit_exit_to(compiler, fallthrough_pc);
     patch_forward_jump(assembler, jump, true);
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
-
-    // Emit taken epilogue.
-    bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, taken_pc);
-    bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_block_exit(compiler);
+    emit_exit_to(compiler, taken_pc);
 }
 
 /// Restores the callee-saved registers pushed by the block prologue and returns to the host.
@@ -1580,9 +1594,7 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         case 0xE: // AL (always)
             flush_dirty_registers(compiler);
             bal_sliding_window_flush_all(&compiler->window);
-            bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, taken_pc);
-            bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-            emit_block_exit(compiler);
+            emit_exit_to(compiler, taken_pc);
             return;
         default:
             BAL_LOG_ERROR(&bal_thread_logger, "Unsupported B.cond condition: %u", cond);
@@ -4009,6 +4021,11 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define SYSTEM_REGISTER_CNTFRQ_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 0U)
 #define SYSTEM_REGISTER_CNTPCT_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 1U)
 #define SYSTEM_REGISTER_CNTVCT_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 2U)
+#define SYSTEM_REGISTER_DIT         SYSTEM_REGISTER(3U, 3U, 4U, 2U, 5U)
+#define SYSTEM_REGISTER_SSBS        SYSTEM_REGISTER(3U, 3U, 4U, 2U, 6U)
+
+#define PSTATE_DIT  (1ULL << 24U)
+#define PSTATE_SSBS (1ULL << 12U)
 
 /// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, FZ16, Len) and FPSR (N, Z, C, V, QC and
 /// the cumulative exception flags), as implemented by Unicorn's reference model. FZ16 is writable
@@ -4078,6 +4095,14 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
             break;
         case SYSTEM_REGISTER_TPIDR_EL0:
             offset = offsetof(bal_cpu_t, tpidr_el0);
+            break;
+        case SYSTEM_REGISTER_DIT:
+            offset = offsetof(bal_cpu_t, dit);
+            mask   = PSTATE_DIT;
+            break;
+        case SYSTEM_REGISTER_SSBS:
+            offset = offsetof(bal_cpu_t, ssbs);
+            mask   = PSTATE_SSBS;
             break;
         case SYSTEM_REGISTER_TPIDRRO_EL0:
             offset = offsetof(bal_cpu_t, tpidrro_el0);
@@ -4250,6 +4275,50 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
     const bal_x86_macro_t store_macro = {
         .opcode              = BAL_X86_MACRO_STORE,
         .source              = value,
+        .immediate_or_offset = offset,
+    };
+    bal_sliding_window_push(&compiler->window, store_macro);
+}
+
+/// Translates MSR (immediate) to DIT and SSBS, which set the field from bit 0 of CRm. The other
+/// PSTATE fields are EL1 ones, or belong to extensions the guest CPU lacks.
+static void
+translate_pstate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const uint32_t op1    = (instruction >> 16U) & 0x7U;
+    const uint32_t op2    = (instruction >> 5U) & 0x7U;
+    const uint64_t is_on  = (instruction >> 8U) & 1U;
+    size_t         offset = 0U;
+    uint64_t       bit    = 0U;
+
+    if (3U == op1 && 2U == op2)
+    {
+        offset = offsetof(bal_cpu_t, dit);
+        bit    = PSTATE_DIT;
+    }
+    else if (3U == op1 && 1U == op2)
+    {
+        offset = offsetof(bal_cpu_t, ssbs);
+        bit    = PSTATE_SSBS;
+    }
+    else
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: unsupported PSTATE field %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    const bal_x86_macro_t value_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_REGISTER_ZERO,
+        .immediate_or_offset = 0U != is_on ? bit : 0U,
+    };
+    bal_sliding_window_push(&compiler->window, value_macro);
+
+    const bal_x86_macro_t store_macro = {
+        .opcode              = BAL_X86_MACRO_STORE,
+        .source              = BAL_X86_REGISTER_ZERO,
         .immediate_or_offset = offset,
     };
     bal_sliding_window_push(&compiler->window, store_macro);
@@ -5227,6 +5296,9 @@ emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                      const bal_exception_t              exception,
                      const uint64_t                     immediate)
 {
+    // The block must return to the engine, which reports the exception.
+    compiler->is_linkable = false;
+
     // RAX may cache a guest register, so the cache is written back and emptied before RAX is
     // used; otherwise terminate_block() would write the exception kind into that register.
     flush_dirty_registers(compiler);
@@ -5413,6 +5485,43 @@ emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 
 /// Leaves the block: when it ran floating point inline, the flags go to FPSR and the host MXCSR
 /// comes back first. The sliding window must be flushed.
+/// Leaves the block for the guest address `next_pc`.
+///
+/// A linkable exit first checks bal_cpu_t::jit_exit_requested, then has a jump the engine can
+/// point at the block for `next_pc`, skipping its prologue. Until then the jump falls through
+/// to the ordinary exit, which records the jump's address in bal_cpu_t::jit_link_site, stores
+/// the PC and returns to the engine. Either way the host MXCSR is back in place first, as a
+/// block expects on entry.
+static void
+emit_exit_to(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_guest_address_t next_pc)
+{
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        emit_fold_mxcsr_flags(assembler);
+        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
+    }
+
+    if (true == compiler->is_linkable)
+    {
+        bal_x86_emit_cmp_mem8_rbp_offset_imm(
+            assembler, (int32_t)offsetof(bal_cpu_t, jit_exit_requested), 0);
+        const size_t is_exit_requested = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+        const size_t link_site         = assembler->offset;
+        bal_x86_emit_jmp_rel32(assembler, 0);
+        patch_forward_jump(assembler, is_exit_requested, true);
+        bal_x86_emit_mov_r64_imm64(
+            assembler, BAL_X86_RAX, (uint64_t)(uintptr_t)(assembler->rx_buffer + link_site));
+        bal_x86_emit_store_r64_rbp_offset(
+            assembler, BAL_X86_RAX, offsetof(bal_cpu_t, jit_link_site));
+    }
+
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, next_pc);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    emit_epilogue(assembler);
+}
+
 static void
 emit_block_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {

@@ -215,6 +215,19 @@ extern "C"
     /// `engine` must be a valid pointer.
     BAL_HOT void bal_engine_clear_cache(bal_engine_t *engine);
 
+    /// Makes the translated code `engine` runs return to the engine at the next block boundary,
+    /// where it looks at [`bal_engine_stop_thread`], [`bal_engine_clear_cache`] and
+    /// [`BAL_ENGINE_FLAG_INTERRUPT_PENDING`]. Translated blocks jump straight into each other, so a
+    /// host that sets `BAL_ENGINE_FLAG_INTERRUPT_PENDING` while the engine runs calls this too;
+    /// the other two do it themselves.
+    ///
+    /// This function is thread-safe and can be called from any thread.
+    ///
+    /// # Safety
+    ///
+    /// `engine` must be a valid pointer.
+    BAL_HOT void bal_engine_request_exit(bal_engine_t *engine);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

@@ -150,8 +150,15 @@ extern "C"
         uint64_t dit;
         uint64_t ssbs;
 
+        /// Used by the engine to chain translated blocks: the host address of the jump a block
+        /// left through, which the engine points at the next block, and a flag the host sets,
+        /// through bal_engine_request_exit(), to make chained blocks return to the engine.
+        uint64_t jit_link_site;
+        uint32_t jit_exit_requested;
+        uint32_t jit_pad;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[64];
+        uint8_t reserved[48];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

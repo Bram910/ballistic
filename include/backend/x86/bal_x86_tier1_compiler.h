@@ -30,8 +30,11 @@ extern "C"
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
         /// Whether the host has FMA3, which the fused multiply-add fast paths need.
-        bool    has_fma;
-        uint8_t pad1[3];
+        bool has_fma;
+        /// Whether the exits of the block being translated may be chained to the next block.
+        /// Blocks that raise a guest exception or end on ISB always return to the engine.
+        bool    is_linkable;
+        uint8_t pad1[2];
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");
@@ -53,6 +56,10 @@ extern "C"
                                                  bal_jit_debug_context_t *debug_context);
 
     BAL_HOT void bal_tier1_compiler_reset(bal_tier1_compiler_t *compiler);
+
+    /// The size of the prologue every translated block starts with. A chained jump enters a block
+    /// this many bytes after its start, where the registers the prologue saves already are.
+#define BAL_TIER1_BLOCK_PROLOGUE_SIZE 12U
 
     BAL_HOT void *bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                                                const bal_memory_interface_t *memory_interface,

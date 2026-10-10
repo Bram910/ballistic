@@ -77,6 +77,8 @@ static void emit_epilogue(bal_x86_assembler_t *assembler);
 
 static void emit_block_exit(bal_tier1_compiler_t *compiler);
 
+static void emit_exit_to(bal_tier1_compiler_t *compiler, bal_guest_address_t next_pc);
+
 static size_t emit_forward_jump(bal_x86_assembler_t *assembler,
                                 bool                 is_conditional,
                                 bal_x86_condition_t  condition);
@@ -357,6 +359,18 @@ translate_block(bal_tier1_compiler_t         *compiler,
     bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R14);
     bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R15);
     bal_x86_emit_mov_r64_r64(&compiler->assembler, BAL_X86_RBP, BAL_X86_ABI_ARG1);
+
+    if (BAL_UNLIKELY(compiler->assembler.offset - start_x86_block_offset
+                     != BAL_TIER1_BLOCK_PROLOGUE_SIZE))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: unexpected block prologue size");
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return NULL;
+    }
+
+    compiler->is_linkable
+        = 0U
+          == (engine_flags & (BAL_ENGINE_FLAG_SINGLE_STEP | BAL_ENGINE_FLAG_DISABLE_BLOCK_CACHE));
 
     bool   is_block_terminated   = false;
     bool   is_pc_dynamic         = false;
@@ -651,7 +665,8 @@ translate_block(bal_tier1_compiler_t         *compiler,
                     {
                         emit_store_cpu_word(
                             compiler, (int32_t)offsetof(bal_cpu_t, instruction_barrier), 1U);
-                        is_block_terminated = true;
+                        compiler->is_linkable = false;
+                        is_block_terminated   = true;
                         break;
                     }
 
@@ -1330,10 +1345,8 @@ terminate_block(bal_tier1_compiler_t     *compiler,
 
     if (false == is_pc_dynamic)
     {
-        BAL_LOG_TRACE(&bal_thread_logger, "Updating Guest PC");
-        bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, next_pc);
-        bal_x86_emit_store_r64_rbp_offset(
-            &compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+        emit_exit_to(compiler, next_pc);
+        return;
     }
 
     BAL_LOG_TRACE(&bal_thread_logger, "Restoring callee-saved registers and emitting RET");
@@ -1360,18 +1373,11 @@ terminate_block_conditional(bal_tier1_compiler_t     *compiler,
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
 
-    // Emit fallthrough epilogue.
-    bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, fallthrough_pc);
-    bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_block_exit(compiler);
+    emit_exit_to(compiler, fallthrough_pc);
     patch_forward_jump(assembler, jump, true);
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
-
-    // Emit taken epilogue.
-    bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, taken_pc);
-    bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_block_exit(compiler);
+    emit_exit_to(compiler, taken_pc);
 }
 
 /// Restores the callee-saved registers pushed by the block prologue and returns to the host.
@@ -1588,9 +1594,7 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
         case 0xE: // AL (always)
             flush_dirty_registers(compiler);
             bal_sliding_window_flush_all(&compiler->window);
-            bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, taken_pc);
-            bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-            emit_block_exit(compiler);
+            emit_exit_to(compiler, taken_pc);
             return;
         default:
             BAL_LOG_ERROR(&bal_thread_logger, "Unsupported B.cond condition: %u", cond);
@@ -5292,6 +5296,9 @@ emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                      const bal_exception_t              exception,
                      const uint64_t                     immediate)
 {
+    // The block must return to the engine, which reports the exception.
+    compiler->is_linkable = false;
+
     // RAX may cache a guest register, so the cache is written back and emptied before RAX is
     // used; otherwise terminate_block() would write the exception kind into that register.
     flush_dirty_registers(compiler);
@@ -5478,6 +5485,43 @@ emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 
 /// Leaves the block: when it ran floating point inline, the flags go to FPSR and the host MXCSR
 /// comes back first. The sliding window must be flushed.
+/// Leaves the block for the guest address `next_pc`.
+///
+/// A linkable exit first checks bal_cpu_t::jit_exit_requested, then has a jump the engine can
+/// point at the block for `next_pc`, skipping its prologue. Until then the jump falls through
+/// to the ordinary exit, which records the jump's address in bal_cpu_t::jit_link_site, stores
+/// the PC and returns to the engine. Either way the host MXCSR is back in place first, as a
+/// block expects on entry.
+static void
+emit_exit_to(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_guest_address_t next_pc)
+{
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        emit_fold_mxcsr_flags(assembler);
+        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
+    }
+
+    if (true == compiler->is_linkable)
+    {
+        bal_x86_emit_cmp_mem8_rbp_offset_imm(
+            assembler, (int32_t)offsetof(bal_cpu_t, jit_exit_requested), 0);
+        const size_t is_exit_requested = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+        const size_t link_site         = assembler->offset;
+        bal_x86_emit_jmp_rel32(assembler, 0);
+        patch_forward_jump(assembler, is_exit_requested, true);
+        bal_x86_emit_mov_r64_imm64(
+            assembler, BAL_X86_RAX, (uint64_t)(uintptr_t)(assembler->rx_buffer + link_site));
+        bal_x86_emit_store_r64_rbp_offset(
+            assembler, BAL_X86_RAX, offsetof(bal_cpu_t, jit_link_site));
+    }
+
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, next_pc);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    emit_epilogue(assembler);
+}
+
 static void
 emit_block_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {

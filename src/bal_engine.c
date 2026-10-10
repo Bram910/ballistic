@@ -428,6 +428,8 @@ bal_engine_run_thread(bal_engine_t *engine)
                          (unsigned long long)engine->cpu->pc);
             engine->status = BAL_EXCEPTION_DATA_ABORT == engine->cpu->exception
                                  ? BAL_ERROR_MEMORY_FAULT
+                             : BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION == engine->cpu->exception
+                                 ? BAL_ERROR_UNKNOWN_INSTRUCTION
                                  : BAL_ERROR_GUEST_EXCEPTION;
             break;
         }

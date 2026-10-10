@@ -70,6 +70,7 @@ extern "C"
         OPCODE_ATOMIC,
         OPCODE_FLOAT,
         OPCODE_EXCEPTION,
+        OPCODE_INTEGER_HELPER,
         OPCODE_ENUM_END = 0x7FF
     } bal_opcode_t;
 

@@ -1564,10 +1564,16 @@ bal_execute_float(bal_cpu_t *cpu, const uint32_t instruction)
     return 1U;
 }
 
-static context_t
-element_context(const uint64_t fpcr, const bool is_double)
+static precision_t
+precision_of(const uint32_t esize)
 {
-    const precision_t precision = true == is_double ? PRECISION_DOUBLE : PRECISION_SINGLE;
+    return 16U == esize ? PRECISION_HALF : (64U == esize ? PRECISION_DOUBLE : PRECISION_SINGLE);
+}
+
+static context_t
+element_context(const uint64_t fpcr, const uint32_t esize)
+{
+    const precision_t precision = precision_of(esize);
     context_t         context   = {
                   .fpcr      = fpcr,
                   .flags     = 0U,
@@ -1585,6 +1591,11 @@ constant(const context_t *context, const bool is_two, const uint64_t sign)
     if (PRECISION_DOUBLE == context->precision)
     {
         return sign | (true == is_two ? 0x4000000000000000ULL : 0x3FF8000000000000ULL);
+    }
+
+    if (PRECISION_HALF == context->precision)
+    {
+        return sign | (true == is_two ? 0x4000U : 0x3E00U);
     }
 
     return sign | (true == is_two ? 0x40000000ULL : 0x3FC00000ULL);
@@ -1614,6 +1625,24 @@ reciprocal_step(context_t *context, uint64_t a, uint64_t b, const bool is_recipr
     if (true == is_infinity(layout, a) || true == is_infinity(layout, b))
     {
         return layout->exponent_mask | ((a ^ b) & layout->sign_mask);
+    }
+
+    if (PRECISION_HALF == context->precision)
+    {
+        // The halving is exact in double precision, so both forms are one fused operation there.
+        const double x             = half_to_double(a, false);
+        const double y             = half_to_double(b, false);
+        const double addend        = true == is_reciprocal ? 2.0 : 3.0;
+        const double scale         = true == is_reciprocal ? 1.0 : 0.5;
+        const int    previous_mode = fegetround();
+        (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
+        const double guest_result = fma(x, y, addend) * scale;
+        (void)fesetround(FE_TOWARDZERO);
+        (void)feclearexcept(FE_ALL_EXCEPT);
+        const double truncated = fma(x, y, addend) * scale;
+        const bool   sticky    = 0 != fetestexcept(FE_INEXACT);
+        (void)fesetround(previous_mode);
+        return round_to_half(context, truncated, sticky, 0 != signbit(guest_result), false, true);
     }
 
     const int previous_mode = fegetround();
@@ -1915,13 +1944,13 @@ arithmetic(context_t *context, const operation_t operation, uint64_t a, uint64_t
 uint64_t
 bal_float_element(const uint64_t              fpcr,
                   uint64_t                   *fpsr,
-                  const bool                  is_double,
+                  const uint32_t              esize,
                   const bal_float_operation_t operation,
                   const uint64_t              a,
                   const uint64_t              b,
                   const uint64_t              c)
 {
-    context_t context = element_context(fpcr, is_double);
+    context_t context = element_context(fpcr, esize);
     uint64_t  result  = 0U;
 
     switch (operation)
@@ -1985,12 +2014,12 @@ bal_float_element(const uint64_t              fpcr,
 uint64_t
 bal_float_round_element(const uint64_t fpcr,
                         uint64_t      *fpsr,
-                        const bool     is_double,
+                        const uint32_t esize,
                         const uint64_t value,
                         const uint32_t rmode,
                         const bool     exact)
 {
-    context_t      context = element_context(fpcr, is_double);
+    context_t      context = element_context(fpcr, esize);
     const uint64_t result  = round_to_integral(&context, value, rmode, exact);
     *fpsr |= context.flags;
     return result;
@@ -1999,14 +2028,14 @@ bal_float_round_element(const uint64_t fpcr,
 uint64_t
 bal_float_to_integer_element(const uint64_t fpcr,
                              uint64_t      *fpsr,
-                             const bool     is_double,
+                             const uint32_t esize,
                              const uint64_t value,
                              const uint32_t fraction_bits,
                              const uint32_t rmode,
                              const bool     is_unsigned,
                              const uint32_t bits)
 {
-    context_t      context = element_context(fpcr, is_double);
+    context_t      context = element_context(fpcr, esize);
     const uint64_t result
         = convert_to_integer(&context, value, fraction_bits, rmode, is_unsigned, bits);
     *fpsr |= context.flags;
@@ -2016,13 +2045,13 @@ bal_float_to_integer_element(const uint64_t fpcr,
 uint64_t
 bal_float_from_integer_element(const uint64_t fpcr,
                                uint64_t      *fpsr,
-                               const bool     is_double,
+                               const uint32_t esize,
                                const uint64_t value,
                                const uint32_t fraction_bits,
                                const bool     is_unsigned,
                                const uint32_t bits)
 {
-    context_t      context = element_context(fpcr, is_double);
+    context_t      context = element_context(fpcr, esize);
     const uint64_t result = convert_from_integer(&context, value, fraction_bits, is_unsigned, bits);
     *fpsr |= context.flags;
     return result;
@@ -2031,12 +2060,12 @@ bal_float_from_integer_element(const uint64_t fpcr,
 uint64_t
 bal_float_convert_element(const uint64_t fpcr,
                           uint64_t      *fpsr,
-                          const bool     to_double,
+                          const uint32_t source_esize,
+                          const uint32_t target_esize,
                           const uint64_t value)
 {
-    context_t      context = element_context(fpcr, false == to_double);
-    const uint64_t result  = convert_precision(
-        &context, value, true == to_double ? PRECISION_DOUBLE : PRECISION_SINGLE);
+    context_t      context = element_context(fpcr, source_esize);
+    const uint64_t result  = convert_precision(&context, value, precision_of(target_esize));
     *fpsr |= context.flags;
     return result;
 }

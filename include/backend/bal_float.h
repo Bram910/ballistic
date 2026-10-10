@@ -62,11 +62,12 @@ extern "C"
         BAL_FLOAT_ABSOLUTE_COMPARE_GREATER,
     } bal_float_operation_t;
 
-    /// Applies `operation` to single (`is_double` false) or double precision operands under
-    /// `fpcr`, accumulating the FPSR flags it raises into `fpsr`. Unary operations use `a`.
+    /// Applies `operation` to half, single or double precision operands (`esize` 16, 32 or 64)
+    /// under `fpcr`, accumulating the FPSR flags it raises into `fpsr`. Unary operations use `a`.
+    /// The estimates do not take half precision.
     uint64_t bal_float_element(uint64_t              fpcr,
                                uint64_t             *fpsr,
-                               bool                  is_double,
+                               uint32_t              esize,
                                bal_float_operation_t operation,
                                uint64_t              a,
                                uint64_t              b,
@@ -75,12 +76,12 @@ extern "C"
     /// FRINT* on one element: `rmode` 0-3 are to nearest, +infinity, -infinity and zero, 4 is
     /// to nearest with ties away; `exact` raises Inexact (FRINTX).
     uint64_t bal_float_round_element(
-        uint64_t fpcr, uint64_t *fpsr, bool is_double, uint64_t value, uint32_t rmode, bool exact);
+        uint64_t fpcr, uint64_t *fpsr, uint32_t esize, uint64_t value, uint32_t rmode, bool exact);
 
     /// FCVT[NPMZA][SU] on one element, to a `bits`-bit integer scaled by 2^`fraction_bits`.
     uint64_t bal_float_to_integer_element(uint64_t  fpcr,
                                           uint64_t *fpsr,
-                                          bool      is_double,
+                                          uint32_t  esize,
                                           uint64_t  value,
                                           uint32_t  fraction_bits,
                                           uint32_t  rmode,
@@ -90,16 +91,17 @@ extern "C"
     /// SCVTF and UCVTF on one `bits`-bit element, divided by 2^`fraction_bits`.
     uint64_t bal_float_from_integer_element(uint64_t  fpcr,
                                             uint64_t *fpsr,
-                                            bool      is_double,
+                                            uint32_t  esize,
                                             uint64_t  value,
                                             uint32_t  fraction_bits,
                                             bool      is_unsigned,
                                             uint32_t  bits);
 
-    /// FCVTL and FCVTN on one element: single to double when `to_double`, else double to single.
+    /// FCVTL and FCVTN on one element, from `source_esize` to `target_esize` bits.
     uint64_t bal_float_convert_element(uint64_t  fpcr,
                                        uint64_t *fpsr,
-                                       bool      to_double,
+                                       uint32_t  source_esize,
+                                       uint32_t  target_esize,
                                        uint64_t  value);
 
 #ifdef __cplusplus

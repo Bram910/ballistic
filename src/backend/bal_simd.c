@@ -2416,6 +2416,25 @@ three_different(simd_t *simd, const uint32_t instruction)
     const vector_t d      = read_vector(simd, rd);
     vector_t       result = { { 0U, 0U } };
 
+    // PMULL and PMULL2 on doublewords: a 128-bit carry-less product.
+    if (0xEU == opcode && 0U == u && 3U == size)
+    {
+        const uint64_t a = n.d[q];
+        const uint64_t b = m.d[q];
+
+        for (uint32_t i = 0U; i < 64U; ++i)
+        {
+            if (0U != ((b >> i) & 1U))
+            {
+                result.d[0] ^= a << i;
+                result.d[1] ^= 0U == i ? 0U : a >> (64U - i);
+            }
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
     if (3U == size)
     {
         return false;
@@ -2477,7 +2496,7 @@ three_different(simd_t *simd, const uint32_t instruction)
 
     if (0xFU == opcode || (0xEU == opcode && (1U == u || size != 0U)))
     {
-        return false; // PMULL on doublewords is a cryptographic instruction, handled elsewhere.
+        return false; // PMULL only takes bytes and doublewords.
     }
 
     for (uint32_t e = 0U; e < elements; ++e)
@@ -2607,10 +2626,381 @@ scalar_pairwise(simd_t *simd, const uint32_t instruction)
     return true;
 }
 
+// The cryptographic extension.
+
+/// The AES S-box and its inverse.
+static const uint8_t AES_SBOX[256] = {
+    0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
+    0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
+    0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15,
+    0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75,
+    0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84,
+    0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF,
+    0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8,
+    0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2,
+    0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73,
+    0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB,
+    0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79,
+    0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08,
+    0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A,
+    0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E,
+    0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF,
+    0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16,
+};
+
+static const uint8_t AES_INVERSE_SBOX[256] = {
+    0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
+    0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
+    0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
+    0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D, 0x8B, 0xD1, 0x25,
+    0x72, 0xF8, 0xF6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xD4, 0xA4, 0x5C, 0xCC, 0x5D, 0x65, 0xB6, 0x92,
+    0x6C, 0x70, 0x48, 0x50, 0xFD, 0xED, 0xB9, 0xDA, 0x5E, 0x15, 0x46, 0x57, 0xA7, 0x8D, 0x9D, 0x84,
+    0x90, 0xD8, 0xAB, 0x00, 0x8C, 0xBC, 0xD3, 0x0A, 0xF7, 0xE4, 0x58, 0x05, 0xB8, 0xB3, 0x45, 0x06,
+    0xD0, 0x2C, 0x1E, 0x8F, 0xCA, 0x3F, 0x0F, 0x02, 0xC1, 0xAF, 0xBD, 0x03, 0x01, 0x13, 0x8A, 0x6B,
+    0x3A, 0x91, 0x11, 0x41, 0x4F, 0x67, 0xDC, 0xEA, 0x97, 0xF2, 0xCF, 0xCE, 0xF0, 0xB4, 0xE6, 0x73,
+    0x96, 0xAC, 0x74, 0x22, 0xE7, 0xAD, 0x35, 0x85, 0xE2, 0xF9, 0x37, 0xE8, 0x1C, 0x75, 0xDF, 0x6E,
+    0x47, 0xF1, 0x1A, 0x71, 0x1D, 0x29, 0xC5, 0x89, 0x6F, 0xB7, 0x62, 0x0E, 0xAA, 0x18, 0xBE, 0x1B,
+    0xFC, 0x56, 0x3E, 0x4B, 0xC6, 0xD2, 0x79, 0x20, 0x9A, 0xDB, 0xC0, 0xFE, 0x78, 0xCD, 0x5A, 0xF4,
+    0x1F, 0xDD, 0xA8, 0x33, 0x88, 0x07, 0xC7, 0x31, 0xB1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xEC, 0x5F,
+    0x60, 0x51, 0x7F, 0xA9, 0x19, 0xB5, 0x4A, 0x0D, 0x2D, 0xE5, 0x7A, 0x9F, 0x93, 0xC9, 0x9C, 0xEF,
+    0xA0, 0xE0, 0x3B, 0x4D, 0xAE, 0x2A, 0xF5, 0xB0, 0xC8, 0xEB, 0xBB, 0x3C, 0x83, 0x53, 0x99, 0x61,
+    0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D,
+};
+
+/// Multiplies two elements of GF(2^8) modulo the AES polynomial x^8 + x^4 + x^3 + x + 1.
+static uint32_t
+gf_multiply(uint32_t a, uint32_t b)
+{
+    uint32_t result = 0U;
+
+    while (b != 0U)
+    {
+        if (0U != (b & 1U))
+        {
+            result ^= a;
+        }
+
+        a = ((a << 1U) ^ (0U != (a & 0x80U) ? 0x1BU : 0U)) & 0xFFU;
+        b >>= 1U;
+    }
+
+    return result;
+}
+
+/// AESE, AESD, AESMC and AESIMC. The state's byte r + 4 * c is row r of column c.
+static bool
+aes(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t opcode = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t d      = read_vector(simd, rd);
+    vector_t       input  = n;
+    vector_t       result = { { 0U, 0U } };
+
+    if (opcode < 0x4U || opcode > 0x7U)
+    {
+        return false;
+    }
+
+    // AESE and AESD first add the round key held in the destination.
+    if (opcode <= 0x5U)
+    {
+        input.d[0] ^= d.d[0];
+        input.d[1] ^= d.d[1];
+    }
+
+    for (uint32_t c = 0U; c < 4U; ++c)
+    {
+        for (uint32_t r = 0U; r < 4U; ++r)
+        {
+            switch (opcode)
+            {
+                case 0x4U: // AESE: ShiftRows, then SubBytes.
+                {
+                    const uint64_t byte = get_element(&input, r + 4U * ((c + r) % 4U), 8U);
+                    set_element(&result, r + 4U * c, 8U, AES_SBOX[byte]);
+                    break;
+                }
+                case 0x5U: // AESD: InvShiftRows, then InvSubBytes.
+                {
+                    const uint64_t byte = get_element(&input, r + 4U * c, 8U);
+                    set_element(&result, r + 4U * ((c + r) % 4U), 8U, AES_INVERSE_SBOX[byte]);
+                    break;
+                }
+                default: // AESMC and AESIMC: each output byte mixes the four bytes of its column.
+                {
+                    static const uint32_t MIX[4]         = { 2U, 3U, 1U, 1U };
+                    static const uint32_t INVERSE_MIX[4] = { 14U, 11U, 13U, 9U };
+                    const uint32_t       *coefficients   = 0x6U == opcode ? MIX : INVERSE_MIX;
+                    uint32_t              value          = 0U;
+
+                    for (uint32_t j = 0U; j < 4U; ++j)
+                    {
+                        value ^= gf_multiply((uint32_t)get_element(&input, j + 4U * c, 8U),
+                                             coefficients[(j - r) & 3U]);
+                    }
+
+                    set_element(&result, r + 4U * c, 8U, value);
+                    break;
+                }
+            }
+        }
+    }
+
+    write_vector(simd, rd, result, 128U);
+    return true;
+}
+
+static uint32_t
+rotate_left(const uint32_t value, const uint32_t amount)
+{
+    return (value << amount) | (value >> ((32U - amount) & 31U));
+}
+
+static uint32_t
+rotate_right(const uint32_t value, const uint32_t amount)
+{
+    return rotate_left(value, (32U - amount) & 31U);
+}
+
+static uint32_t
+sha_choose(const uint32_t x, const uint32_t y, const uint32_t z)
+{
+    return ((y ^ z) & x) ^ z;
+}
+
+static uint32_t
+sha_majority(const uint32_t x, const uint32_t y, const uint32_t z)
+{
+    return (x & y) | ((x | y) & z);
+}
+
+static void
+get_words(const vector_t *vector, uint32_t words[4])
+{
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        words[e] = (uint32_t)get_element(vector, e, 32U);
+    }
+}
+
+static vector_t
+from_words(const uint32_t words[4])
+{
+    vector_t vector = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        set_element(&vector, e, 32U, words[e]);
+    }
+
+    return vector;
+}
+
+/// Four rounds of SHA-256 on the state halves `x` (A to D) and `y` (E to H). SHA256H keeps the
+/// new `x`, SHA256H2 the new `y`.
+static void
+sha256_rounds(uint32_t x[4], uint32_t y[4], const uint32_t w[4])
+{
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        const uint32_t sigma1
+            = rotate_right(y[0], 6U) ^ rotate_right(y[0], 11U) ^ rotate_right(y[0], 25U);
+        const uint32_t sigma0
+            = rotate_right(x[0], 2U) ^ rotate_right(x[0], 13U) ^ rotate_right(x[0], 22U);
+        const uint32_t t = y[3] + sigma1 + sha_choose(y[0], y[1], y[2]) + w[e];
+        x[3] += t;
+        y[3] = t + sigma0 + sha_majority(x[0], x[1], x[2]);
+
+        // Rotate Y:X left by one word.
+        const uint32_t top_x = x[3];
+        x[3]                 = x[2];
+        x[2]                 = x[1];
+        x[1]                 = x[0];
+        x[0]                 = y[3];
+        y[3]                 = y[2];
+        y[2]                 = y[1];
+        y[1]                 = y[0];
+        y[0]                 = top_x;
+    }
+}
+
+/// SHA three register: SHA1C, SHA1P, SHA1M, SHA1SU0, SHA256H, SHA256H2 and SHA256SU1.
+static bool
+sha_three_register(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t rm     = (instruction >> 16U) & 0x1FU;
+    const uint32_t opcode = (instruction >> 12U) & 0x7U;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t m      = read_vector(simd, rm);
+    const vector_t d      = read_vector(simd, rd);
+    uint32_t       x[4];
+    uint32_t       y[4];
+    uint32_t       w[4];
+    vector_t       result = { { 0U, 0U } };
+
+    get_words(&d, x);
+    get_words(&n, y);
+    get_words(&m, w);
+
+    switch (opcode)
+    {
+        case 0x0U: // SHA1C
+        case 0x1U: // SHA1P
+        case 0x2U: // SHA1M
+        {
+            uint32_t e_value = y[0];
+
+            for (uint32_t e = 0U; e < 4U; ++e)
+            {
+                uint32_t t = 0U;
+
+                if (0x0U == opcode)
+                {
+                    t = sha_choose(x[1], x[2], x[3]);
+                }
+                else if (0x1U == opcode)
+                {
+                    t = x[1] ^ x[2] ^ x[3];
+                }
+                else
+                {
+                    t = sha_majority(x[1], x[2], x[3]);
+                }
+
+                e_value += rotate_left(x[0], 5U) + t + w[e];
+                x[1] = rotate_left(x[1], 30U);
+
+                // Rotate Y:X left by one word, Y being the single word e_value.
+                const uint32_t top = x[3];
+                x[3]               = x[2];
+                x[2]               = x[1];
+                x[1]               = x[0];
+                x[0]               = e_value;
+                e_value            = top;
+            }
+
+            result = from_words(x);
+            break;
+        }
+        case 0x3U: // SHA1SU0
+            result.d[0] = d.d[1] ^ d.d[0] ^ m.d[0];
+            result.d[1] = n.d[0] ^ d.d[1] ^ m.d[1];
+            break;
+        case 0x4U: // SHA256H
+            sha256_rounds(x, y, w);
+            result = from_words(x);
+            break;
+        case 0x5U: // SHA256H2
+            sha256_rounds(y, x, w);
+            result = from_words(x);
+            break;
+        case 0x6U: // SHA256SU1
+        {
+            // T0 = m<31:0> : n<127:32>; the first two results feed the last two.
+            const uint32_t t0[4] = { y[1], y[2], y[3], w[0] };
+            uint32_t       words[4];
+
+            for (uint32_t e = 0U; e < 4U; ++e)
+            {
+                const uint32_t source = e < 2U ? w[e + 2U] : words[e - 2U];
+                const uint32_t sigma
+                    = rotate_right(source, 17U) ^ rotate_right(source, 19U) ^ (source >> 10U);
+                words[e] = sigma + x[e] + t0[e];
+            }
+
+            result = from_words(words);
+            break;
+        }
+        default:
+            return false;
+    }
+
+    write_vector(simd, rd, result, 128U);
+    return true;
+}
+
+/// SHA two register: SHA1H, SHA1SU1 and SHA256SU0.
+static bool
+sha_two_register(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t opcode = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn     = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_vector(simd, rn);
+    const vector_t d      = read_vector(simd, rd);
+    uint32_t       x[4];
+    uint32_t       y[4];
+    uint32_t       words[4];
+
+    get_words(&d, x);
+    get_words(&n, y);
+
+    switch (opcode)
+    {
+        case 0x0U: // SHA1H
+        {
+            vector_t result = { { 0U, 0U } };
+            set_element(&result, 0U, 32U, rotate_left(y[0], 30U));
+            write_vector(simd, rd, result, 32U);
+            return true;
+        }
+        case 0x1U: // SHA1SU1
+        {
+            // T = d EOR (n >> 32).
+            const uint32_t t[4] = { x[0] ^ y[1], x[1] ^ y[2], x[2] ^ y[3], x[3] };
+            words[0]            = rotate_left(t[0], 1U);
+            words[1]            = rotate_left(t[1], 1U);
+            words[2]            = rotate_left(t[2], 1U);
+            words[3]            = rotate_left(t[3], 1U) ^ rotate_left(t[0], 2U);
+            break;
+        }
+        case 0x2U: // SHA256SU0
+        {
+            // T = n<31:0> : d<127:32>.
+            const uint32_t t[4] = { x[1], x[2], x[3], y[0] };
+
+            for (uint32_t e = 0U; e < 4U; ++e)
+            {
+                const uint32_t sigma
+                    = rotate_right(t[e], 7U) ^ rotate_right(t[e], 18U) ^ (t[e] >> 3U);
+                words[e] = sigma + x[e];
+            }
+
+            break;
+        }
+        default:
+            return false;
+    }
+
+    write_vector(simd, rd, from_words(words), 128U);
+    return true;
+}
+
 /// Decodes and executes one instruction. Returns false if it is not implemented.
 static bool
 execute(simd_t *simd, const uint32_t instruction)
 {
+    // The cryptographic extension: AES, SHA-1 and SHA-256.
+    if (0x4E280800U == (instruction & 0xFF3E0C00U))
+    {
+        return aes(simd, instruction);
+    }
+
+    if (0x5E000000U == (instruction & 0xFF208C00U))
+    {
+        return sha_three_register(simd, instruction);
+    }
+
+    if (0x5E280800U == (instruction & 0xFF3E0C00U))
+    {
+        return sha_two_register(simd, instruction);
+    }
+
     // Advanced SIMD scalar: 01 U 1111x ...
     if (0x5E000000U == (instruction & 0xDE000000U))
     {

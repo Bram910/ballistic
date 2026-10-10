@@ -592,7 +592,7 @@ float_three_same_operation(const uint32_t         u,
 /// Applies a floating-point element operation, with FMLS negating the first multiplicand.
 static uint64_t
 float_operation(simd_t                     *simd,
-                const bool                  is_double,
+                const uint32_t              esize,
                 const bal_float_operation_t operation,
                 const bool                  negate_first,
                 uint64_t                    a,
@@ -601,11 +601,106 @@ float_operation(simd_t                     *simd,
 {
     if (true == negate_first)
     {
-        a ^= true == is_double ? 0x8000000000000000ULL : 0x80000000ULL;
+        a ^= 1ULL << (esize - 1U);
     }
 
-    return bal_float_element(
-        simd->cpu->fpcr, &simd->flags, is_double, operation, a, b, accumulator);
+    return bal_float_element(simd->cpu->fpcr, &simd->flags, esize, operation, a, b, accumulator);
+}
+
+/// The floating-point operations of three same, on `esize`-bit elements: the 11xxx opcodes of the
+/// single and double precision group, and the half precision group, whose opcode is three bits.
+/// a is bit 23 in both.
+static bool
+float_three_same(simd_t        *simd,
+                 const uint32_t instruction,
+                 const bool     is_scalar,
+                 const uint32_t esize)
+{
+    const uint32_t        q             = (instruction >> 30U) & 1U;
+    const uint32_t        u             = (instruction >> 29U) & 1U;
+    const uint32_t        a             = (instruction >> 23U) & 1U;
+    const uint32_t        rm            = (instruction >> 16U) & 0x1FU;
+    const uint32_t        opcode        = (instruction >> 11U) & 0x7U;
+    const uint32_t        rn            = (instruction >> 5U) & 0x1FU;
+    const uint32_t        rd            = instruction & 0x1FU;
+    const uint32_t        datasize      = 1U == q ? 128U : 64U;
+    const vector_t        n             = read_vector(simd, rn);
+    const vector_t        m             = read_vector(simd, rm);
+    const vector_t        d             = read_vector(simd, rd);
+    vector_t              result        = { { 0U, 0U } };
+    bal_float_operation_t operation     = BAL_FLOAT_ADD;
+    bool                  is_pairwise   = false;
+    bool                  is_accumulate = false;
+
+    if (false == float_three_same_operation(u, a, opcode, &operation, &is_pairwise, &is_accumulate))
+    {
+        return false;
+    }
+
+    if (true == is_scalar)
+    {
+        // FMULX, FCMEQ, FRECPS, FRSQRTS, FCMGE, FACGE, FABD, FCMGT and FACGT.
+        const bool is_allowed
+            = BAL_FLOAT_MULTIPLY_EXTENDED == operation || BAL_FLOAT_RECIPROCAL_STEP == operation
+              || BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP == operation
+              || BAL_FLOAT_ABSOLUTE_DIFFERENCE == operation || operation >= BAL_FLOAT_COMPARE_EQUAL;
+
+        if (false == is_allowed || true == is_pairwise)
+        {
+            return false;
+        }
+
+        set_element(&result,
+                    0U,
+                    esize,
+                    float_operation(simd,
+                                    esize,
+                                    operation,
+                                    false,
+                                    get_element(&n, 0U, esize),
+                                    get_element(&m, 0U, esize),
+                                    0U));
+        write_vector(simd, rd, result, esize);
+        return true;
+    }
+
+    if (64U == esize && 0U == q)
+    {
+        return false;
+    }
+
+    const uint32_t elements     = datasize / esize;
+    const bool     negate_first = true == is_accumulate && 1U == a;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        uint64_t x = 0U;
+        uint64_t y = 0U;
+
+        if (true == is_pairwise)
+        {
+            // Pairs of adjacent elements of m:n.
+            const uint32_t first = 2U * e;
+            x                    = first < elements ? get_element(&n, first, esize)
+                                                    : get_element(&m, first - elements, esize);
+            y                    = first + 1U < elements ? get_element(&n, first + 1U, esize)
+                                                         : get_element(&m, first + 1U - elements, esize);
+        }
+        else
+        {
+            x = get_element(&n, e, esize);
+            y = get_element(&m, e, esize);
+        }
+
+        set_element(
+            &result,
+            e,
+            esize,
+            float_operation(simd, esize, operation, negate_first, x, y, get_element(&d, e, esize)));
+    }
+
+    write_vector(simd, rd, result, datasize);
+    return true;
 }
 
 /// Advanced SIMD three same, vector and scalar.
@@ -678,85 +773,7 @@ three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     // Floating point: opcode 11xxx, with size<0> selecting double precision.
     if (0x18U == (opcode & 0x18U))
     {
-        const bool            is_double     = 1U == (size & 1U);
-        const uint32_t        esize         = true == is_double ? 64U : 32U;
-        bal_float_operation_t operation     = BAL_FLOAT_ADD;
-        bool                  is_pairwise   = false;
-        bool                  is_accumulate = false;
-
-        if (false
-            == float_three_same_operation(
-                u, size >> 1U, opcode, &operation, &is_pairwise, &is_accumulate))
-        {
-            return false;
-        }
-
-        if (true == is_scalar)
-        {
-            // FMULX, FCMEQ, FRECPS, FRSQRTS, FCMGE, FACGE, FABD, FCMGT and FACGT.
-            const bool is_allowed = BAL_FLOAT_MULTIPLY_EXTENDED == operation
-                                    || BAL_FLOAT_RECIPROCAL_STEP == operation
-                                    || BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP == operation
-                                    || BAL_FLOAT_ABSOLUTE_DIFFERENCE == operation
-                                    || operation >= BAL_FLOAT_COMPARE_EQUAL;
-
-            if (false == is_allowed || true == is_pairwise)
-            {
-                return false;
-            }
-
-            set_element(&result,
-                        0U,
-                        esize,
-                        float_operation(simd,
-                                        is_double,
-                                        operation,
-                                        false,
-                                        get_element(&n, 0U, esize),
-                                        get_element(&m, 0U, esize),
-                                        0U));
-            write_vector(simd, rd, result, esize);
-            return true;
-        }
-
-        if (true == is_double && 0U == q)
-        {
-            return false;
-        }
-
-        const uint32_t elements     = datasize / esize;
-        const bool     negate_first = true == is_accumulate && 1U == (size >> 1U);
-
-        for (uint32_t e = 0U; e < elements; ++e)
-        {
-            uint64_t a = 0U;
-            uint64_t b = 0U;
-
-            if (true == is_pairwise)
-            {
-                // Pairs of adjacent elements of m:n.
-                const uint32_t first = 2U * e;
-                a                    = first < elements ? get_element(&n, first, esize)
-                                                        : get_element(&m, first - elements, esize);
-                b                    = first + 1U < elements ? get_element(&n, first + 1U, esize)
-                                                             : get_element(&m, first + 1U - elements, esize);
-            }
-            else
-            {
-                a = get_element(&n, e, esize);
-                b = get_element(&m, e, esize);
-            }
-
-            set_element(
-                &result,
-                e,
-                esize,
-                float_operation(
-                    simd, is_double, operation, negate_first, a, b, get_element(&d, e, esize)));
-        }
-
-        write_vector(simd, rd, result, datasize);
-        return true;
+        return float_three_same(simd, instruction, is_scalar, 1U == (size & 1U) ? 64U : 32U);
     }
 
     const uint32_t esize = 8U << size;
@@ -905,6 +922,153 @@ misc_rounding_mode(const uint32_t u, const uint32_t a, const uint32_t opcode, co
     return 0U == a ? (0U == low ? 0U : 2U) : (0U == low ? 1U : 3U);
 }
 
+/// The floating-point operations of two-register miscellaneous on `esize`-bit elements, for the
+/// single and double precision group and the half precision one; a is bit 23 in both.
+static bool
+float_two_register_misc(simd_t        *simd,
+                        const uint32_t instruction,
+                        const bool     is_scalar,
+                        const uint32_t esize)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t u        = (instruction >> 29U) & 1U;
+    const uint32_t opcode   = (instruction >> 12U) & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t datasize = true == is_scalar ? 64U : (1U == q ? 128U : 64U);
+    const vector_t n        = read_vector(simd, rn);
+    vector_t       result   = { { 0U, 0U } };
+    const uint64_t fpcr     = simd->cpu->fpcr;
+
+    const uint32_t a        = (instruction >> 23U) & 1U;
+    const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
+
+    if (false == is_scalar && 64U == esize && 0U == q)
+    {
+        return false;
+    }
+
+    // The estimates have no half precision implementation yet.
+    if (16U == esize && 0x1DU == opcode && 1U == a)
+    {
+        return false;
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint64_t x     = get_element(&n, e, esize);
+        uint64_t       value = 0U;
+
+        switch ((u << 6U) | (a << 5U) | opcode)
+        {
+            case 0x2CU: // FCMGT #0
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_COMPARE_GREATER, x, 0U, 0U);
+                break;
+            case 0x2DU: // FCMEQ #0
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_COMPARE_EQUAL, x, 0U, 0U);
+                break;
+            case 0x2EU: // FCMLT #0: 0 > x
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_COMPARE_GREATER, 0U, x, 0U);
+                break;
+            case 0x6CU: // FCMGE #0
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_COMPARE_GREATER_EQUAL, x, 0U, 0U);
+                break;
+            case 0x6DU: // FCMLE #0: 0 >= x
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_COMPARE_GREATER_EQUAL, 0U, x, 0U);
+                break;
+            case 0x2FU: // FABS
+                if (true == is_scalar)
+                {
+                    return false;
+                }
+                value = x & (mask_of(esize) >> 1U);
+                break;
+            case 0x6FU: // FNEG
+                if (true == is_scalar)
+                {
+                    return false;
+                }
+                value = x ^ (1ULL << (esize - 1U));
+                break;
+            case 0x7FU: // FSQRT
+                if (true == is_scalar)
+                {
+                    return false;
+                }
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_SQUARE_ROOT, x, 0U, 0U);
+                break;
+            case 0x3DU: // FRECPE
+                value = bal_float_element(
+                    fpcr, &simd->flags, esize, BAL_FLOAT_RECIPROCAL_ESTIMATE, x, 0U, 0U);
+                break;
+            case 0x7DU: // FRSQRTE
+                value = bal_float_element(fpcr,
+                                          &simd->flags,
+                                          esize,
+                                          BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE,
+                                          x,
+                                          0U,
+                                          0U);
+                break;
+            case 0x18U: // FRINTN
+            case 0x19U: // FRINTM
+            case 0x38U: // FRINTP
+            case 0x39U: // FRINTZ
+            case 0x58U: // FRINTA
+            case 0x59U: // FRINTX
+            case 0x79U: // FRINTI
+                if (true == is_scalar)
+                {
+                    return false;
+                }
+                value = bal_float_round_element(fpcr,
+                                                &simd->flags,
+                                                esize,
+                                                x,
+                                                misc_rounding_mode(u, a, opcode, simd->cpu),
+                                                0x59U == ((u << 6U) | (a << 5U) | opcode));
+                break;
+            case 0x1AU: // FCVTNS
+            case 0x1BU: // FCVTMS
+            case 0x1CU: // FCVTAS
+            case 0x3AU: // FCVTPS
+            case 0x3BU: // FCVTZS
+            case 0x5AU: // FCVTNU
+            case 0x5BU: // FCVTMU
+            case 0x5CU: // FCVTAU
+            case 0x7AU: // FCVTPU
+            case 0x7BU: // FCVTZU
+                value = bal_float_to_integer_element(fpcr,
+                                                     &simd->flags,
+                                                     esize,
+                                                     x,
+                                                     0U,
+                                                     misc_rounding_mode(u, a, opcode, simd->cpu),
+                                                     1U == u,
+                                                     esize);
+                break;
+            case 0x1DU: // SCVTF
+            case 0x5DU: // UCVTF
+                value = bal_float_from_integer_element(
+                    fpcr, &simd->flags, esize, x, 0U, 1U == u, esize);
+                break;
+            default:
+                return false;
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
+    return true;
+}
+
 /// Advanced SIMD two-register miscellaneous, vector and scalar.
 static bool
 two_register_misc(simd_t *simd, const uint32_t instruction, const bool is_scalar)
@@ -926,167 +1090,49 @@ two_register_misc(simd_t *simd, const uint32_t instruction, const bool is_scalar
 
     if (true == is_float && opcode != 0x16U && opcode != 0x17U)
     {
-        const bool     is_double = 1U == (size & 1U);
-        const uint32_t a         = size >> 1U;
-        const uint32_t esize     = true == is_double ? 64U : 32U;
-        const uint32_t elements  = true == is_scalar ? 1U : datasize / esize;
-
-        if (false == is_scalar && true == is_double && 0U == q)
-        {
-            return false;
-        }
-
-        for (uint32_t e = 0U; e < elements; ++e)
-        {
-            const uint64_t x     = get_element(&n, e, esize);
-            uint64_t       value = 0U;
-
-            switch ((u << 6U) | (a << 5U) | opcode)
-            {
-                case 0x2CU: // FCMGT #0
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER, x, 0U, 0U);
-                    break;
-                case 0x2DU: // FCMEQ #0
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_EQUAL, x, 0U, 0U);
-                    break;
-                case 0x2EU: // FCMLT #0: 0 > x
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER, 0U, x, 0U);
-                    break;
-                case 0x6CU: // FCMGE #0
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER_EQUAL, x, 0U, 0U);
-                    break;
-                case 0x6DU: // FCMLE #0: 0 >= x
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_COMPARE_GREATER_EQUAL, 0U, x, 0U);
-                    break;
-                case 0x2FU: // FABS
-                    if (true == is_scalar)
-                    {
-                        return false;
-                    }
-                    value = x & (mask_of(esize) >> 1U);
-                    break;
-                case 0x6FU: // FNEG
-                    if (true == is_scalar)
-                    {
-                        return false;
-                    }
-                    value = x ^ (1ULL << (esize - 1U));
-                    break;
-                case 0x7FU: // FSQRT
-                    if (true == is_scalar)
-                    {
-                        return false;
-                    }
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_SQUARE_ROOT, x, 0U, 0U);
-                    break;
-                case 0x3DU: // FRECPE
-                    value = bal_float_element(
-                        fpcr, &simd->flags, is_double, BAL_FLOAT_RECIPROCAL_ESTIMATE, x, 0U, 0U);
-                    break;
-                case 0x7DU: // FRSQRTE
-                    value = bal_float_element(fpcr,
-                                              &simd->flags,
-                                              is_double,
-                                              BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE,
-                                              x,
-                                              0U,
-                                              0U);
-                    break;
-                case 0x18U: // FRINTN
-                case 0x19U: // FRINTM
-                case 0x38U: // FRINTP
-                case 0x39U: // FRINTZ
-                case 0x58U: // FRINTA
-                case 0x59U: // FRINTX
-                case 0x79U: // FRINTI
-                    if (true == is_scalar)
-                    {
-                        return false;
-                    }
-                    value = bal_float_round_element(fpcr,
-                                                    &simd->flags,
-                                                    is_double,
-                                                    x,
-                                                    misc_rounding_mode(u, a, opcode, simd->cpu),
-                                                    0x59U == ((u << 6U) | (a << 5U) | opcode));
-                    break;
-                case 0x1AU: // FCVTNS
-                case 0x1BU: // FCVTMS
-                case 0x1CU: // FCVTAS
-                case 0x3AU: // FCVTPS
-                case 0x3BU: // FCVTZS
-                case 0x5AU: // FCVTNU
-                case 0x5BU: // FCVTMU
-                case 0x5CU: // FCVTAU
-                case 0x7AU: // FCVTPU
-                case 0x7BU: // FCVTZU
-                    value
-                        = bal_float_to_integer_element(fpcr,
-                                                       &simd->flags,
-                                                       is_double,
-                                                       x,
-                                                       0U,
-                                                       misc_rounding_mode(u, a, opcode, simd->cpu),
-                                                       1U == u,
-                                                       esize);
-                    break;
-                case 0x1DU: // SCVTF
-                case 0x5DU: // UCVTF
-                    value = bal_float_from_integer_element(
-                        fpcr, &simd->flags, is_double, x, 0U, 1U == u, esize);
-                    break;
-                default:
-                    return false;
-            }
-
-            set_element(&result, e, esize, value);
-        }
-
-        write_vector(simd, rd, result, true == is_scalar ? esize : datasize);
-        return true;
+        return float_two_register_misc(simd, instruction, is_scalar, 1U == (size & 1U) ? 64U : 32U);
     }
 
-    // FCVTN, FCVTN2 (double to single) and FCVTL, FCVTL2 (single to double).
+    // FCVTN, FCVTN2 to the narrower precision and FCVTL, FCVTL2 to the wider one: sz = 1 converts
+    // between single and double precision, sz = 0 between half and single.
     if (0x16U == opcode || 0x17U == opcode)
     {
-        if (true == is_scalar || 0U == u || 1U == u)
+        // With size<1> set these encodings are BFCVTN (FEAT_BF16, which the guest CPU lacks) or
+        // unallocated.
+        if (true == is_scalar || 1U == u || 1U == (size >> 1U))
         {
-            if (true == is_scalar || 1U == u || 0U == (size & 1U))
-            {
-                return false; // FCVTXN and the half precision forms are not implemented.
-            }
+            return false; // FCVTXN is not implemented.
         }
+
+        const uint32_t wide   = 1U == (size & 1U) ? 64U : 32U;
+        const uint32_t narrow = wide / 2U;
+        const uint32_t count  = 128U / wide;
 
         if (0x16U == opcode)
         {
             result = 1U == q ? d : result;
 
-            for (uint32_t e = 0U; e < 2U; ++e)
+            for (uint32_t e = 0U; e < count; ++e)
             {
-                set_element(
-                    &result,
-                    2U * q + e,
-                    32U,
-                    bal_float_convert_element(fpcr, &simd->flags, false, get_element(&n, e, 64U)));
+                set_element(&result,
+                            q * count + e,
+                            narrow,
+                            bal_float_convert_element(
+                                fpcr, &simd->flags, wide, narrow, get_element(&n, e, wide)));
             }
 
             write_vector(simd, rd, result, 1U == q ? 128U : 64U);
             return true;
         }
 
-        for (uint32_t e = 0U; e < 2U; ++e)
+        for (uint32_t e = 0U; e < count; ++e)
         {
-            set_element(&result,
-                        e,
-                        64U,
-                        bal_float_convert_element(
-                            fpcr, &simd->flags, true, get_element(&n, 2U * q + e, 32U)));
+            set_element(
+                &result,
+                e,
+                wide,
+                bal_float_convert_element(
+                    fpcr, &simd->flags, narrow, wide, get_element(&n, q * count + e, narrow)));
         }
 
         write_vector(simd, rd, result, 128U);
@@ -1321,38 +1367,36 @@ across_lanes(simd_t *simd, const uint32_t instruction)
     const vector_t n        = read_vector(simd, rn);
     vector_t       result   = { { 0U, 0U } };
 
-    // FMAXNMV, FMINNMV, FMAXV, FMINV: single precision, 4S only, reduced as a tree.
-    if (1U == u && (0x0CU == opcode || 0x0FU == opcode))
+    // FMAXNMV, FMINNMV, FMAXV, FMINV: single precision on 4S with U = 1 and half precision on 4H
+    // and 8H with U = 0, reduced as a tree of adjacent pairs, as Reduce() does.
+    if ((0x0CU == opcode || 0x0FU == opcode) && 0U == (size & 1U) && (0U == u || 1U == q))
     {
-        if (0U == q || 1U == (size & 1U))
-        {
-            return false;
-        }
-
+        const uint32_t              esize      = 1U == u ? 32U : 16U;
         const bool                  is_minimum = 1U == (size >> 1U);
         const bal_float_operation_t operation
             = 0x0CU == opcode ? (is_minimum ? BAL_FLOAT_MINIMUM_NUMBER : BAL_FLOAT_MAXIMUM_NUMBER)
                               : (is_minimum ? BAL_FLOAT_MINIMUM : BAL_FLOAT_MAXIMUM);
-        const uint64_t fpcr = simd->cpu->fpcr;
-        const uint64_t low  = bal_float_element(fpcr,
-                                               &simd->flags,
-                                               false,
-                                               operation,
-                                               get_element(&n, 0U, 32U),
-                                               get_element(&n, 1U, 32U),
-                                               0U);
-        const uint64_t high = bal_float_element(fpcr,
-                                                &simd->flags,
-                                                false,
-                                                operation,
-                                                get_element(&n, 2U, 32U),
-                                                get_element(&n, 3U, 32U),
-                                                0U);
-        set_element(&result,
-                    0U,
-                    32U,
-                    bal_float_element(fpcr, &simd->flags, false, operation, low, high, 0U));
-        write_vector(simd, rd, result, 32U);
+        uint64_t values[8];
+        uint32_t count = datasize / esize;
+
+        for (uint32_t e = 0U; e < count; ++e)
+        {
+            values[e] = get_element(&n, e, esize);
+        }
+
+        while (count > 1U)
+        {
+            for (uint32_t e = 0U; e < count / 2U; ++e)
+            {
+                values[e] = float_operation(
+                    simd, esize, operation, false, values[2U * e], values[2U * e + 1U], 0U);
+            }
+
+            count /= 2U;
+        }
+
+        set_element(&result, 0U, esize, values[0]);
+        write_vector(simd, rd, result, esize);
         return true;
     }
 
@@ -1866,32 +1910,28 @@ shift_immediate(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     // Fixed-point conversions: SCVTF, UCVTF (opcode 11100) and FCVTZS, FCVTZU (11111).
     if (0x1CU == opcode || 0x1FU == opcode)
     {
-        if (size < 2U || (false == is_scalar && 3U == size && 0U == q))
+        if (0U == size || (false == is_scalar && 3U == size && 0U == q))
         {
-            return false; // The half precision forms are not implemented.
+            return false;
         }
 
-        const bool     is_double = 3U == size;
-        const uint32_t elements  = true == is_scalar ? 1U : datasize / esize;
+        const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
 
         for (uint32_t e = 0U; e < elements; ++e)
         {
-            const uint64_t x     = get_element(&n, e, esize);
-            const uint64_t value = 0x1CU == opcode ? bal_float_from_integer_element(simd->cpu->fpcr,
-                                                                                    &simd->flags,
-                                                                                    is_double,
-                                                                                    x,
-                                                                                    right_shift,
-                                                                                    1U == u,
-                                                                                    esize)
-                                                   : bal_float_to_integer_element(simd->cpu->fpcr,
-                                                                                  &simd->flags,
-                                                                                  is_double,
-                                                                                  x,
-                                                                                  right_shift,
-                                                                                  3U,
-                                                                                  1U == u,
-                                                                                  esize);
+            const uint64_t x = get_element(&n, e, esize);
+            const uint64_t value
+                = 0x1CU == opcode
+                      ? bal_float_from_integer_element(
+                            simd->cpu->fpcr, &simd->flags, esize, x, right_shift, 1U == u, esize)
+                      : bal_float_to_integer_element(simd->cpu->fpcr,
+                                                     &simd->flags,
+                                                     esize,
+                                                     x,
+                                                     right_shift,
+                                                     3U,
+                                                     1U == u,
+                                                     esize);
             set_element(&result, e, esize, value);
         }
 
@@ -1991,22 +2031,24 @@ indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     // Floating point: FMLA (0001), FMLS (0101), FMUL (1001, U = 0), FMULX (1001, U = 1).
     if (1U == (opcode & 0x3U) && opcode != 0xDU)
     {
-        if (size < 2U)
+        if (1U == size)
         {
-            return false; // The half precision forms are not implemented.
+            return false;
         }
 
-        const bool     is_double = 3U == size;
-        const uint32_t esize     = true == is_double ? 64U : 32U;
+        // Size 00 is half precision, whose index is H:L:M and whose Rm has four bits.
+        const uint32_t esize = 0U == size ? 16U : (3U == size ? 64U : 32U);
 
-        if ((true == is_double && 1U == l) || (false == is_scalar && true == is_double && 0U == q)
+        if ((64U == esize && 1U == l) || (false == is_scalar && 64U == esize && 0U == q)
             || (1U == u && opcode != 0x9U))
         {
             return false;
         }
 
-        const uint32_t index    = true == is_double ? h : (h << 1U) | l;
-        const uint32_t rm       = (m_bit << 4U) | rm_low;
+        const uint32_t index    = 64U == esize   ? h
+                                  : 16U == esize ? (h << 2U) | (l << 1U) | m_bit
+                                                 : (h << 1U) | l;
+        const uint32_t rm       = 16U == esize ? rm_low : (m_bit << 4U) | rm_low;
         const vector_t m        = read_vector(simd, rm);
         const uint64_t element  = get_element(&m, index, esize);
         const uint32_t elements = true == is_scalar ? 1U : datasize / esize;
@@ -2019,7 +2061,7 @@ indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
             if (0x9U == opcode)
             {
                 value = float_operation(simd,
-                                        is_double,
+                                        esize,
                                         1U == u ? BAL_FLOAT_MULTIPLY_EXTENDED : BAL_FLOAT_MULTIPLY,
                                         false,
                                         a,
@@ -2029,7 +2071,7 @@ indexed_element(simd_t *simd, const uint32_t instruction, const bool is_scalar)
             else
             {
                 value = float_operation(simd,
-                                        is_double,
+                                        esize,
                                         BAL_FLOAT_MULTIPLY_ADD,
                                         0x5U == opcode,
                                         a,
@@ -2226,11 +2268,11 @@ scalar_pairwise(simd_t *simd, const uint32_t instruction)
     const vector_t n      = read_vector(simd, rn);
     vector_t       result = { { 0U, 0U } };
 
-    if (0U == u)
+    if (0U == u && 0x1BU == opcode)
     {
-        if (0x1BU != opcode || size != 3U)
+        if (size != 3U)
         {
-            return false; // Only ADDP; the U = 0 floating-point forms are half precision.
+            return false;
         }
 
         set_element(&result, 0U, 64U, n.d[0] + n.d[1]);
@@ -2238,8 +2280,13 @@ scalar_pairwise(simd_t *simd, const uint32_t instruction)
         return true;
     }
 
-    const bool            is_double = 1U == (size & 1U);
-    const uint32_t        esize     = true == is_double ? 64U : 32U;
+    // Floating point: single or double precision with U = 1, half precision with U = 0, sz = 0.
+    if (0U == u && 1U == (size & 1U))
+    {
+        return false;
+    }
+
+    const uint32_t        esize     = 0U == u ? 16U : (1U == (size & 1U) ? 64U : 32U);
     const bool            is_second = 1U == (size >> 1U);
     bal_float_operation_t operation = BAL_FLOAT_ADD;
 
@@ -2266,7 +2313,7 @@ scalar_pairwise(simd_t *simd, const uint32_t instruction)
                 0U,
                 esize,
                 float_operation(simd,
-                                is_double,
+                                esize,
                                 operation,
                                 false,
                                 get_element(&n, 0U, esize),
@@ -2283,6 +2330,17 @@ execute(simd_t *simd, const uint32_t instruction)
     // Advanced SIMD scalar: 01 U 1111x ...
     if (0x5E000000U == (instruction & 0xDE000000U))
     {
+        // Half precision three same and two-register miscellaneous.
+        if (0x5E400400U == (instruction & 0xDF60C400U))
+        {
+            return float_three_same(simd, instruction, true, 16U);
+        }
+
+        if (0x5E780800U == (instruction & 0xDF7E0C00U))
+        {
+            return float_two_register_misc(simd, instruction, true, 16U);
+        }
+
         if (0x5E200400U == (instruction & 0xDF200400U))
         {
             return three_same(simd, instruction, true);
@@ -2320,6 +2378,17 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x0E000000U != (instruction & 0x9E000000U))
     {
         return false;
+    }
+
+    // Half precision three same and two-register miscellaneous.
+    if (0x0E400400U == (instruction & 0x9F60C400U))
+    {
+        return float_three_same(simd, instruction, false, 16U);
+    }
+
+    if (0x0E780800U == (instruction & 0x9F7E0C00U))
+    {
+        return float_two_register_misc(simd, instruction, false, 16U);
     }
 
     if (0x0E200400U == (instruction & 0x9F200400U))

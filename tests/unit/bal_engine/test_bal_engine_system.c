@@ -307,6 +307,33 @@ test_Pacibsp_FollowsTheBKeyEnable(void)
 }
 
 static void
+test_IcIvauAndIsb_RunTheCodeTheGuestWrote(void)
+{
+    // Calls a function returning 1, overwrites its first instruction with MOVZ X0, #2, and
+    // calls it again after IC IVAU and ISB.
+    const uint32_t program[] = {
+        0xAA1E03E5U, // MOV X5, X30
+        0x9400003FU, // BL 0x100
+        0xAA0003E3U, // MOV X3, X0
+        0xB9000041U, // STR W1, [X2]
+        0xD50B7522U, // IC IVAU, X2
+        0xD5033FDFU, // ISB
+        0x9400003AU, // BL 0x100
+        0xAA0503FEU, // MOV X30, X5
+        RET,
+    };
+    const uint32_t function[] = { 0xD2800020U, RET }; // MOVZ X0, #1; RET
+    (void)memcpy(g_memory, program, sizeof(program));
+    (void)memcpy(g_memory + 0x100U, function, sizeof(function));
+    g_cpu.x[1] = 0xD2800040U;
+    g_cpu.x[2] = 0x100U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+}
+
+static void
 test_ClearCache_RetranslatesTheGuestCode(void)
 {
     // MOVZ X0, #1, run once; then MOVZ X0, #2 in its place after bal_engine_clear_cache().
@@ -364,6 +391,7 @@ main(void)
     RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
     RUN_TEST(test_Pacibsp_FollowsTheBKeyEnable);
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
+    RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     return UNITY_END();
 }

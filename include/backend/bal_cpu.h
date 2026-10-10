@@ -127,8 +127,16 @@ extern "C"
         /// TBID1 (52). A TxSZ below 16 counts as 16, so zero gives 48-bit addresses.
         uint64_t tcr_el1;
 
+        /// Set by IC IVAU, which says the guest has written instructions, and by ISB, which
+        /// makes them visible to the instruction stream. When a block ends on an ISB after an
+        /// IC IVAU, the engine discards its translations before running on, so the guest
+        /// executes the code it wrote. Other engines sharing the memory need
+        /// bal_engine_clear_cache() from the host.
+        uint32_t instruction_cache_invalidated;
+        uint32_t instruction_barrier;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[24];
+        uint8_t reserved[16];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

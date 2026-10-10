@@ -281,6 +281,21 @@ bal_engine_run_thread(bal_engine_t *engine)
             break;
         }
 
+        // An ISB after an IC IVAU makes the code the guest wrote visible to it, so the
+        // translations of the old code go.
+        if (BAL_UNLIKELY(0U != engine->cpu->instruction_barrier))
+        {
+            engine->cpu->instruction_barrier = 0U;
+
+            if (0U != engine->cpu->instruction_cache_invalidated)
+            {
+                engine->cpu->instruction_cache_invalidated = 0U;
+                atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
+                                      true,
+                                      memory_order_release);
+            }
+        }
+
         if (BAL_UNLIKELY(atomic_load_explicit(
                 &internal_engine_state->thread_state.clear_cache_requested, memory_order_acquire)))
         {

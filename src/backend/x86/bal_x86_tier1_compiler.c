@@ -4260,6 +4260,110 @@ emit_register_access(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     push_macro(compiler, STORES[size_log2], pointer, x86_rt);
 }
 
+/// Loads or stores one SIMD&FP register through the host pointer in BAL_X86_REGISTER_ZERO.
+///
+/// `size_log2` is the access size, 0 (B) to 4 (Q). The registers live in the cpu structure, so
+/// the data moves through BAL_X86_REGISTER_DISCARD_RESULT. A load clears the bits above the
+/// access, as every scalar write to a SIMD&FP register does.
+static void
+emit_vector_access(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                   const uint8_t                      vt,
+                   const uint32_t                     size_log2,
+                   const bool                         is_load)
+{
+    static const bal_x86_macro_opcode_t LOADS[4] = {
+        BAL_X86_MACRO_LOAD_MEMORY_R32_MEM8,
+        BAL_X86_MACRO_LOAD_MEMORY_R32_MEM16,
+        BAL_X86_MACRO_LOAD_MEMORY_R32_MEM32,
+        BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64,
+    };
+    static const bal_x86_macro_opcode_t STORES[4] = {
+        BAL_X86_MACRO_STORE_MEMORY_MEM8_R8,
+        BAL_X86_MACRO_STORE_MEMORY_MEM16_R16,
+        BAL_X86_MACRO_STORE_MEMORY_MEM32_R32,
+        BAL_X86_MACRO_STORE_MEMORY_MEM64_R64,
+    };
+    const bal_x86_register_t pointer     = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t data        = BAL_X86_REGISTER_DISCARD_RESULT;
+    const uint32_t           low_size    = size_log2 > 3U ? 3U : size_log2;
+    const uint64_t           low_offset  = offsetof(bal_cpu_t, v[vt][0]);
+    const uint64_t           high_offset = offsetof(bal_cpu_t, v[vt][1]);
+
+    if (true == is_load)
+    {
+        push_macro(compiler, LOADS[low_size], data, pointer);
+        const bal_x86_macro_t store_low = {
+            .opcode              = BAL_X86_MACRO_STORE,
+            .source              = data,
+            .immediate_or_offset = low_offset,
+        };
+        bal_sliding_window_push(&compiler->window, store_low);
+
+        if (4U == size_log2)
+        {
+            emit_advance_address(compiler, 8U);
+            push_macro(compiler, BAL_X86_MACRO_LOAD_MEMORY_R64_MEM64, data, pointer);
+            emit_advance_address(compiler, (uint64_t)-8);
+        }
+        else
+        {
+            const bal_x86_macro_t zero_macro = {
+                .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+                .destination         = data,
+                .immediate_or_offset = 0U,
+            };
+            bal_sliding_window_push(&compiler->window, zero_macro);
+        }
+
+        const bal_x86_macro_t store_high = {
+            .opcode              = BAL_X86_MACRO_STORE,
+            .source              = data,
+            .immediate_or_offset = high_offset,
+        };
+        bal_sliding_window_push(&compiler->window, store_high);
+        return;
+    }
+
+    const bal_x86_macro_t load_low = {
+        .opcode              = BAL_X86_MACRO_LOAD,
+        .destination         = data,
+        .immediate_or_offset = low_offset,
+    };
+    bal_sliding_window_push(&compiler->window, load_low);
+    push_macro(compiler, STORES[low_size], pointer, data);
+
+    if (4U == size_log2)
+    {
+        const bal_x86_macro_t load_high = {
+            .opcode              = BAL_X86_MACRO_LOAD,
+            .destination         = data,
+            .immediate_or_offset = high_offset,
+        };
+        bal_sliding_window_push(&compiler->window, load_high);
+        emit_advance_address(compiler, 8U);
+        push_macro(compiler, BAL_X86_MACRO_STORE_MEMORY_MEM64_R64, pointer, data);
+        emit_advance_address(compiler, (uint64_t)-8);
+    }
+}
+
+/// Loads or stores a general purpose register, or a SIMD&FP register when `is_vector` is set.
+static void
+emit_access(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+            const bool                         is_vector,
+            const uint8_t                      rt,
+            const uint32_t                     size_log2,
+            const bool                         is_load,
+            const uint32_t                     sign_extend)
+{
+    if (true == is_vector)
+    {
+        emit_vector_access(compiler, rt, size_log2, is_load);
+        return;
+    }
+
+    emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+}
+
 /// Computes the written-back base (base + offset, with register 31 as the stack pointer) of the
 /// pre- and post-indexed forms and saves it on the stack. Called after the address is known to be
 /// mapped and before the access, so the access sees the original base and a faulting access
@@ -4330,9 +4434,11 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     // Load register (literal): opc 011 V 00 imm19 Rt.
     if (0x18U == ((instruction >> 24U) & 0x3BU))
     {
-        const uint32_t opc = instruction >> 30U;
+        const uint32_t opc       = instruction >> 30U;
+        const bool     is_vector = 1U == ((instruction >> 26U) & 1U);
 
-        if (BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)))
+        // For SIMD&FP registers opc 00/01/10 select S/D/Q and 11 is unallocated.
+        if (true == is_vector && BAL_UNLIKELY(3U == opc))
         {
             reject_load_store(compiler, instruction);
             return;
@@ -4346,9 +4452,10 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         const uint32_t imm19 = (instruction >> 5U) & 0x7FFFFU;
 
         // WARNING: Shifting the 19-bit field to the top and back sign-extends it.
-        const int32_t         offset        = (int32_t)(imm19 << 13U) >> 13U;
-        const uint64_t        address       = guest_address + (uint64_t)((int64_t)offset * 4);
-        const uint32_t        size_log2     = 0U == opc ? 2U : (1U == opc ? 3U : 2U);
+        const int32_t  offset  = (int32_t)(imm19 << 13U) >> 13U;
+        const uint64_t address = guest_address + (uint64_t)((int64_t)offset * 4);
+        const uint32_t size_log2
+            = true == is_vector ? 2U + opc : (0U == opc ? 2U : (1U == opc ? 3U : 2U));
         const bal_x86_macro_t address_macro = {
             .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
             .destination         = BAL_X86_REGISTER_ZERO,
@@ -4356,32 +4463,35 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         };
         bal_sliding_window_push(&compiler->window, address_macro);
         emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
-        emit_register_access(compiler, rt, size_log2, true, 2U == opc ? 64U : 0U);
+        emit_access(
+            compiler, is_vector, rt, size_log2, true, 2U == opc && false == is_vector ? 64U : 0U);
         return;
     }
 
     // Load/store pair: opc 101 V type(2) L imm7 Rt2 Rn Rt.
     if (0x5U == ((instruction >> 27U) & 0x7U))
     {
-        const uint32_t opc     = instruction >> 30U;
-        const uint32_t type    = (instruction >> 23U) & 0x3U;
-        const bool     is_load = 1U == ((instruction >> 22U) & 1U);
-        const uint32_t imm7    = (instruction >> 15U) & 0x7FU;
-        const uint8_t  rt2     = (uint8_t)((instruction >> 10U) & 0x1FU);
+        const uint32_t opc       = instruction >> 30U;
+        const uint32_t type      = (instruction >> 23U) & 0x3U;
+        const bool     is_load   = 1U == ((instruction >> 22U) & 1U);
+        const uint32_t imm7      = (instruction >> 15U) & 0x7FU;
+        const uint8_t  rt2       = (uint8_t)((instruction >> 10U) & 0x1FU);
+        const bool     is_vector = 1U == ((instruction >> 26U) & 1U);
 
-        // V = 1 is SIMD, opc 11 is unallocated, and opc 01 is LDPSW for loads but STGP for stores.
-        if (BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)) || BAL_UNLIKELY(3U == opc)
-            || BAL_UNLIKELY(1U == opc && false == is_load))
+        // opc 11 is unallocated. For general purpose registers opc 01 is LDPSW for loads but STGP
+        // for stores; for SIMD&FP registers opc 00/01/10 select S/D/Q.
+        if (BAL_UNLIKELY(3U == opc)
+            || BAL_UNLIKELY(1U == opc && false == is_load && false == is_vector))
         {
             reject_load_store(compiler, instruction);
             return;
         }
 
-        const uint32_t size_log2   = 2U == opc ? 3U : 2U;
+        const uint32_t size_log2   = true == is_vector ? 2U + opc : (2U == opc ? 3U : 2U);
         const int32_t  scaled      = ((int32_t)(imm7 << 25U) >> 25U) * (1 << size_log2);
         const bool     is_post     = 1U == type;
         const bool     is_pre      = 3U == type;
-        const uint32_t sign_extend = 1U == opc ? 64U : 0U;
+        const uint32_t sign_extend = 1U == opc && false == is_vector ? 64U : 0U;
 
         emit_base_plus_offset(compiler, rn, true == is_post ? 0 : scaled);
         emit_translate_data_address(compiler, memory_interface, 2ULL << size_log2, guest_address);
@@ -4391,13 +4501,22 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
             emit_writeback_begin(compiler, rn, scaled);
         }
 
-        // Rt2 is accessed first so that a load with Rt == Rt2, which is CONSTRAINED
-        // UNPREDICTABLE, leaves the value from the lower address, as Unicorn's reference model
-        // does.
-        emit_advance_address(compiler, 1ULL << size_log2);
-        emit_register_access(compiler, rt2, size_log2, is_load, sign_extend);
-        emit_advance_address(compiler, (uint64_t)(-(int64_t)(1ULL << size_log2)));
-        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+        // A load with Rt == Rt2 is CONSTRAINED UNPREDICTABLE. Unicorn's reference model leaves
+        // the value from the lower address in a general purpose register but the one from the
+        // higher address in a SIMD&FP register, so the access order follows it.
+        if (true == is_vector)
+        {
+            emit_access(compiler, is_vector, rt, size_log2, is_load, sign_extend);
+            emit_advance_address(compiler, 1ULL << size_log2);
+            emit_access(compiler, is_vector, rt2, size_log2, is_load, sign_extend);
+        }
+        else
+        {
+            emit_advance_address(compiler, 1ULL << size_log2);
+            emit_access(compiler, is_vector, rt2, size_log2, is_load, sign_extend);
+            emit_advance_address(compiler, (uint64_t)(-(int64_t)(1ULL << size_log2)));
+            emit_access(compiler, is_vector, rt, size_log2, is_load, sign_extend);
+        }
 
         if (true == is_pre || true == is_post)
         {
@@ -4408,16 +4527,34 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     }
 
     // Load/store register: size 111 V 0x opc ...
-    if (BAL_UNLIKELY(0x7U != ((instruction >> 27U) & 0x7U))
-        || BAL_UNLIKELY(1U == ((instruction >> 26U) & 1U)))
+    if (BAL_UNLIKELY(0x7U != ((instruction >> 27U) & 0x7U)))
     {
         reject_load_store(compiler, instruction);
         return;
     }
 
-    const uint32_t size_log2 = instruction >> 30U;
+    const bool     is_vector = 1U == ((instruction >> 26U) & 1U);
     const uint32_t opc       = (instruction >> 22U) & 0x3U;
-    const bool     is_load   = opc != 0U;
+    uint32_t       size_log2 = instruction >> 30U;
+    bool           is_load   = opc != 0U;
+
+    // SIMD&FP registers: opc bit 0 is the direction, and opc bit 1 with size 00 selects Q. The
+    // other opc 1x encodings are unallocated.
+    if (true == is_vector)
+    {
+        if (opc >= 2U)
+        {
+            if (BAL_UNLIKELY(size_log2 != 0U))
+            {
+                reject_load_store(compiler, instruction);
+                return;
+            }
+
+            size_log2 = 4U;
+        }
+
+        is_load = 1U == (opc & 1U);
+    }
 
     // The register offset form is mode 10 with a W or X index (option x1x). The pointer
     // authentication loads and the atomics share the rest of that space.
@@ -4437,7 +4574,7 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     // ones, where only opc 10 (LDRSW) exists.
     uint32_t sign_extend = 0U;
 
-    if (opc >= 2U)
+    if (opc >= 2U && false == is_vector)
     {
         if (3U == size_log2)
         {
@@ -4465,7 +4602,7 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         const int64_t offset = (int64_t)(((instruction >> 10U) & 0xFFFU) << size_log2);
         emit_base_plus_offset(compiler, rn, offset);
         emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
-        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+        emit_access(compiler, is_vector, rt, size_log2, is_load, sign_extend);
         return;
     }
 
@@ -4522,7 +4659,7 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         emit_base_plus_offset(compiler, rn, 0);
         push_macro(compiler, BAL_X86_MACRO_ADD_REGISTER_REGISTER, BAL_X86_REGISTER_ZERO, index);
         emit_translate_data_address(compiler, memory_interface, 1ULL << size_log2, guest_address);
-        emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+        emit_access(compiler, is_vector, rt, size_log2, is_load, sign_extend);
         return;
     }
 
@@ -4540,7 +4677,7 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         emit_writeback_begin(compiler, rn, offset);
     }
 
-    emit_register_access(compiler, rt, size_log2, is_load, sign_extend);
+    emit_access(compiler, is_vector, rt, size_log2, is_load, sign_extend);
 
     if (true == is_pre || true == is_post)
     {

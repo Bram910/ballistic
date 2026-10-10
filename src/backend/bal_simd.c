@@ -2399,4 +2399,237 @@ bal_execute_simd(bal_cpu_t *cpu, const uint32_t instruction)
     return 1U;
 }
 
+/// The shape of an Advanced SIMD structure load or store.
+typedef struct
+{
+    bool is_load;
+    bool is_single;
+    bool is_replicate;
+    bool has_writeback;
+    /// Registers per structure, and how often the structures repeat (LD1 with several
+    /// registers).
+    uint32_t selem;
+    uint32_t repeat;
+    uint32_t esize;
+    uint32_t datasize;
+    /// The lane of a single-structure access.
+    uint32_t index;
+    uint32_t pad;
+} structure_t;
+
+/// Decodes the load/store vector structure classes. Returns false for unallocated encodings.
+static bool
+decode_structure(const uint32_t instruction, structure_t *structure)
+{
+    const uint32_t q    = (instruction >> 30U) & 1U;
+    const uint32_t size = (instruction >> 10U) & 0x3U;
+    (void)memset(structure, 0, sizeof(*structure));
+    structure->is_load  = 1U == ((instruction >> 22U) & 1U);
+    structure->datasize = 1U == q ? 128U : 64U;
+
+    const bool is_multiple         = 0x0C000000U == (instruction & 0xBFBF0000U);
+    const bool is_multiple_indexed = 0x0C800000U == (instruction & 0xBFA00000U);
+    const bool is_single           = 0x0D000000U == (instruction & 0xBF9F0000U);
+    const bool is_single_indexed   = 0x0D800000U == (instruction & 0xBF800000U);
+    structure->has_writeback       = is_multiple_indexed || is_single_indexed;
+
+    if (true == is_multiple || true == is_multiple_indexed)
+    {
+        static const uint8_t REPEAT[16] = { 1, 0, 4, 0, 1, 0, 3, 1, 1, 0, 2, 0, 0, 0, 0, 0 };
+        static const uint8_t SELEM[16]  = { 4, 0, 1, 0, 3, 0, 1, 1, 2, 0, 1, 0, 0, 0, 0, 0 };
+        const uint32_t       opcode     = (instruction >> 12U) & 0xFU;
+        structure->repeat               = REPEAT[opcode];
+        structure->selem                = SELEM[opcode];
+        structure->esize                = 8U << size;
+
+        // Structures of several 64-bit elements need a whole Q register.
+        return structure->repeat != 0U && !(3U == size && 0U == q && structure->selem != 1U);
+    }
+
+    if (false == is_single && false == is_single_indexed)
+    {
+        return false;
+    }
+
+    const uint32_t opcode = (instruction >> 13U) & 0x7U;
+    const uint32_t r      = (instruction >> 21U) & 1U;
+    const uint32_t s      = (instruction >> 12U) & 1U;
+    uint32_t       scale  = opcode >> 1U;
+    structure->is_single  = true;
+    structure->repeat     = 1U;
+    structure->selem      = (((opcode & 1U) << 1U) | r) + 1U;
+
+    switch (scale)
+    {
+        case 3U: // LD1R-LD4R
+            if (false == structure->is_load || 1U == s)
+            {
+                return false;
+            }
+
+            scale                   = size;
+            structure->is_replicate = true;
+            break;
+        case 0U:
+            structure->index = (q << 3U) | (s << 2U) | size;
+            break;
+        case 1U:
+            if (1U == (size & 1U))
+            {
+                return false;
+            }
+
+            structure->index = (q << 2U) | (s << 1U) | (size >> 1U);
+            break;
+        default:
+            if (1U == (size >> 1U))
+            {
+                return false;
+            }
+
+            if (0U == size)
+            {
+                structure->index = (q << 1U) | s;
+            }
+            else
+            {
+                if (1U == s)
+                {
+                    return false;
+                }
+
+                structure->index = q;
+                scale            = 3U;
+            }
+
+            break;
+    }
+
+    structure->esize = 8U << scale;
+    return true;
+}
+
+bool
+bal_is_simd_memory_supported(const uint32_t instruction)
+{
+    structure_t structure;
+    return decode_structure(instruction, &structure);
+}
+
+/// Returns the host address of `bytes` bytes at `address`, or NULL if they are not all mapped.
+static uint8_t *
+translate_element(const bal_memory_interface_t *memory_interface,
+                  const uint64_t                address,
+                  const uint32_t                bytes)
+{
+    size_t         available_bytes = 0U;
+    const uint8_t *host_address
+        = memory_interface->translate((void *)memory_interface, address, &available_bytes);
+
+    if (NULL == host_address || available_bytes < bytes)
+    {
+        return NULL;
+    }
+
+    return (uint8_t *)(uintptr_t)host_address;
+}
+
+uint64_t
+bal_execute_simd_memory(bal_cpu_t                    *cpu,
+                        const bal_memory_interface_t *memory_interface,
+                        const uint32_t                instruction)
+{
+    structure_t structure;
+    (void)decode_structure(instruction, &structure);
+
+    simd_t         simd    = { .cpu = cpu, .flags = 0U };
+    const uint32_t rt      = instruction & 0x1FU;
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+    const uint32_t rm      = (instruction >> 16U) & 0x1FU;
+    const uint32_t ebytes  = structure.esize / 8U;
+    const uint64_t address = cpu->x[rn]; // Register 31 is the stack pointer.
+    uint64_t       offset  = 0U;
+
+    if (true == structure.is_replicate)
+    {
+        uint32_t t = rt;
+
+        for (uint32_t s = 0U; s < structure.selem; ++s)
+        {
+            const uint8_t *pointer = translate_element(memory_interface, address + offset, ebytes);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            uint64_t element = 0U;
+            (void)memcpy(&element, pointer, ebytes);
+            vector_t result = { { 0U, 0U } };
+
+            for (uint32_t e = 0U; e < structure.datasize / structure.esize; ++e)
+            {
+                set_element(&result, e, structure.esize, element);
+            }
+
+            write_vector(&simd, t, result, structure.datasize);
+            offset += ebytes;
+            t = (t + 1U) % 32U;
+        }
+    }
+    else
+    {
+        // A single structure works on one lane of full registers; multiple structures on every
+        // lane of datasize-bit registers.
+        const uint32_t elements
+            = true == structure.is_single ? 1U : structure.datasize / structure.esize;
+        const uint32_t width = true == structure.is_single ? 128U : structure.datasize;
+
+        for (uint32_t r = 0U; r < structure.repeat; ++r)
+        {
+            for (uint32_t e = 0U; e < elements; ++e)
+            {
+                uint32_t       t    = (rt + r) % 32U;
+                const uint32_t lane = true == structure.is_single ? structure.index : e;
+
+                for (uint32_t s = 0U; s < structure.selem; ++s)
+                {
+                    uint8_t *pointer
+                        = translate_element(memory_interface, address + offset, ebytes);
+
+                    if (NULL == pointer)
+                    {
+                        return 0U;
+                    }
+
+                    vector_t value = read_vector(&simd, t);
+
+                    if (true == structure.is_load)
+                    {
+                        uint64_t element = 0U;
+                        (void)memcpy(&element, pointer, ebytes);
+                        set_element(&value, lane, structure.esize, element);
+                        write_vector(&simd, t, value, width);
+                    }
+                    else
+                    {
+                        const uint64_t element = get_element(&value, lane, structure.esize);
+                        (void)memcpy(pointer, &element, ebytes);
+                    }
+
+                    offset += ebytes;
+                    t = (t + 1U) % 32U;
+                }
+            }
+        }
+    }
+
+    if (true == structure.has_writeback)
+    {
+        cpu->x[rn] = address + (31U == rm ? offset : cpu->x[rm]);
+    }
+
+    return 1U;
+}
+
 /*** end of file ***/

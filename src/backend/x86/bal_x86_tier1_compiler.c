@@ -4118,6 +4118,41 @@ emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     }
 }
 
+/// Calls a runtime helper `function(cpu, memory_interface, instruction)` that executes one
+/// memory instruction on the guest state, and raises a data abort when it returns zero.
+///
+/// The guest registers are flushed to the cpu structure first, since the helper reads and writes
+/// them there.
+static void
+emit_memory_helper_call(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                        const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                        const uint32_t                             instruction,
+                        const bal_guest_address_t                  guest_address,
+                        const uint64_t                             function)
+{
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+
+    const bal_x86_macro_t interface_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG2,
+        .immediate_or_offset = (uint64_t)(uintptr_t)memory_interface,
+    };
+    bal_sliding_window_push(&compiler->window, interface_macro);
+
+    const bal_x86_macro_t instruction_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG3,
+        .immediate_or_offset = instruction,
+    };
+    bal_sliding_window_push(&compiler->window, instruction_macro);
+
+    emit_runtime_call(compiler, function);
+    emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
+}
+
 /// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register,
 /// by calling translate_data_address() for `size` bytes, and raises a data abort when the address
 /// is not mapped.
@@ -4445,6 +4480,24 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     const uint8_t rt = (uint8_t)(instruction & 0x1FU);
     const uint8_t rn = (uint8_t)((instruction >> 5U) & 0x1FU);
 
+    // Advanced SIMD structures: 0 Q 0011 0x ..., LD1-LD4, ST1-ST4 and LD1R-LD4R. The runtime
+    // helper moves them element by element.
+    if (0x0C000000U == (instruction & 0xBE000000U))
+    {
+        if (BAL_UNLIKELY(false == bal_is_simd_memory_supported(instruction)))
+        {
+            reject_load_store(compiler, instruction);
+            return;
+        }
+
+        emit_memory_helper_call(compiler,
+                                memory_interface,
+                                instruction,
+                                guest_address,
+                                (uint64_t)(uintptr_t)&bal_execute_simd_memory);
+        return;
+    }
+
     // Load register (literal): opc 011 V 00 imm19 Rt.
     if (0x18U == ((instruction >> 24U) & 0x3BU))
     {
@@ -4720,27 +4773,11 @@ translate_atomic(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         return;
     }
 
-    flush_dirty_registers(compiler);
-    reset_register_allocator(compiler);
-
-    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
-
-    const bal_x86_macro_t interface_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_ABI_ARG2,
-        .immediate_or_offset = (uint64_t)(uintptr_t)memory_interface,
-    };
-    bal_sliding_window_push(&compiler->window, interface_macro);
-
-    const bal_x86_macro_t instruction_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_ABI_ARG3,
-        .immediate_or_offset = instruction,
-    };
-    bal_sliding_window_push(&compiler->window, instruction_macro);
-
-    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&bal_execute_atomic);
-    emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
+    emit_memory_helper_call(compiler,
+                            memory_interface,
+                            instruction,
+                            guest_address,
+                            (uint64_t)(uintptr_t)&bal_execute_atomic);
 }
 
 /// Translates the SIMD&FP data processing instructions: the scalar floating-point ones through

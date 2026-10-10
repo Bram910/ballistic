@@ -461,19 +461,14 @@ typedef enum
     OPERATION_FUSED_MULTIPLY_ADD,
 } operation_t;
 
-/// Runs one host operation under the guest rounding mode and returns its result and flags.
+/// Computes one host operation in the operand precision under the current host rounding mode.
 static uint64_t
-host_operation(context_t        *context,
-               const operation_t operation,
-               const uint64_t    a,
-               const uint64_t    b,
-               const uint64_t    c)
+host_compute(const context_t  *context,
+             const operation_t operation,
+             const uint64_t    a,
+             const uint64_t    b,
+             const uint64_t    c)
 {
-    const int previous_mode = fegetround();
-    (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
-    (void)feclearexcept(FE_ALL_EXCEPT);
-    uint64_t result = 0U;
-
     if (PRECISION_DOUBLE == context->precision)
     {
         const double x     = to_double(a);
@@ -504,42 +499,72 @@ host_operation(context_t        *context,
                 break;
         }
 
-        result = from_double(value);
+        return from_double(value);
     }
-    else
+
+    const float x     = to_float(a);
+    const float y     = to_float(b);
+    const float z     = to_float(c);
+    float       value = 0.0F;
+
+    switch (operation)
     {
-        const float x     = to_float(a);
-        const float y     = to_float(b);
-        const float z     = to_float(c);
-        float       value = 0.0F;
-
-        switch (operation)
-        {
-            case OPERATION_ADD:
-                value = x + y;
-                break;
-            case OPERATION_SUBTRACT:
-                value = x - y;
-                break;
-            case OPERATION_MULTIPLY:
-                value = x * y;
-                break;
-            case OPERATION_DIVIDE:
-                value = x / y;
-                break;
-            case OPERATION_SQUARE_ROOT:
-                value = sqrtf(x);
-                break;
-            case OPERATION_FUSED_MULTIPLY_ADD:
-            default:
-                value = fmaf(x, y, z);
-                break;
-        }
-
-        result = from_float(value);
+        case OPERATION_ADD:
+            value = x + y;
+            break;
+        case OPERATION_SUBTRACT:
+            value = x - y;
+            break;
+        case OPERATION_MULTIPLY:
+            value = x * y;
+            break;
+        case OPERATION_DIVIDE:
+            value = x / y;
+            break;
+        case OPERATION_SQUARE_ROOT:
+            value = sqrtf(x);
+            break;
+        case OPERATION_FUSED_MULTIPLY_ADD:
+        default:
+            value = fmaf(x, y, z);
+            break;
     }
 
-    const uint64_t flags = host_flags();
+    return from_float(value);
+}
+
+/// Runs one host operation under the guest rounding mode and returns its result and flags.
+static uint64_t
+host_operation(context_t        *context,
+               const operation_t operation,
+               const uint64_t    a,
+               const uint64_t    b,
+               const uint64_t    c)
+{
+    const int previous_mode = fegetround();
+    (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
+    (void)feclearexcept(FE_ALL_EXCEPT);
+    uint64_t result = host_compute(context, operation, a, b, c);
+    uint64_t flags  = host_flags();
+
+    // AArch64 detects tininess before rounding and x86 after it, so an inexact result that
+    // rounded up to the smallest normal may still have been tiny: then it raises Underflow, and
+    // with FPCR.FZ finish() flushes it. Rounding towards zero gives a denormal exactly when the
+    // exact result was tiny.
+    const uint64_t smallest_normal = 1ULL << context->layout.fraction_bits;
+
+    if (0U != (flags & FPSR_IXC) && smallest_normal == (result & ~context->layout.sign_mask))
+    {
+        (void)fesetround(FE_TOWARDZERO);
+        const uint64_t truncated = host_compute(context, operation, a, b, c);
+
+        if (true == is_denormal(&context->layout, truncated)
+            || true == is_zero(&context->layout, truncated))
+        {
+            flags |= FPSR_UFC;
+        }
+    }
+
     (void)fesetround(previous_mode);
     return finish(context, result, flags);
 }

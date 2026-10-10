@@ -84,6 +84,21 @@ local function derive_opcode(mnemonic)
         return "OPCODE_ATOMIC"
     end
 
+    -- Exception generation. HLT, HVC and SMC are undefined at EL0.
+    if m == "SVC" or m == "BRK" or m == "UDF" or m == "HLT" or m == "HVC" or m == "SMC" then
+        return "OPCODE_EXCEPTION"
+    end
+
+    -- CRC32 and the flag manipulation instructions, executed by a runtime helper.
+    if m:match("^CRC32C?[BHWX]$") or m == "CFINV" or m == "RMIF" or m == "SETF8" or m == "SETF16" then
+        return "OPCODE_INTEGER_HELPER"
+    end
+
+    -- SYS: the cache maintenance operations EL0 may execute.
+    if m == "SYS" then
+        return "OPCODE_SYSTEM_REGISTER"
+    end
+
     for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
                               "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
         if m:sub(1, #prefix) == prefix then

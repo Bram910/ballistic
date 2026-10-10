@@ -308,11 +308,17 @@ def main():
     )
 
     counts = Counter(e["status"] for e in entries)
+    groups = []
+    for name in CLASS_ORDER:
+        members = [e for e in entries if e["class"] == name]
+        if members:
+            done = sum(e["status"] == VERIFIED for e in members) / len(members)
+            groups.append(f"{name} {100 * done:.1f}%")
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
         f"operands against Unicorn: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "
-        f"checkable (Unicorn rejects the random branch targets), {counts[WRONG]} wrong and {counts[TODO]} "
-        f"not started. Integer and branch instructions: {100 * integer_done:.1f}%."
+        f"checkable (Unicorn cannot run the random samples or has a known bug for them), "
+        f"{counts[WRONG]} wrong and {counts[TODO]} not started. Verified by group: {', '.join(groups)}."
     )
     update_readme(summary)
     print(summary)

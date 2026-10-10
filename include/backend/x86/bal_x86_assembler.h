@@ -4,6 +4,7 @@
 #include "bal_errors.h"
 #include "bal_memory.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1481,6 +1482,73 @@ extern "C"
     /// - `assembler->status` != [`BAL_SUCCESS`]
     /// - `assembler->buffer` is full.
     void bal_x86_emit_ud2(bal_x86_assembler_t *assembler);
+
+    /// Emits a register to register SSE instruction: `[prefix] [REX] opcode ModR/M [imm8]`, with
+    /// `reg` (0-15, an XMM or general purpose register as the instruction defines) in the ModR/M
+    /// reg field and `rm` in the r/m field.
+    ///
+    /// `prefix` is 0x66, 0xF2, 0xF3, or 0 for none. `opcode` holds `opcode_size` bytes including
+    /// the 0F escape. REX is emitted when `is_64bit` (REX.W) or a register above 7 needs it. The
+    /// 8-bit immediate is emitted when `has_immediate` is true.
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - a register is above 15.
+    void bal_x86_emit_sse_register(bal_x86_assembler_t *assembler,
+                                   uint8_t              prefix,
+                                   bool                 is_64bit,
+                                   const uint8_t       *opcode,
+                                   size_t               opcode_size,
+                                   uint8_t              reg,
+                                   uint8_t              rm,
+                                   bool                 has_immediate,
+                                   uint8_t              immediate,
+                                   const char          *mnemonic);
+
+    /// Emits an SSE instruction with a memory operand at `[rbp + offset]`, otherwise like
+    /// bal_x86_emit_sse_register(). This also encodes LDMXCSR and STMXCSR (0F AE /2 and /3).
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `reg` is above 15.
+    void bal_x86_emit_sse_rbp_offset(bal_x86_assembler_t *assembler,
+                                     uint8_t              prefix,
+                                     bool                 is_64bit,
+                                     const uint8_t       *opcode,
+                                     size_t               opcode_size,
+                                     uint8_t              reg,
+                                     int32_t              offset,
+                                     const char          *mnemonic);
+
+    /// Emits a 128-bit VEX instruction from the 0F38 map with the 66 prefix, such as the FMA3
+    /// VFMADD231PS: `opcode reg, vvvv, rm` on XMM registers 0-15. `is_64bit` sets VEX.W, which
+    /// selects the double precision forms of the FMA instructions.
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - a register is above 15.
+    void bal_x86_emit_vex_0f38_register(bal_x86_assembler_t *assembler,
+                                        bool                 is_64bit,
+                                        uint8_t              opcode,
+                                        uint8_t              reg,
+                                        uint8_t              vvvv,
+                                        uint8_t              rm,
+                                        const char          *mnemonic);
 
 #ifdef __cplusplus
 }

@@ -96,6 +96,14 @@ extern "C"
         /// monotonic clock.
         uint64_t (*read_counter)(void *context);
         void *counter_context;
+
+        /// Used by translated code that runs floating point inline: the host's MXCSR while the
+        /// block runs, and a word for loading and storing MXCSR.
+        uint32_t jit_host_mxcsr;
+        uint32_t jit_mxcsr;
+
+        /// Keeps the structure a whole number of its 64-byte alignment.
+        uint8_t reserved[56];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

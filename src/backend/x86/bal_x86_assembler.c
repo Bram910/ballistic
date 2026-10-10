@@ -3242,4 +3242,164 @@ emit_modrm_memory_disp32_rbp(uint8_t *BAL_RESTRICT buffer, size_t *BAL_RESTRICT 
     emit8(buffer, offset, modrm);
 }
 
+/// Checks the common preconditions of the SSE and VEX emitters and reserves `size` bytes.
+static bool
+can_emit_vector(bal_x86_assembler_t *assembler, const size_t size, const uint32_t registers)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return false;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return false;
+    }
+
+    if (BAL_UNLIKELY(registers > 15U))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Invalid SSE register operand: %u", registers);
+        assembler->status = BAL_ERROR_INVALID_ARGUMENT;
+        return false;
+    }
+
+    return can_emit(assembler, size);
+}
+
+void
+bal_x86_emit_sse_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                          const uint8_t                     prefix,
+                          const bool                        is_64bit,
+                          const uint8_t *BAL_RESTRICT       opcode,
+                          const size_t                      opcode_size,
+                          const uint8_t                     reg,
+                          const uint8_t                     rm,
+                          const bool                        has_immediate,
+                          const uint8_t                     immediate,
+                          const char *BAL_RESTRICT          mnemonic)
+{
+    const bool   needs_rex = true == is_64bit || reg > 7U || rm > 7U;
+    const size_t size = (prefix != 0U ? 1U : 0U) + (true == needs_rex ? 1U : 0U) + opcode_size + 1U
+                        + (true == has_immediate ? 1U : 0U);
+
+    if (false == can_emit_vector(assembler, size, reg > rm ? reg : rm))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] %s %u, %u", assembler->offset, mnemonic, reg, rm);
+
+    if (prefix != 0U)
+    {
+        emit8(assembler->buffer, &assembler->offset, prefix);
+    }
+
+    if (true == needs_rex)
+    {
+        emit_rex(assembler->buffer,
+                 &assembler->offset,
+                 true == is_64bit ? 1U : 0U,
+                 (uint8_t)(reg >> 3U),
+                 (uint8_t)(rm >> 3U));
+    }
+
+    for (size_t i = 0U; i < opcode_size; ++i)
+    {
+        emit8(assembler->buffer, &assembler->offset, opcode[i]);
+    }
+
+    emit_modrm_register(assembler->buffer, &assembler->offset, reg & 7U, rm & 7U);
+
+    if (true == has_immediate)
+    {
+        emit8(assembler->buffer, &assembler->offset, immediate);
+    }
+}
+
+void
+bal_x86_emit_sse_rbp_offset(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                            const uint8_t                     prefix,
+                            const bool                        is_64bit,
+                            const uint8_t *BAL_RESTRICT       opcode,
+                            const size_t                      opcode_size,
+                            const uint8_t                     reg,
+                            const int32_t                     offset,
+                            const char *BAL_RESTRICT          mnemonic)
+{
+    const bool   needs_rex = true == is_64bit || reg > 7U;
+    const size_t size
+        = (prefix != 0U ? 1U : 0U) + (true == needs_rex ? 1U : 0U) + opcode_size + 1U + 4U;
+
+    if (false == can_emit_vector(assembler, size, reg))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s %u, [rbp + 0x%X]",
+                  assembler->offset,
+                  mnemonic,
+                  reg,
+                  (uint32_t)offset);
+
+    if (prefix != 0U)
+    {
+        emit8(assembler->buffer, &assembler->offset, prefix);
+    }
+
+    if (true == needs_rex)
+    {
+        emit_rex(assembler->buffer,
+                 &assembler->offset,
+                 true == is_64bit ? 1U : 0U,
+                 (uint8_t)(reg >> 3U),
+                 0U);
+    }
+
+    for (size_t i = 0U; i < opcode_size; ++i)
+    {
+        emit8(assembler->buffer, &assembler->offset, opcode[i]);
+    }
+
+    emit_modrm_memory_disp32_rbp(assembler->buffer, &assembler->offset, reg & 7U);
+    emit32(assembler->buffer, &assembler->offset, (uint32_t)offset);
+}
+
+void
+bal_x86_emit_vex_0f38_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                               const bool                        is_64bit,
+                               const uint8_t                     opcode,
+                               const uint8_t                     reg,
+                               const uint8_t                     vvvv,
+                               const uint8_t                     rm,
+                               const char *BAL_RESTRICT          mnemonic)
+{
+    const uint8_t largest = reg > rm ? (reg > vvvv ? reg : vvvv) : (rm > vvvv ? rm : vvvv);
+
+    if (false == can_emit_vector(assembler, 5U, largest))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s xmm%u, xmm%u, xmm%u",
+                  assembler->offset,
+                  mnemonic,
+                  reg,
+                  vvvv,
+                  rm);
+
+    // C4 [R X B mmmmm = 00010] [W vvvv L pp = 01]: R, X, B and vvvv are stored inverted.
+    const uint32_t byte1 = ((~(uint32_t)reg >> 3U & 1U) << 7U) | (1U << 6U)
+                           | ((~(uint32_t)rm >> 3U & 1U) << 5U) | 0x02U;
+    const uint32_t byte2
+        = ((true == is_64bit ? 1U : 0U) << 7U) | ((~(uint32_t)vvvv & 0xFU) << 3U) | 0x01U;
+    emit8(assembler->buffer, &assembler->offset, 0xC4);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)byte1);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)byte2);
+    emit8(assembler->buffer, &assembler->offset, opcode);
+    emit_modrm_register(assembler->buffer, &assembler->offset, reg & 7U, rm & 7U);
+}
+
 /*** end of file ***/

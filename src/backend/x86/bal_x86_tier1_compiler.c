@@ -4953,7 +4953,10 @@ emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                      const bal_exception_t              exception,
                      const uint64_t                     immediate)
 {
+    // RAX may cache a guest register, so the cache is written back and emptied before RAX is
+    // used; otherwise terminate_block() would write the exception kind into that register.
     flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
     bal_sliding_window_flush_all(&compiler->window);
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
     bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, immediate);

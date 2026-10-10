@@ -291,12 +291,17 @@ bal_tier1_compiler_reset(bal_tier1_compiler_t *compiler)
     bal_x86_assembler_reset(&compiler->assembler);
 }
 
-void *
-bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
-                             const bal_memory_interface_t *memory_interface,
-                             bal_guest_address_t           guest_address,
-                             const size_t                  max_instructions,
-                             const uint32_t                engine_flags)
+/// Translates up to `max_instructions` instructions at `guest_address` into one block. When an
+/// instruction cannot be translated, returns NULL with BAL_ERROR_UNKNOWN_INSTRUCTION, the number
+/// of instructions before it in `translated_count` and its encoding in `failed_instruction`.
+static void *
+translate_block(bal_tier1_compiler_t         *compiler,
+                const bal_memory_interface_t *memory_interface,
+                bal_guest_address_t           guest_address,
+                const size_t                  max_instructions,
+                const uint32_t                engine_flags,
+                size_t                       *translated_count,
+                uint32_t                     *failed_instruction)
 {
     if (BAL_UNLIKELY(NULL == compiler))
     {
@@ -413,6 +418,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
         {
             const uint32_t                            instruction = *host_address_cursor;
             const bal_decoder_instruction_metadata_t *metadata    = bal_decode_arm64(instruction);
+            *failed_instruction                                   = instruction;
 
             if (BAL_UNLIKELY(NULL == metadata))
             {
@@ -889,7 +895,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
             guest_address += 4;
             ++host_address_cursor;
 
-            if (i + 1 == max_instructions)
+            if (arm_instruction_count == max_instructions)
             {
                 BAL_LOG_WARN(&bal_thread_logger,
                              "Max instructions limit reached, terminating block");
@@ -912,6 +918,7 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
     {
         const bal_error_t status
             = compiler->status == BAL_SUCCESS ? compiler->assembler.status : compiler->status;
+        *translated_count = arm_instruction_count;
         BAL_LOG_ERROR(&bal_thread_logger,
                       "Aborting function: block assembly was truncated due to error: %s",
                       bal_error_to_string(status));
@@ -934,6 +941,96 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                  "Tier 1 compiled block ends at GVA 0x%016llX",
                  (unsigned long long)guest_address);
     return host_address;
+}
+
+/// Emits a block that raises BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION for `instruction` at
+/// `guest_address`, leaving the PC on it.
+static void *
+translate_unsupported(bal_tier1_compiler_t     *compiler,
+                      const bal_guest_address_t guest_address,
+                      const uint32_t            instruction,
+                      const uint32_t            engine_flags)
+{
+    reset_register_allocator(compiler);
+    compiler->is_guest_mxcsr_active = false;
+    void *host_address              = compiler->assembler.rx_buffer + compiler->assembler.offset;
+
+    bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_RBP);
+    bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R12);
+    bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R13);
+    bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R14);
+    bal_x86_emit_push_r64(&compiler->assembler, BAL_X86_R15);
+    bal_x86_emit_mov_r64_r64(&compiler->assembler, BAL_X86_RBP, BAL_X86_ABI_ARG1);
+
+    emit_guest_exception(compiler, BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION, instruction);
+    terminate_block(compiler, guest_address, false, 1U, engine_flags);
+
+    if (BAL_UNLIKELY(compiler->status != BAL_SUCCESS || compiler->assembler.status != BAL_SUCCESS))
+    {
+        return NULL;
+    }
+
+    return host_address;
+}
+
+void *
+bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
+                             const bal_memory_interface_t *memory_interface,
+                             const bal_guest_address_t     guest_address,
+                             const size_t                  max_instructions,
+                             const uint32_t                engine_flags)
+{
+    if (BAL_UNLIKELY(NULL == compiler))
+    {
+        return NULL;
+    }
+
+    const size_t start_offset       = compiler->assembler.offset;
+    size_t       translated_count   = 0;
+    uint32_t     failed_instruction = 0;
+    void        *block              = translate_block(compiler,
+                                  memory_interface,
+                                  guest_address,
+                                  max_instructions,
+                                  engine_flags,
+                                  &translated_count,
+                                  &failed_instruction);
+
+    // An instruction tier 1 cannot translate raises an exception only when it is reached, and an
+    // instruction fetch fault only when execution gets to the unmapped address: the partial block
+    // is dropped and the block ends before the instruction. A block starting with an
+    // untranslatable instruction raises the exception at once.
+    const bool is_unknown = BAL_ERROR_UNKNOWN_INSTRUCTION == compiler->status;
+    const bool is_late_fetch_fault
+        = (BAL_ERROR_MEMORY_FAULT == compiler->status || BAL_ERROR_PC_ALIGNMENT == compiler->status)
+          && translated_count > 0U;
+
+    if (BAL_LIKELY(NULL != block) || compiler->assembler.status != BAL_SUCCESS
+        || (false == is_unknown && false == is_late_fetch_fault))
+    {
+        return block;
+    }
+
+    compiler->assembler.offset = start_offset;
+    compiler->status           = BAL_SUCCESS;
+    bal_sliding_window_reset(&compiler->window);
+
+    if (translated_count > 0U)
+    {
+        return translate_block(compiler,
+                               memory_interface,
+                               guest_address,
+                               translated_count,
+                               engine_flags,
+                               &translated_count,
+                               &failed_instruction);
+    }
+
+    BAL_LOG_INFO(&bal_thread_logger,
+                 "Unsupported instruction %08x at GVA 0x%016llX raises an exception",
+                 failed_instruction,
+                 (unsigned long long)guest_address);
+    return translate_unsupported(compiler, guest_address, failed_instruction, engine_flags);
 }
 
 static void

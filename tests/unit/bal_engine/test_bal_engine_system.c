@@ -357,6 +357,33 @@ test_ClearCache_RetranslatesTheGuestCode(void)
 }
 
 static void
+test_UnsupportedInstruction_RaisesWhenReached(void)
+{
+    // MOVZ X0, #1; AT S1E1R, X1 (EL1 only); MOVZ X0, #2.
+    const uint32_t program[] = { 0xD2800020U, 0xD5087801U, 0xD2800040U };
+    load_program(program, 3U);
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_UNKNOWN_INSTRUCTION, run());
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_UINT32(BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX64(0xD5087801U, g_cpu.exception_immediate);
+    TEST_ASSERT_EQUAL_HEX64(4U, g_cpu.pc);
+}
+
+static void
+test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress(void)
+{
+    // MOVZ X0, #1; MOVZ X0, #2 in the last eight bytes, falling through into unmapped memory.
+    const uint32_t program[] = { 0xD2800020U, 0xD2800040U };
+    (void)memcpy(g_memory + GUEST_MEMORY_SIZE - 8U, program, sizeof(program));
+    g_cpu.pc = GUEST_MEMORY_SIZE - 8U;
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_MEMORY_FAULT, run());
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(GUEST_MEMORY_SIZE, g_cpu.pc);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -393,5 +420,7 @@ main(void)
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
+    RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);
+    RUN_TEST(test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress);
     return UNITY_END();
 }

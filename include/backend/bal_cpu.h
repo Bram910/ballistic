@@ -161,8 +161,15 @@ extern "C"
         /// array of BAL_TIER1_LOOKUP_ENTRIES bal_tier1_lookup_entry_t.
         uint64_t jit_lookup_table;
 
+        /// Used by the engine: the software TLB loads and stores look guest pages up in, an
+        /// array of BAL_TIER1_TLB_ENTRIES bal_tier1_tlb_entry_t.
+        uint64_t jit_memory_tlb;
+
+        /// Used by the engine: the bal_memory_interface_t a TLB miss asks.
+        uint64_t jit_memory_interface;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[40];
+        uint8_t reserved[24];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

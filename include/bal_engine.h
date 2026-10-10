@@ -228,6 +228,20 @@ extern "C"
     /// `engine` must be a valid pointer.
     BAL_HOT void bal_engine_request_exit(bal_engine_t *engine);
 
+    /// Tells `engine` that the guest memory map has changed: the memory interface translates
+    /// some guest addresses differently, or not at all. Translated loads and stores cache where
+    /// guest pages are, and the engine drops that cache at the next block boundary.
+    ///
+    /// Each [`bal_engine_run_thread`] call starts with the cache empty, so a host that changes
+    /// the map only while the engine is stopped, as when it handles an SVC, needs no call.
+    ///
+    /// This function is thread-safe and can be called from any thread.
+    ///
+    /// # Safety
+    ///
+    /// `engine` must be a valid pointer.
+    BAL_HOT void bal_engine_invalidate_memory(bal_engine_t *engine);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

@@ -450,6 +450,34 @@ bal_x86_emit_jmp_rel32(bal_x86_assembler_t *assembler, const int32_t offset)
 }
 
 void
+bal_x86_emit_call_rel32(bal_x86_assembler_t *assembler, const int32_t offset)
+{
+    if (BAL_UNLIKELY(NULL == assembler))
+    {
+        return;
+    }
+
+    if (BAL_UNLIKELY(assembler->status != BAL_SUCCESS))
+    {
+        BAL_LOG_ERROR(&bal_thread_logger, "Aborting function: assembler status != BAL_SUCCESS");
+        return;
+    }
+
+    const size_t instruction_size_bytes = 5;
+
+    if (BAL_UNLIKELY(false == can_emit(assembler, instruction_size_bytes)))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] call 0x%X", assembler->offset, offset);
+    emit8(assembler->buffer, &assembler->offset, 0xE8);
+
+    // WARNING: Bit pattern of int32_t offset is preserved in uint32_t.
+    emit32(assembler->buffer, &assembler->offset, (uint32_t)offset);
+}
+
+void
 bal_x86_emit_load_r64_rbp_offset(bal_x86_assembler_t     *assembler,
                                  const bal_x86_register_t destination,
                                  const int32_t            offset)

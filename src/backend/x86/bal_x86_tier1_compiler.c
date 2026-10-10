@@ -19,6 +19,7 @@
 #define BAL_X86_ABI_ARG1 BAL_X86_RCX
 #define BAL_X86_ABI_ARG2 BAL_X86_RDX
 #define BAL_X86_ABI_ARG3 BAL_X86_R8
+#define BAL_X86_ABI_ARG4 BAL_X86_R9
 
 // The Windows x64 calling convention makes the caller reserve 32 bytes of shadow space.
 #define BAL_X86_ABI_SHADOW_SPACE 32U
@@ -28,6 +29,7 @@
 #define BAL_X86_ABI_ARG1         BAL_X86_RDI
 #define BAL_X86_ABI_ARG2         BAL_X86_RSI
 #define BAL_X86_ABI_ARG3         BAL_X86_RDX
+#define BAL_X86_ABI_ARG4         BAL_X86_RCX
 #define BAL_X86_ABI_SHADOW_SPACE 0U
 
 #endif
@@ -146,6 +148,7 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+static void emit_memory_thunk(bal_tier1_compiler_t *compiler);
 static void translate_pstate(bal_tier1_compiler_t *compiler, uint32_t instruction);
 static void emit_store_cpu_word(bal_tier1_compiler_t *compiler, int32_t offset, uint32_t value);
 static bool translate_pointer_authentication(bal_tier1_compiler_t         *compiler,
@@ -279,7 +282,8 @@ bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
         return error;
     }
 
-    return BAL_SUCCESS;
+    emit_memory_thunk(compiler);
+    return compiler->assembler.status;
 }
 
 void
@@ -294,6 +298,7 @@ bal_tier1_compiler_reset(bal_tier1_compiler_t *compiler)
     reset_register_allocator(compiler);
     bal_sliding_window_reset(&compiler->window);
     bal_x86_assembler_reset(&compiler->assembler);
+    emit_memory_thunk(compiler);
 }
 
 /// Translates up to `max_instructions` instructions at `guest_address` into one block. When an
@@ -4329,10 +4334,12 @@ translate_pstate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
 /// address of `size` contiguous bytes at `guest_address`, or NULL when the memory interface does
 /// not map all of them.
 static const uint8_t *
-translate_data_address(const bal_memory_interface_t *memory_interface,
-                       const bal_guest_address_t     guest_address,
-                       const uint64_t                size)
+translate_data_address(const bal_cpu_t          *cpu,
+                       const bal_guest_address_t guest_address,
+                       const uint64_t            size)
 {
+    const bal_memory_interface_t *memory_interface
+        = (const bal_memory_interface_t *)(uintptr_t)cpu->jit_memory_interface;
     size_t         available_bytes = 0U;
     const uint8_t *host_address
         = memory_interface->translate((void *)memory_interface, guest_address, &available_bytes);
@@ -4342,7 +4349,35 @@ translate_data_address(const bal_memory_interface_t *memory_interface,
         return NULL;
     }
 
+    // Cache the page when the memory interface maps all of it contiguously, so the next accesses
+    // to it stay in translated code.
+    const bal_guest_address_t page_base
+        = guest_address & ~(bal_guest_address_t)(BAL_TIER1_GUEST_PAGE_SIZE - 1U);
+    size_t         page_bytes = 0U;
+    const uint8_t *page_host
+        = memory_interface->translate((void *)memory_interface, page_base, &page_bytes);
+
+    if (page_host != NULL && page_bytes >= BAL_TIER1_GUEST_PAGE_SIZE
+        && page_host + (guest_address - page_base) == host_address)
+    {
+        bal_tier1_tlb_entry_t *tlb   = (bal_tier1_tlb_entry_t *)(uintptr_t)cpu->jit_memory_tlb;
+        const uint64_t         page  = guest_address >> 12U;
+        bal_tier1_tlb_entry_t *entry = &tlb[page & (BAL_TIER1_TLB_ENTRIES - 1U)];
+        entry->page                  = page;
+        entry->host_offset           = (uint64_t)(uintptr_t)page_host - page_base;
+    }
+
     return host_address;
+}
+
+void
+bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb)
+{
+    for (uint32_t i = 0U; i < BAL_TIER1_TLB_ENTRIES; ++i)
+    {
+        tlb[i].page        = BAL_TIER1_TLB_EMPTY_PAGE;
+        tlb[i].host_offset = 0U;
+    }
 }
 
 /// Calls the C function at `function`, whose arguments are already in the ABI argument
@@ -4488,42 +4523,118 @@ emit_memory_helper_call(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
 }
 
-/// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register,
-/// by calling translate_data_address() for `size` bytes, and raises a data abort when the address
-/// is not mapped.
+/// Emits the TLB miss handler every block shares, at the start of the code buffer. It takes the
+/// guest address in BAL_X86_REGISTER_ZERO and the access size in BAL_X86_REGISTER_DISCARD_RESULT,
+/// calls translate_data_address(), and returns the host address, or zero, in
+/// BAL_X86_REGISTER_ZERO with every guest register preserved. translate_data_address() does no
+/// floating point, so MXCSR can stay as it is.
+static void
+emit_memory_thunk(bal_tier1_compiler_t *BAL_RESTRICT compiler)
+{
+    static const bal_x86_register_t CALLER_SAVED[]
+        = { BAL_X86_RAX, BAL_X86_RCX, BAL_X86_RDX, BAL_X86_R8, BAL_X86_R9, BAL_X86_R10 };
+    const size_t                      count     = sizeof(CALLER_SAVED) / sizeof(CALLER_SAVED[0]);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    for (size_t i = 0U; i < count; ++i)
+    {
+        bal_x86_emit_push_r64(assembler, CALLER_SAVED[i]);
+    }
+
+    // The return address and six registers leave RSP 8 bytes off the 16-byte alignment calls
+    // need.
+    bal_x86_emit_sub_r64_imm32(assembler, BAL_X86_RSP, 8 + (int32_t)BAL_X86_ABI_SHADOW_SPACE);
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_ABI_ARG3, BAL_X86_REGISTER_DISCARD_RESULT);
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_ABI_ARG2, BAL_X86_REGISTER_ZERO);
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+    bal_x86_emit_mov_r64_imm64(
+        assembler, BAL_X86_RAX, (uint64_t)(uintptr_t)&translate_data_address);
+    bal_x86_emit_call_r64(assembler, BAL_X86_RAX);
+    bal_x86_emit_add_r64_imm32(assembler, BAL_X86_RSP, 8 + (int32_t)BAL_X86_ABI_SHADOW_SPACE);
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_REGISTER_ZERO, BAL_X86_RAX);
+
+    for (size_t i = count; i > 0U; --i)
+    {
+        bal_x86_emit_pop_r64(assembler, CALLER_SAVED[i - 1U]);
+    }
+
+    bal_x86_emit_ret(assembler);
+}
+
+/// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register for
+/// an access of `size` bytes, and raises a data abort when the address is not mapped.
 ///
-/// Dirty guest registers are written back and the register cache is emptied first, since the
-/// call may clobber every caller-saved register.
+/// The page is looked up in the software TLB (bal_cpu_t::jit_memory_tlb) first; an access within
+/// a cached page needs no call. Otherwise translate_data_address() asks the memory interface and
+/// caches the page. The register cache is the same on both paths, so the guest registers stay in
+/// their host registers across the access.
 static void
 emit_translate_data_address(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                             const bal_memory_interface_t *BAL_RESTRICT memory_interface,
                             const uint64_t                             size,
                             const bal_guest_address_t                  guest_address)
 {
-    const bal_x86_register_t address = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t          address   = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t          scratch   = BAL_X86_REGISTER_DISCARD_RESULT;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    (void)memory_interface;
 
+    // The guest registers stay in their host registers on both paths: the fast path saves the
+    // two it borrows, and the slow path the caller-saved ones the call may clobber.
+    bal_sliding_window_flush_all(&compiler->window);
+    bal_x86_emit_push_r64(assembler, BAL_X86_RAX);
+    bal_x86_emit_push_r64(assembler, BAL_X86_RCX);
+
+    // RAX = page number, RCX = its TLB entry.
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RAX, address);
+    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RAX, 12U);
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RCX, BAL_X86_RAX);
+    bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_RCX, 56U);
+    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RCX, 52U);
+    bal_x86_emit_load_r64_rbp_offset(assembler, scratch, offsetof(bal_cpu_t, jit_memory_tlb));
+    bal_x86_emit_add_r64_r64(assembler, BAL_X86_RCX, scratch);
+
+    // The entry must hold this page, and the access must not cross into the next one.
+    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RCX);
+    bal_x86_emit_xor_r64_r64(assembler, scratch, BAL_X86_RAX);
+    const size_t is_other_page = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    bal_x86_emit_mov_r64_r64(assembler, scratch, address);
+    bal_x86_emit_shl_r64_imm8(assembler, scratch, 52U);
+    bal_x86_emit_shr_r64_imm8(assembler, scratch, 52U);
+    bal_x86_emit_add_r64_imm32(assembler, scratch, (int32_t)size - 1);
+    bal_x86_emit_shr_r64_imm8(assembler, scratch, 12U);
+    const size_t is_crossing = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    bal_x86_emit_add_r64_imm32(assembler, BAL_X86_RCX, 8);
+    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RCX);
+    bal_x86_emit_add_r64_r64(assembler, address, scratch);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_RCX);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_RAX);
+    const size_t is_translated = emit_forward_jump(assembler, false, BAL_X86_COND_E);
+
+    // Slow path: translate_data_address() through the memory interface, which also fills the
+    // TLB entry.
+    patch_forward_jump(assembler, is_other_page, true);
+    patch_forward_jump(assembler, is_crossing, true);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_RCX);
+    bal_x86_emit_pop_r64(assembler, BAL_X86_RAX);
+    bal_x86_emit_mov_r64_imm64(assembler, scratch, size);
+    bal_x86_emit_call_rel32(assembler, (int32_t)(0 - (int64_t)(assembler->offset + 5U)));
+
+    // An unmapped address ends the block with a data abort, after the guest registers are
+    // written back.
+    bal_x86_emit_test_r64_r64(assembler, address, address);
+    const size_t is_mapped = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
     flush_dirty_registers(compiler);
-    reset_register_allocator(compiler);
+    bal_sliding_window_flush_all(&compiler->window);
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, guest_address);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
+    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+    emit_block_exit(compiler);
 
-    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG2, address);
-
-    const bal_x86_macro_t interface_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_ABI_ARG1,
-        .immediate_or_offset = (uint64_t)(uintptr_t)memory_interface,
-    };
-    bal_sliding_window_push(&compiler->window, interface_macro);
-
-    const bal_x86_macro_t size_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_ABI_ARG3,
-        .immediate_or_offset = size,
-    };
-    bal_sliding_window_push(&compiler->window, size_macro);
-
-    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&translate_data_address);
-    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, address, BAL_X86_RAX);
-    emit_data_abort_if_zero(compiler, address, guest_address);
+    patch_forward_jump(assembler, is_mapped, true);
+    patch_forward_jump(assembler, is_translated, false);
 }
 
 /// Puts the address formed by a base register (the stack pointer for register 31) plus a signed

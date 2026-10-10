@@ -63,13 +63,17 @@ typedef struct
         atomic_bool is_executing;
         atomic_bool stop_requested;
         atomic_bool clear_cache_requested;
-        char        pad1[61];
+        atomic_bool invalidate_memory_requested;
+        char        pad1[60];
     } thread_state;
 
     BAL_ALIGNED(64) block_cache_set_t block_cache[BLOCK_CACHE_SETS];
 
     /// The blocks indirect branches jump to directly; see bal_tier1_lookup_entry_t.
     BAL_ALIGNED(64) bal_tier1_lookup_entry_t lookup_table[BAL_TIER1_LOOKUP_ENTRIES];
+
+    /// The guest pages loads and stores reach directly; see bal_tier1_tlb_entry_t.
+    BAL_ALIGNED(64) bal_tier1_tlb_entry_t memory_tlb[BAL_TIER1_TLB_ENTRIES];
 } internal_engine_state_t;
 
 // Disable address sanitizers when executing jit code because it introduces very subtle but
@@ -286,6 +290,12 @@ bal_engine_run_thread(bal_engine_t *engine)
     uint64_t link_site            = 0U;
     engine->cpu->jit_lookup_table = (uint64_t)(uintptr_t)internal_engine_state->lookup_table;
 
+    // The host may have changed the guest's memory map since the last run, so the TLB starts
+    // empty; see bal_engine_invalidate_memory() for changes while the engine runs.
+    engine->cpu->jit_memory_tlb       = (uint64_t)(uintptr_t)internal_engine_state->memory_tlb;
+    engine->cpu->jit_memory_interface = (uint64_t)(uintptr_t)engine->memory_interface;
+    bal_tier1_tlb_clear(internal_engine_state->memory_tlb);
+
     while (true)
     {
         // The requests that made chained blocks return are looked at below.
@@ -324,6 +334,14 @@ bal_engine_run_thread(bal_engine_t *engine)
             atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
                                   false,
                                   memory_order_release);
+        }
+
+        if (BAL_UNLIKELY(atomic_exchange_explicit(
+                &internal_engine_state->thread_state.invalidate_memory_requested,
+                false,
+                memory_order_acq_rel)))
+        {
+            bal_tier1_tlb_clear(internal_engine_state->memory_tlb);
         }
 
         if (engine->flags & BAL_ENGINE_FLAG_INTERRUPT_PENDING)
@@ -623,6 +641,21 @@ bal_engine_clear_cache(bal_engine_t *engine)
         = (internal_engine_state_t *)engine->engine_state;
     atomic_store_explicit(
         &engine_state->thread_state.clear_cache_requested, true, memory_order_release);
+    bal_engine_request_exit(engine);
+}
+
+void
+bal_engine_invalidate_memory(bal_engine_t *engine)
+{
+    if (BAL_UNLIKELY(NULL == engine) || BAL_UNLIKELY(NULL == engine->engine_state))
+    {
+        return;
+    }
+
+    internal_engine_state_t *BAL_RESTRICT engine_state
+        = (internal_engine_state_t *)engine->engine_state;
+    atomic_store_explicit(
+        &engine_state->thread_state.invalidate_memory_requested, true, memory_order_release);
     bal_engine_request_exit(engine);
 }
 

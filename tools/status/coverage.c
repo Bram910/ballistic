@@ -14,6 +14,9 @@
 //! - `unverified`: tier 1 translated the samples but Unicorn could not run any of them,
 //! - `todo`: tier 1 rejected every sample.
 //!
+//! Pointer authentication runs with random keys, key enables (SCTLR_EL1) and address layouts
+//! (TCR_EL1), set in both engines.
+//!
 //! Half of the general purpose registers hold addresses inside a mapped data area, so loads and
 //! stores mostly reach memory. A memory fault or another guest exception, such as an SVC, raised
 //! by both engines is a match when it is the same exception and the registers agree, as in the
@@ -63,7 +66,51 @@ typedef struct
     uint32_t nzcv;
     /// The bal_exception_t raised, or BAL_EXCEPTION_NONE.
     uint32_t exception;
+    /// The pointer authentication keys and the SCTLR_EL1 and TCR_EL1 values, as in bal_cpu_t.
+    uint64_t pac_keys[5][2];
+    uint64_t sctlr_el1;
+    uint64_t tcr_el1;
+    /// Whether Unicorn needs the pointer authentication registers set.
+    uint64_t has_pac_state;
 } state_t;
+
+/// SCTLR_EL1 as Unicorn resets it, without the key enables.
+#define UNICORN_SCTLR_EL1 0xC50838ULL
+
+static void
+write_system_register(uc_engine *engine,
+                      uint32_t   op0,
+                      uint32_t   op1,
+                      uint32_t   crn,
+                      uint32_t   crm,
+                      uint32_t   op2,
+                      uint64_t   value)
+{
+    uc_arm64_cp_reg reg
+        = { .crn = crn, .crm = crm, .op0 = op0, .op1 = op1, .op2 = op2, .val = value };
+    (void)uc_reg_write(engine, UC_ARM64_REG_CP_REG, &reg);
+}
+
+/// Sets the keys, SCTLR_EL1 and TCR_EL1 in Unicorn, with SCR_EL3 and HCR_EL2 set (non-secure,
+/// API and APK) so that pointer authentication does not trap to EL2 or EL3.
+static void
+write_pac_state(uc_engine *engine, const state_t *state)
+{
+    write_system_register(engine, 3, 6, 1, 1, 0, (3ULL << 16U) | (1ULL << 10U) | 1ULL);
+    write_system_register(engine, 3, 4, 1, 1, 0, (3ULL << 40U) | (1ULL << 31U));
+    write_system_register(engine, 3, 0, 1, 0, 0, UNICORN_SCTLR_EL1 | state->sctlr_el1);
+    write_system_register(engine, 3, 0, 2, 0, 2, state->tcr_el1);
+
+    // APIAKey, APIBKey, APDAKey, APDBKey and APGAKey: CRm 1, 1, 2, 2, 3 and op2 0 or 2 for the
+    // low half, plus one for the high half.
+    for (uint32_t key = 0U; key < 5U; ++key)
+    {
+        const uint32_t crm = key < 2U ? 1U : (key < 4U ? 2U : 3U);
+        const uint32_t op2 = 1U == key || 3U == key ? 2U : 0U;
+        write_system_register(engine, 3, 0, 2, crm, op2, state->pac_keys[key][0]);
+        write_system_register(engine, 3, 0, 2, crm, op2 + 1U, state->pac_keys[key][1]);
+    }
+}
 
 static uint64_t g_random_state = 0x2545F4914F6CDD1DULL;
 static uint8_t  g_initial_memory[GUEST_MEMORY_SIZE];
@@ -103,6 +150,11 @@ run_unicorn(uint32_t instruction, state_t *state)
     uc_hook  exception_hook   = 0U;
     (void)uc_hook_add(
         engine, &exception_hook, UC_HOOK_INTR, (void *)on_exception, &exception_number, 1U, 0U);
+
+    if (0U != state->has_pac_state)
+    {
+        write_pac_state(engine, state);
+    }
 
     (void)memcpy(g_unicorn_memory, g_initial_memory, sizeof(g_unicorn_memory));
     (void)memcpy(g_unicorn_memory, &instruction, sizeof(instruction));
@@ -194,10 +246,13 @@ run_ballistic(uint32_t instruction, state_t *state)
     (void)memset(&cpu, 0, sizeof(cpu));
     (void)memcpy(cpu.x, state->x, sizeof(cpu.x));
     (void)memcpy(cpu.v, state->v, sizeof(cpu.v));
-    cpu.flag_n = (uint8_t)((state->nzcv >> 31U) & 1U);
-    cpu.flag_z = (uint8_t)((state->nzcv >> 30U) & 1U);
-    cpu.flag_c = (uint8_t)((state->nzcv >> 29U) & 1U);
-    cpu.flag_v = (uint8_t)((state->nzcv >> 28U) & 1U);
+    (void)memcpy(cpu.pac_keys, state->pac_keys, sizeof(cpu.pac_keys));
+    cpu.sctlr_el1 = state->sctlr_el1;
+    cpu.tcr_el1   = state->tcr_el1;
+    cpu.flag_n    = (uint8_t)((state->nzcv >> 31U) & 1U);
+    cpu.flag_z    = (uint8_t)((state->nzcv >> 30U) & 1U);
+    cpu.flag_c    = (uint8_t)((state->nzcv >> 29U) & 1U);
+    cpu.flag_v    = (uint8_t)((state->nzcv >> 28U) & 1U);
 
     bal_engine_t engine;
     (void)memset(&engine, 0, sizeof(engine));
@@ -248,6 +303,217 @@ random_register(void)
     return 0U != (next_random() % 4U) ? address & ~0xFULL : address;
 }
 
+/// A random pointer for pointer authentication: canonical in 48 bits, with a top byte, or random.
+static uint64_t
+random_pointer(void)
+{
+    switch (next_random() % 5U)
+    {
+        case 0:
+            return random_register();
+        case 1:
+            return next_random() & 0x0000FFFFFFFFFFFFULL;
+        case 2:
+            return next_random() | 0xFFFF000000000000ULL;
+        case 3:
+            return (next_random() & 0x0000FFFFFFFFFFFFULL) | (next_random() << 56U);
+        default:
+            return next_random();
+    }
+}
+
+/// Whether the PAC field of `pointer`, as AddPAC() sees it, holds copies of bit 55 only.
+static bool
+is_canonical_pointer(const state_t *state, const uint64_t pointer, const bool is_data)
+{
+    const bool     is_upper = 0U != ((pointer >> 55U) & 1U);
+    const uint64_t tcr      = state->tcr_el1;
+    const bool     tbi      = 0U != ((tcr >> (is_upper ? 38U : 37U)) & 1U);
+    const bool     tbid     = 0U != ((tcr >> (is_upper ? 52U : 51U)) & 1U);
+    const uint32_t bottom   = 64U - ((uint32_t)(tcr >> (is_upper ? 16U : 0U)) & 0x3FU);
+    const uint32_t top      = tbi && (is_data || !tbid) ? 55U : 63U;
+    const uint64_t field    = (~0ULL >> (63U - top)) & (~0ULL << bottom);
+    return 0U == (pointer & field) || field == (pointer & field);
+}
+
+/// The pointer authentication cases Unicorn (QEMU 5.0) cannot verify: it corrupts bit 63 or 55
+/// rather than bit 62 or 54 of the code it adds to a pointer with bad extension bits and picks
+/// the range of such a pointer differently, it does not strip with XPAC* while every key is
+/// disabled, and LDRAA or LDRAB with writeback to their own target register is CONSTRAINED
+/// UNPREDICTABLE.
+static bool
+is_unverifiable_pac(const uint32_t instruction, const state_t *state)
+{
+    if (0xDAC10000U == (instruction & 0xFFFF0000U))
+    {
+        const uint32_t opcode = (instruction >> 10U) & 0x3FU;
+        const uint32_t rd     = instruction & 0x1FU;
+
+        if (opcode < 4U || (opcode >= 8U && opcode < 0xCU))
+        {
+            return false == is_canonical_pointer(state, state->x[rd], 0U != (opcode & 2U));
+        }
+
+        return opcode >= 0x10U && 0U == state->sctlr_el1;
+    }
+
+    // PACIA1716, PACIASP and the other signing hints (op2 bit 2 clear).
+    if (0xD503211FU == (instruction & 0xFFFFFD1FU) && 0U == ((instruction >> 7U) & 1U))
+    {
+        const uint32_t target = 0U == ((instruction >> 9U) & 1U) ? 17U : 30U;
+        return false == is_canonical_pointer(state, state->x[target], false);
+    }
+
+    if (0xD50320FFU == instruction)
+    {
+        return 0U == state->sctlr_el1;
+    }
+
+    if (0xF8200C00U == (instruction & 0xFF200C00U))
+    {
+        return (instruction & 0x1FU) == ((instruction >> 5U) & 0x1FU);
+    }
+
+    return false;
+}
+
+/// The PAC* instruction that signs the pointer `instruction` authenticates, with the same key and
+/// modifier, and the register it signs (`target`). Zero when there is none.
+static uint32_t
+signing_instruction(const uint32_t instruction, uint32_t *target)
+{
+    const uint32_t rn = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd = instruction & 0x1FU;
+
+    // AUTIA, AUTIB, AUTDA, AUTDB (opcode 0001xx) and their Z forms (0011xx).
+    if (0xDAC10000U == (instruction & 0xFFFF0000U))
+    {
+        const uint32_t opcode = (instruction >> 10U) & 0x3FU;
+        *target               = rd;
+
+        if (opcode >= 0x4U && opcode <= 0x7U)
+        {
+            return 0xDAC10000U | ((opcode - 4U) << 10U) | (rn << 5U) | rd;
+        }
+
+        if (opcode >= 0xCU && opcode <= 0xFU)
+        {
+            return 0xDAC10000U | ((opcode - 4U) << 10U) | (31U << 5U) | rd;
+        }
+
+        return 0U;
+    }
+
+    // AUTIA1716 and AUTIB1716 sign X17 with X16; AUTIASP, AUTIAZ and the B forms X30 with SP or
+    // zero.
+    if (0xD503211FU == (instruction & 0xFFFFFD1FU))
+    {
+        const uint32_t op2 = (instruction >> 5U) & 7U;
+        const uint32_t key = (op2 >> 1U) & 1U;
+
+        if (op2 < 4U)
+        {
+            return 0U;
+        }
+
+        if (0U == ((instruction >> 9U) & 1U))
+        {
+            *target = 17U;
+            return 0xDAC10000U | (key << 10U) | (16U << 5U) | 17U;
+        }
+
+        *target = 30U;
+        return 0U != (op2 & 1U) ? 0xDAC10000U | (key << 10U) | (31U << 5U) | 30U
+                                : 0xDAC10000U | ((8U + key) << 10U) | (31U << 5U) | 30U;
+    }
+
+    // LDRAA and LDRAB: PACDZA or PACDZB on the base.
+    if (0xF8200400U == (instruction & 0xFF200400U))
+    {
+        const uint32_t key = 2U + ((instruction >> 23U) & 1U);
+        *target            = rn;
+        return 31U == rn ? 0U : 0xDAC10000U | ((8U + key) << 10U) | (31U << 5U) | rn;
+    }
+
+    // The authenticated branches: RETAA and RETAB sign X30 with SP, the others Xn with Xm, SP or
+    // zero.
+    if (0xD61F0800U == (instruction & 0xFE9FF800U))
+    {
+        const uint32_t key = (instruction >> 10U) & 1U;
+        const uint32_t rm  = instruction & 0x1FU;
+
+        if (0x00400000U == (instruction & 0x00600000U))
+        {
+            *target = 30U;
+            return 0xDAC10000U | (key << 10U) | (31U << 5U) | 30U;
+        }
+
+        *target = rn;
+
+        if (31U == rn)
+        {
+            return 0U;
+        }
+
+        return 0U != ((instruction >> 24U) & 1U)
+                   ? 0xDAC10000U | (key << 10U) | (rm << 5U) | rn
+                   : 0xDAC10000U | ((8U + key) << 10U) | (31U << 5U) | rn;
+    }
+
+    return 0U;
+}
+
+/// Gives a pointer authentication sample random pointers, keys, enables and address layout.
+static void
+randomize_pac_state(const uint32_t instruction, state_t *state)
+{
+    static const uint64_t ENABLES[4] = { 1ULL << 31U, 1ULL << 30U, 1ULL << 27U, 1ULL << 13U };
+
+    state->has_pac_state = 1U;
+
+    for (uint32_t r = 0U; r < 32U; ++r)
+    {
+        state->x[r] = random_pointer();
+    }
+
+    for (uint32_t key = 0U; key < 5U; ++key)
+    {
+        state->pac_keys[key][0] = next_random();
+        state->pac_keys[key][1] = next_random();
+    }
+
+    for (uint32_t key = 0U; key < 4U; ++key)
+    {
+        state->sctlr_el1 |= 0U != (next_random() % 4U) ? ENABLES[key] : 0U;
+    }
+
+    // T0SZ and T1SZ in 16 to 39, TBI0, TBI1, TBID0 and TBID1.
+    state->tcr_el1 = (16U + next_random() % 24U) | ((16U + next_random() % 24U) << 16U)
+                     | ((next_random() & 3U) << 37U) | ((next_random() & 3U) << 51U);
+
+    // Unicorn authenticates LDRAA and LDRAB against SP rather than zero.
+    if (0xF8200400U == (instruction & 0xFF200400U))
+    {
+        state->x[31] = 0U;
+    }
+
+    // Half of the authentications get a pointer Unicorn signed, so that they can succeed and the
+    // branches land in mapped memory.
+    uint32_t       target = 0U;
+    const uint32_t signer = signing_instruction(instruction, &target);
+
+    if (signer != 0U && 0U != (next_random() & 1U))
+    {
+        state->x[target]     = random_register();
+        state_t signed_state = *state;
+
+        if (RUN_OK == run_unicorn(signer, &signed_state))
+        {
+            state->x[target] = signed_state.x[target];
+        }
+    }
+}
+
 int
 main(void)
 {
@@ -287,7 +553,13 @@ main(void)
                 initial.v[r][1] = next_random();
             }
 
-            initial.nzcv     = (uint32_t)(next_random() & 0xFU) << 28U;
+            initial.nzcv = (uint32_t)(next_random() & 0xFU) << 28U;
+
+            if (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode)
+            {
+                randomize_pac_state(instruction, &initial);
+            }
+
             state_t expected = initial;
             state_t actual   = initial;
 
@@ -307,7 +579,9 @@ main(void)
             const bool is_known_unicorn_bug
                 = (0x38204000U == (instruction & 0x3F20EC00U) && (instruction >> 30U) != 3U)
                   || (0x5F00FC00U == (instruction & 0xDF80FC00U)
-                      && 1U == ((instruction >> 20U) & 0x7U));
+                      && 1U == ((instruction >> 20U) & 0x7U))
+                  || (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode
+                      && true == is_unverifiable_pac(instruction, &initial));
 
             if (true == is_known_unicorn_bug)
             {

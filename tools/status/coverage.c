@@ -463,6 +463,17 @@ signing_instruction(const uint32_t instruction, uint32_t *target)
     return 0U;
 }
 
+/// MRS, MSR (register) and MSR (immediate) of DIT and SSBS, which the guest CPU has and Unicorn
+/// (QEMU 5.0) does not.
+static bool
+is_dit_or_ssbs(const uint32_t instruction)
+{
+    const uint32_t register_access = instruction & 0xFFDFFFE0U;
+    const uint32_t immediate       = instruction & 0xFFFFF0FFU;
+    return 0xD51B42A0U == register_access || 0xD51B42C0U == register_access
+           || 0xD503405FU == immediate || 0xD503403FU == immediate;
+}
+
 /// Gives a pointer authentication sample random pointers, keys, enables and address layout.
 static void
 randomize_pac_state(const uint32_t instruction, state_t *state)
@@ -581,7 +592,8 @@ main(void)
                   || (0x5F00FC00U == (instruction & 0xDF80FC00U)
                       && 1U == ((instruction >> 20U) & 0x7U))
                   || (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode
-                      && true == is_unverifiable_pac(instruction, &initial));
+                      && true == is_unverifiable_pac(instruction, &initial))
+                  || true == is_dit_or_ssbs(instruction);
 
             if (true == is_known_unicorn_bug)
             {

@@ -21,13 +21,17 @@ extern "C"
         int8_t               x86_to_arm[16];
         uint32_t             is_dirty;
         uint8_t              eviction_cursor;
-        char                 pad;
+        /// Whether the block being translated has switched MXCSR to the guest floating-point
+        /// environment, which every later exit must undo.
+        bool is_guest_mxcsr_active;
         /// Bitmask of the x86 registers allocated for the guest instruction being translated.
         /// They are never chosen for eviction, so an instruction cannot evict its own operands.
         uint16_t                 pinned_registers;
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
-        uint32_t                 pad1;
+        /// Whether the host has FMA3, which the fused multiply-add fast paths need.
+        bool    has_fma;
+        uint8_t pad1[3];
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");

@@ -74,6 +74,20 @@ static void terminate_block_conditional(bal_tier1_compiler_t *compiler,
 
 static void emit_epilogue(bal_x86_assembler_t *assembler);
 
+static void emit_block_exit(bal_tier1_compiler_t *compiler);
+
+static size_t emit_forward_jump(bal_x86_assembler_t *assembler,
+                                bool                 is_conditional,
+                                bal_x86_condition_t  condition);
+
+static void patch_forward_jump(bal_x86_assembler_t *assembler, size_t jump, bool is_conditional);
+
+static void emit_fold_mxcsr_flags(bal_x86_assembler_t *assembler);
+
+static void emit_load_guest_mxcsr(bal_x86_assembler_t *assembler);
+
+static bool emit_fast_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
 static uint32_t extract_operand_value(uint32_t instruction, const bal_decoder_operand_t *operand);
 
 static void translate_add_sub_imm(bal_tier1_compiler_t                     *compiler,
@@ -241,6 +255,7 @@ bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
     }
 
     compiler->debug_context = debug_context;
+    compiler->has_fma       = 0 != __builtin_cpu_supports("fma");
     bal_error_t error
         = bal_x86_assembler_init(&compiler->assembler, executable_buffer, buffer_size);
 
@@ -312,7 +327,8 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                  (unsigned long long)guest_address,
                  max_instructions);
     reset_register_allocator(compiler);
-    void *host_address = compiler->assembler.rx_buffer + compiler->assembler.offset;
+    compiler->is_guest_mxcsr_active = false;
+    void *host_address              = compiler->assembler.rx_buffer + compiler->assembler.offset;
 
     // Debug tracking.
     const bal_guest_address_t guest_address_base           = guest_address;
@@ -1195,7 +1211,7 @@ terminate_block(bal_tier1_compiler_t     *compiler,
     }
 
     BAL_LOG_TRACE(&bal_thread_logger, "Restoring callee-saved registers and emitting RET");
-    emit_epilogue(&compiler->assembler);
+    emit_block_exit(compiler);
 }
 
 void
@@ -1210,29 +1226,10 @@ terminate_block_conditional(bal_tier1_compiler_t     *compiler,
     }
 
     bal_sliding_window_flush_all(&compiler->window);
-    size_t         dirty_count = 0;
-    const uint32_t dirty_mask  = compiler->is_dirty;
 
-    for (uint8_t arm_register = 0; arm_register < 32; ++arm_register)
-    {
-        if (dirty_mask & (1U << arm_register))
-        {
-            ++dirty_count;
-        }
-    }
-
-    // STORE macro: 7 bytes (REX + Opcode + ModRM + Disp32)
-    // MOV RAX, IMM64: 5 bytes if <= 32-bit, 10 bytes if > 32-bit
-    // MOV [RBP+PC], RAX: 7 bytes (REX + Opcode + ModRM + Disp32)
-    // POP R15-R12: 8 bytes (4 registers x 2 bytes [REX.B + Opcode]
-    // POP RBP: 1 byte
-    // RET: 1 byte
-    const size_t mov_fallthrough_size = (fallthrough_pc <= 0xFFFFFFFFULL) ? 5 : 10;
-    const size_t epilogue_size        = (dirty_count * 7) + mov_fallthrough_size + 7 + 8 + 1 + 1;
-
-    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
-    const int32_t                     jump_offset = (int32_t)epilogue_size;
-    bal_x86_emit_jcc_rel32(assembler, condition, jump_offset);
+    // The jump over the fallthrough exit is patched once the exit's size is known.
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    const size_t                      jump      = emit_forward_jump(assembler, true, condition);
 
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
@@ -1240,17 +1237,60 @@ terminate_block_conditional(bal_tier1_compiler_t     *compiler,
     // Emit fallthrough epilogue.
     bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, fallthrough_pc);
     bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_epilogue(&compiler->assembler);
+    emit_block_exit(compiler);
+    patch_forward_jump(assembler, jump, true);
     flush_dirty_registers(compiler);
     bal_sliding_window_flush_all(&compiler->window);
 
     // Emit taken epilogue.
     bal_x86_emit_mov_r64_imm64(&compiler->assembler, BAL_X86_RAX, taken_pc);
     bal_x86_emit_store_r64_rbp_offset(&compiler->assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    emit_epilogue(&compiler->assembler);
+    emit_block_exit(compiler);
 }
 
 /// Restores the callee-saved registers pushed by the block prologue and returns to the host.
+/// Emits a jump with a zero 32-bit displacement, a JCC on `condition` when `is_conditional`, and
+/// returns its offset for patch_forward_jump().
+static size_t
+emit_forward_jump(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const bool                        is_conditional,
+                  const bal_x86_condition_t         condition)
+{
+    const size_t offset = assembler->offset;
+
+    if (true == is_conditional)
+    {
+        bal_x86_emit_jcc_rel32(assembler, condition, 0);
+    }
+    else
+    {
+        bal_x86_emit_jmp_rel32(assembler, 0);
+    }
+
+    return offset;
+}
+
+/// Points the jump emitted at `jump` by emit_forward_jump() to the current offset.
+static void
+patch_forward_jump(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const size_t                      jump,
+                   const bool                        is_conditional)
+{
+    if (assembler->status != BAL_SUCCESS)
+    {
+        return;
+    }
+
+    // JCC rel32 is 0F 8x and four bytes; JMP rel32 is E9 and four bytes.
+    const size_t   field    = jump + (true == is_conditional ? 2U : 1U);
+    const uint32_t distance = (uint32_t)(assembler->offset - (field + 4U));
+    uint8_t       *bytes    = assembler->buffer + field;
+    bytes[0]                = (uint8_t)distance;
+    bytes[1]                = (uint8_t)(distance >> 8U);
+    bytes[2]                = (uint8_t)(distance >> 16U);
+    bytes[3]                = (uint8_t)(distance >> 24U);
+}
+
 static void
 emit_epilogue(bal_x86_assembler_t *assembler)
 {
@@ -1428,7 +1468,7 @@ translate_b_cond(bal_tier1_compiler_t *BAL_RESTRICT compiler,
             bal_sliding_window_flush_all(&compiler->window);
             bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, taken_pc);
             bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-            emit_epilogue(assembler);
+            emit_block_exit(compiler);
             return;
         default:
             BAL_LOG_ERROR(&bal_thread_logger, "Unsupported B.cond condition: %u", cond);
@@ -3895,6 +3935,14 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         return;
     }
 
+    // FPSR includes the flags that inline floating point has raised into MXCSR in this block.
+    if (SYSTEM_REGISTER_FPSR == system_register && true == compiler->is_guest_mxcsr_active)
+    {
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_fold_mxcsr_flags(&compiler->assembler);
+        emit_load_guest_mxcsr(&compiler->assembler);
+    }
+
     const bal_x86_register_t value       = BAL_X86_REGISTER_ZERO;
     const bal_x86_register_t scratch     = BAL_X86_REGISTER_DISCARD_RESULT;
     size_t                   offset      = 0U;
@@ -4121,6 +4169,15 @@ translate_data_address(const bal_memory_interface_t *memory_interface,
 static void
 emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t function)
 {
+    // The helpers use the host floating-point environment themselves: the flags the block has
+    // raised so far go to FPSR first, and the guest environment is reloaded after the call.
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_fold_mxcsr_flags(&compiler->assembler);
+        emit_load_guest_mxcsr(&compiler->assembler);
+    }
+
     if (BAL_X86_ABI_SHADOW_SPACE != 0U)
     {
         const bal_x86_macro_t reserve_macro = {
@@ -4148,6 +4205,12 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
         };
         bal_sliding_window_push(&compiler->window, release_macro);
     }
+
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_load_guest_mxcsr(&compiler->assembler);
+    }
 }
 
 /// Stops the block with a data abort when `result` is zero: the guest PC is set to this
@@ -4170,7 +4233,7 @@ emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
     bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
     bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
-    emit_epilogue(assembler);
+    emit_block_exit(compiler);
 
     if (BAL_SUCCESS == assembler->status)
     {
@@ -4878,6 +4941,11 @@ translate_atomic(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
 static void
 translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
+    if (true == emit_fast_float(compiler, instruction))
+    {
+        return;
+    }
+
     uint64_t helper = (uint64_t)(uintptr_t)&bal_execute_float;
 
     if (false == bal_is_float_supported(instruction))
@@ -5019,4 +5087,503 @@ translate_system(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
             compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
             return;
     }
+}
+
+// -----------------------------------------------------------------------------
+// Inline floating point and SIMD
+// -----------------------------------------------------------------------------
+
+/// The MXCSR inline floating point runs under: every exception masked, round to nearest, no
+/// flush to zero or denormals are zero, and no flag raised. Guest FPCR = 0 matches it.
+#define GUEST_MXCSR 0x1F80U
+
+#define XMM0 0U
+#define XMM1 1U
+#define XMM2 2U
+#define XMM3 3U
+
+/// Emits `[prefix] [REX.W] 0F opcode` with two register operands and no immediate.
+static void
+emit_sse(bal_x86_assembler_t *BAL_RESTRICT assembler,
+         const uint8_t                     prefix,
+         const bool                        is_64bit,
+         const uint8_t                     opcode,
+         const uint8_t                     reg,
+         const uint8_t                     rm,
+         const char                       *mnemonic)
+{
+    const uint8_t bytes[2] = { 0x0F, opcode };
+    bal_x86_emit_sse_register(assembler, prefix, is_64bit, bytes, 2U, reg, rm, false, 0U, mnemonic);
+}
+
+/// Emits `[prefix] 0F opcode` with two register operands and an 8-bit immediate.
+static void
+emit_sse_immediate(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const uint8_t                     prefix,
+                   const uint8_t                     opcode,
+                   const uint8_t                     reg,
+                   const uint8_t                     rm,
+                   const uint8_t                     immediate,
+                   const char                       *mnemonic)
+{
+    const uint8_t bytes[2] = { 0x0F, opcode };
+    bal_x86_emit_sse_register(
+        assembler, prefix, false, bytes, 2U, reg, rm, true, immediate, mnemonic);
+}
+
+/// Emits `[prefix] 0F opcode` with a register and the memory operand [rbp + offset].
+static void
+emit_sse_memory(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                const uint8_t                     prefix,
+                const uint8_t                     opcode,
+                const uint8_t                     reg,
+                const size_t                      offset,
+                const char                       *mnemonic)
+{
+    const uint8_t bytes[2] = { 0x0F, opcode };
+    bal_x86_emit_sse_rbp_offset(
+        assembler, prefix, false, bytes, 2U, reg, (int32_t)offset, mnemonic);
+}
+
+static void
+emit_ldmxcsr(bal_x86_assembler_t *BAL_RESTRICT assembler, const size_t offset)
+{
+    emit_sse_memory(assembler, 0U, 0xAE, 2U, offset, "ldmxcsr");
+}
+
+static void
+emit_stmxcsr(bal_x86_assembler_t *BAL_RESTRICT assembler, const size_t offset)
+{
+    emit_sse_memory(assembler, 0U, 0xAE, 3U, offset, "stmxcsr");
+}
+
+/// Loads GUEST_MXCSR, which also clears the MXCSR flags.
+static void
+emit_load_guest_mxcsr(bal_x86_assembler_t *BAL_RESTRICT assembler)
+{
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_REGISTER_DISCARD_RESULT, GUEST_MXCSR);
+    bal_x86_emit_store_r32_rbp_offset(
+        assembler, BAL_X86_REGISTER_DISCARD_RESULT, offsetof(bal_cpu_t, jit_mxcsr));
+    emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_mxcsr));
+}
+
+/// ORs the MXCSR exception flags into FPSR: IE, ZE, OE, UE and PE in bits 0 and 2-5 become IOC,
+/// DZC, OFC, UFC and IXC in bits 0-4. DE has no FPSR counterpart while FPCR.FZ is clear. Uses R11
+/// and R13.
+static void
+emit_fold_mxcsr_flags(bal_x86_assembler_t *BAL_RESTRICT assembler)
+{
+    const bal_x86_register_t flags   = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bal_x86_register_t invalid = BAL_X86_REGISTER_ZERO;
+    emit_stmxcsr(assembler, offsetof(bal_cpu_t, jit_mxcsr));
+    bal_x86_emit_load_r64_rbp_offset(assembler, flags, offsetof(bal_cpu_t, jit_mxcsr));
+    bal_x86_emit_mov_r64_r64(assembler, invalid, flags);
+    bal_x86_emit_shl_r64_imm8(assembler, invalid, 63U);
+    bal_x86_emit_shr_r64_imm8(assembler, invalid, 63U);
+    bal_x86_emit_shl_r64_imm8(assembler, flags, 58U);
+    bal_x86_emit_shr_r64_imm8(assembler, flags, 60U);
+    bal_x86_emit_shl_r64_imm8(assembler, flags, 1U);
+    bal_x86_emit_or_r64_r64(assembler, flags, invalid);
+    bal_x86_emit_load_r64_rbp_offset(assembler, invalid, offsetof(bal_cpu_t, fpsr));
+    bal_x86_emit_or_r64_r64(assembler, invalid, flags);
+    bal_x86_emit_store_r64_rbp_offset(assembler, invalid, offsetof(bal_cpu_t, fpsr));
+}
+
+/// Switches MXCSR to GUEST_MXCSR the first time a block runs floating point inline, saving the
+/// host's value for emit_block_exit().
+static void
+emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
+{
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        return;
+    }
+
+    emit_stmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
+    emit_load_guest_mxcsr(&compiler->assembler);
+    compiler->is_guest_mxcsr_active = true;
+}
+
+/// Leaves the block: when it ran floating point inline, the flags go to FPSR and the host MXCSR
+/// comes back first. The sliding window must be flushed.
+static void
+emit_block_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
+{
+    if (true == compiler->is_guest_mxcsr_active)
+    {
+        emit_fold_mxcsr_flags(&compiler->assembler);
+        emit_ldmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
+    }
+
+    emit_epilogue(&compiler->assembler);
+}
+
+/// Starts an inline sequence: the guest registers go back to the cpu structure, since the fast
+/// and slow paths must agree on the register cache, and code is then emitted directly.
+static void
+begin_inline_sequence(bal_tier1_compiler_t *BAL_RESTRICT compiler)
+{
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+    bal_sliding_window_flush_all(&compiler->window);
+}
+
+/// Jumps to the slow path unless FPCR is zero, the only mode inline floating point implements.
+static size_t
+emit_fpcr_check(bal_x86_assembler_t *BAL_RESTRICT assembler)
+{
+    const bal_x86_register_t fpcr = BAL_X86_REGISTER_DISCARD_RESULT;
+    bal_x86_emit_load_r64_rbp_offset(assembler, fpcr, offsetof(bal_cpu_t, fpcr));
+    bal_x86_emit_test_r32_r32(assembler, fpcr, fpcr);
+    return emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+}
+
+/// Loads SIMD&FP register `index` into `xmm`: all 128 bits, or the low 64 with the rest cleared.
+static void
+emit_load_vector(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                 const uint8_t                     xmm,
+                 const uint32_t                    index,
+                 const bool                        is_quad)
+{
+    if (true == is_quad)
+    {
+        emit_sse_memory(assembler, 0U, 0x10, xmm, offsetof(bal_cpu_t, v[index][0]), "movups");
+    }
+    else
+    {
+        emit_sse_memory(assembler, 0xF3, 0x7E, xmm, offsetof(bal_cpu_t, v[index][0]), "movq");
+    }
+}
+
+/// Stores `xmm` to SIMD&FP register `index`: all 128 bits, or the low 64 with the rest cleared.
+static void
+emit_store_vector(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const uint8_t                     xmm,
+                  const uint32_t                    index,
+                  const bool                        is_quad)
+{
+    if (true == is_quad)
+    {
+        emit_sse_memory(assembler, 0U, 0x11, xmm, offsetof(bal_cpu_t, v[index][0]), "movups");
+        return;
+    }
+
+    emit_sse_memory(assembler, 0x66, 0xD6, xmm, offsetof(bal_cpu_t, v[index][0]), "movq");
+    bal_x86_emit_xor_r32_r32(assembler, BAL_X86_REGISTER_ZERO, BAL_X86_REGISTER_ZERO);
+    bal_x86_emit_store_r64_rbp_offset(
+        assembler, BAL_X86_REGISTER_ZERO, (int32_t)offsetof(bal_cpu_t, v[index][1]));
+}
+
+/// Ends an inline sequence with the out-of-line slow path: the jumps in `slow_jumps` lead to a
+/// call of `helper`, which executes the instruction with the exact AArch64 rules.
+static void
+emit_slow_path(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+               const uint32_t                     instruction,
+               const uint64_t                     helper,
+               const size_t                      *slow_jumps,
+               const uint32_t                     slow_jump_count)
+{
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    const size_t                      done = emit_forward_jump(assembler, false, BAL_X86_COND_O);
+
+    for (uint32_t i = 0U; i < slow_jump_count; ++i)
+    {
+        patch_forward_jump(assembler, slow_jumps[i], true);
+    }
+
+    emit_register_helper_call(compiler, instruction, helper);
+    bal_sliding_window_flush_all(&compiler->window);
+    patch_forward_jump(assembler, done, false);
+}
+
+/// FADD, FSUB, FMUL and FDIV (scalar) in single and double precision.
+///
+/// The fast path computes with SSE under GUEST_MXCSR. Its result and MXCSR flags equal the
+/// AArch64 ones when FPCR is zero, except for NaN results, where the NaN rules differ, and results
+/// that round to the smallest normal number, which AArch64 may count as an underflow since it
+/// detects tininess before rounding. Those, and any non-zero FPCR, take the slow path, which
+/// recomputes from the unchanged registers; the flags the fast attempt raised are a subset of the
+/// ones the helper reports.
+static bool
+emit_fast_scalar_arithmetic(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // M 0 S 11110 ftype 1 Rm opcode 10 Rn Rd with opcode 0000-0011.
+    const uint32_t ftype  = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode = (instruction >> 12U) & 0xFU;
+
+    if (0x1E200800U != (instruction & 0xFF200C00U) || ftype > 1U || opcode > 3U)
+    {
+        return false;
+    }
+
+    static const uint8_t     OPERATIONS[4]      = { 0x59, 0x5E, 0x58, 0x5C }; // MUL, DIV, ADD, SUB
+    static const char       *NAMES[4]           = { "mulss", "divss", "addss", "subss" };
+    const bool               is_double          = 1U == ftype;
+    const uint8_t            prefix             = true == is_double ? 0xF2 : 0xF3;
+    const uint32_t           rd                 = instruction & 0x1FU;
+    const uint32_t           rn                 = (instruction >> 5U) & 0x1FU;
+    const uint32_t           rm                 = (instruction >> 16U) & 0x1FU;
+    const bal_x86_register_t result             = BAL_X86_REGISTER_DISCARD_RESULT;
+    const bal_x86_register_t scratch            = BAL_X86_REGISTER_ZERO;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[3];
+
+    begin_inline_sequence(compiler);
+    emit_enter_guest_mxcsr(compiler);
+    slow_jumps[0] = emit_fpcr_check(assembler);
+    emit_sse_memory(assembler, prefix, 0x10, XMM0, offsetof(bal_cpu_t, v[rn][0]), "movs");
+    emit_sse_memory(
+        assembler, prefix, OPERATIONS[opcode], XMM0, offsetof(bal_cpu_t, v[rm][0]), NAMES[opcode]);
+
+    // A NaN result is unordered with itself.
+    emit_sse(assembler, true == is_double ? 0x66 : 0U, false, 0x2E, XMM0, XMM0, "ucomis");
+    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_P);
+
+    // The magnitude shifted left by one is compared with the smallest normal number's.
+    emit_sse(assembler, 0x66, is_double, 0x7E, XMM0, (uint8_t)result, "movd");
+    bal_x86_emit_mov_r64_r64(assembler, scratch, result);
+
+    if (true == is_double)
+    {
+        bal_x86_emit_shl_r64_imm8(assembler, scratch, 1U);
+        bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, 0x0020000000000000ULL);
+    }
+    else
+    {
+        bal_x86_emit_shl_r32_imm8(assembler, scratch, 1U);
+        bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, 0x01000000ULL);
+    }
+
+    push_macro(compiler, BAL_X86_MACRO_SUB_REGISTER_REGISTER, scratch, BAL_X86_RAX);
+    bal_sliding_window_flush_all(&compiler->window);
+    slow_jumps[2] = emit_forward_jump(assembler, true, BAL_X86_COND_E);
+
+    // A scalar write clears the rest of the register; MOVD zero-extended a single.
+    bal_x86_emit_store_r64_rbp_offset(assembler, result, (int32_t)offsetof(bal_cpu_t, v[rd][0]));
+    bal_x86_emit_xor_r32_r32(assembler, scratch, scratch);
+    bal_x86_emit_store_r64_rbp_offset(assembler, scratch, (int32_t)offsetof(bal_cpu_t, v[rd][1]));
+
+    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, 3U);
+    return true;
+}
+
+/// FADD, FSUB, FMUL, FDIV, and with FMA3 FMLA and FMLS (vector), on 2S, 4S and 2D, with the same
+/// fast and slow paths as emit_fast_scalar_arithmetic(): a NaN or smallest-normal lane, or a
+/// non-zero FPCR, runs the whole instruction through the helper.
+static bool
+emit_fast_vector_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 a sz 1 Rm opcode 1 Rn Rd with opcode 11xxx.
+    if (0x0E200400U != (instruction & 0x9F200400U))
+    {
+        return false;
+    }
+
+    const bool     is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_double = 1U == ((instruction >> 22U) & 1U);
+    const uint32_t key = (((instruction >> 29U) & 1U) << 6U) | (((instruction >> 23U) & 1U) << 5U)
+                         | ((instruction >> 11U) & 0x1FU);
+    uint8_t     operation = 0U;
+    bool        is_fused  = false;
+    const char *name      = "";
+
+    switch (key)
+    {
+        case 0x1AU: // FADD
+            operation = 0x58;
+            name      = "addp";
+            break;
+        case 0x3AU: // FSUB
+            operation = 0x5C;
+            name      = "subp";
+            break;
+        case 0x5BU: // FMUL
+            operation = 0x59;
+            name      = "mulp";
+            break;
+        case 0x5FU: // FDIV; the cleared upper lanes of a 64-bit operation would divide 0 by 0.
+            if (false == is_quad)
+            {
+                return false;
+            }
+            operation = 0x5E;
+            name      = "divp";
+            break;
+        case 0x19U: // FMLA: VFMADD231
+            operation = 0xB8;
+            is_fused  = true;
+            name      = "vfmadd231p";
+            break;
+        case 0x39U: // FMLS: VFNMADD231, d - n * m with a single rounding.
+            operation = 0xBC;
+            is_fused  = true;
+            name      = "vfnmadd231p";
+            break;
+        default:
+            return false;
+    }
+
+    if ((true == is_double && false == is_quad) || (true == is_fused && false == compiler->has_fma))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    const uint8_t                     packed    = true == is_double ? 0x66 : 0U;
+    const uint8_t                     mask      = (uint8_t)BAL_X86_REGISTER_DISCARD_RESULT;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[3];
+
+    begin_inline_sequence(compiler);
+    emit_enter_guest_mxcsr(compiler);
+    slow_jumps[0] = emit_fpcr_check(assembler);
+    emit_load_vector(assembler, XMM1, rn, is_quad);
+    emit_load_vector(assembler, XMM2, rm, is_quad);
+
+    if (true == is_fused)
+    {
+        emit_load_vector(assembler, XMM0, rd, is_quad);
+        bal_x86_emit_vex_0f38_register(assembler, is_double, operation, XMM0, XMM1, XMM2, name);
+    }
+    else
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM0, XMM1, "movaps");
+        emit_sse(assembler, packed, false, operation, XMM0, XMM2, name);
+    }
+
+    // CMPUNORD sets a lane to all ones when it holds a NaN; MOVMSK gathers the sign bits.
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+    emit_sse_immediate(assembler, packed, 0xC2, XMM3, XMM3, 3U, "cmpunordp");
+    emit_sse(assembler, packed, false, 0x50, mask, XMM3, "movmskp");
+    bal_x86_emit_test_r32_r32(
+        assembler, BAL_X86_REGISTER_DISCARD_RESULT, BAL_X86_REGISTER_DISCARD_RESULT);
+    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    // Each magnitude shifted left by one is compared with the smallest normal number's.
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+
+    if (true == is_double)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 6U, XMM3, 1U, "psllq");
+        bal_x86_emit_mov_r64_imm64(
+            assembler, BAL_X86_REGISTER_DISCARD_RESULT, 0x0020000000000000ULL);
+        emit_sse(assembler, 0x66, true, 0x6E, XMM2, mask, "movq");
+        emit_sse(assembler, 0x66, false, 0x6C, XMM2, XMM2, "punpcklqdq");
+        emit_sse(assembler, 0x66, false, 0x76, XMM3, XMM2, "pcmpeqd");
+
+        // A 64-bit lane matches when both of its 32-bit halves do.
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM2, XMM3, 0xB1, "pshufd");
+        emit_sse(assembler, 0x66, false, 0xDB, XMM3, XMM2, "pand");
+        emit_sse(assembler, 0x66, false, 0x50, mask, XMM3, "movmskpd");
+    }
+    else
+    {
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM3, 1U, "pslld");
+        bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_REGISTER_DISCARD_RESULT, 0x01000000ULL);
+        emit_sse(assembler, 0x66, false, 0x6E, XMM2, mask, "movd");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM2, XMM2, 0U, "pshufd");
+        emit_sse(assembler, 0x66, false, 0x76, XMM3, XMM2, "pcmpeqd");
+        emit_sse(assembler, 0U, false, 0x50, mask, XMM3, "movmskps");
+    }
+
+    bal_x86_emit_test_r32_r32(
+        assembler, BAL_X86_REGISTER_DISCARD_RESULT, BAL_X86_REGISTER_DISCARD_RESULT);
+    slow_jumps[2] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+
+    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, 3U);
+    return true;
+}
+
+/// ADD, SUB, AND, BIC, ORR and EOR (vector), which SSE2 computes exactly; MOV is ORR with Rn = Rm.
+static bool
+emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 1 Rm opcode 1 Rn Rd.
+    if (0x0E200400U != (instruction & 0x9F200400U))
+    {
+        return false;
+    }
+
+    const bool     is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t u         = (instruction >> 29U) & 1U;
+    const uint32_t size      = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode    = (instruction >> 11U) & 0x1FU;
+    uint8_t        operation = 0U;
+    bool           is_bic    = false;
+
+    if (0x10U == opcode)
+    {
+        static const uint8_t ADDS[4] = { 0xFC, 0xFD, 0xFE, 0xD4 };
+        static const uint8_t SUBS[4] = { 0xF8, 0xF9, 0xFA, 0xFB };
+
+        if (3U == size && false == is_quad)
+        {
+            return false;
+        }
+
+        operation = 0U == u ? ADDS[size] : SUBS[size];
+    }
+    else if (0x03U == opcode)
+    {
+        switch ((u << 2U) | size)
+        {
+            case 0U:
+                operation = 0xDB; // AND: PAND
+                break;
+            case 1U:
+                operation = 0xDF; // BIC: PANDN computes ~m & n
+                is_bic    = true;
+                break;
+            case 2U:
+                operation = 0xEB; // ORR: POR
+                break;
+            case 4U:
+                operation = 0xEF; // EOR: PXOR
+                break;
+            default:
+                return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    begin_inline_sequence(compiler);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    if (true == is_bic)
+    {
+        emit_sse(assembler, 0x66, false, operation, XMM1, XMM0, "pandn");
+        emit_store_vector(assembler, XMM1, rd, is_quad);
+        return true;
+    }
+
+    emit_sse(assembler, 0x66, false, operation, XMM0, XMM1, "padd/psub/logical");
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
+/// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
+/// Returns false to leave it to the runtime helpers.
+static bool
+emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    if (false == emit_fast_scalar_arithmetic(compiler, instruction)
+        && false == emit_fast_vector_float(compiler, instruction)
+        && false == emit_fast_vector_integer(compiler, instruction))
+    {
+        return false;
+    }
+
+    return true;
 }

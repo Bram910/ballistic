@@ -144,7 +144,7 @@ allocator.free(allocator.context, guest_memory, guest_memory_size);
 
 ![Status](docs/status/status.svg)
 
-Each of the 3496 reachable A64 encodings in the decoder table is tested with random operands against Unicorn: 130 verified, 4 translated but not checkable (Unicorn rejects the random branch targets), 0 wrong and 3362 not started. Integer and branch instructions: 55.1%.
+Each of the 3496 reachable A64 encodings in the decoder table is tested with random operands against Unicorn: 1100 verified, 28 translated but not checkable (Unicorn cannot run the random samples or has a known bug for them), 0 wrong and 2368 not started. Verified by group: Data processing (register) 65.0%, Data processing (immediate) 74.4%, Branches and system 26.8%, Loads and stores 63.8%, SIMD and floating point 63.9%, SVE 0.0%, SME 0.0%.
 
 Regenerate with `python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage`
 after a debug build.

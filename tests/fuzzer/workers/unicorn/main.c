@@ -131,6 +131,22 @@ main(void)
             continue;
         }
 
+        for (uint32_t vector_register = 0U; vector_register < 32U && UC_ERR_OK == unicorn_error;
+             ++vector_register)
+        {
+            unicorn_error = uc_reg_write(engine,
+                                         UC_ARM64_REG_Q0 + (int)vector_register,
+                                         input.initial_state.v[vector_register]);
+        }
+
+        if (unicorn_error != UC_ERR_OK)
+        {
+            response.status = BAL_FUZZER_WORKER_ERROR_EXECUTION_FAILED;
+            (void)uc_mem_unmap(engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE);
+            (void)bal_fuzzer_ipc_send(STDOUT_FILENO, &response, sizeof(response));
+            continue;
+        }
+
         uint64_t pc   = GUEST_BASE_ADDRESS + input.initial_state.pc;
         unicorn_error = uc_reg_write(engine, UC_ARM64_REG_PC, &pc);
 

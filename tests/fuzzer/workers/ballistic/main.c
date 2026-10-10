@@ -127,6 +127,7 @@ main(int argc, char **argv)
         cpu.flag_z = input.initial_state.flag_z;
         cpu.flag_n = input.initial_state.flag_n;
         cpu.flag_v = input.initial_state.flag_v;
+        (void)memcpy(cpu.v, input.initial_state.v, sizeof(cpu.v));
 
         cpu.x[30]           = input.instruction_count * 4ULL;
         bal_engine_t engine = {};

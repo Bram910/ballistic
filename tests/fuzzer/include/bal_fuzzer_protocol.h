@@ -17,6 +17,7 @@ BAL_ALIGNED(64) typedef struct
     uint8_t  flag_v;
     uint32_t pad0;
     uint64_t instruction_count;
+    uint64_t v[32][2];
     uint64_t pad1[13];
 } bal_fuzzer_cpu_snapshot_t;
 

@@ -248,6 +248,14 @@ main(const int argc, const char **argv)
                     case BAL_FUZZER_FIELD_FLAG_V:
                         field_name = "flag_v";
                         break;
+                    case BAL_FUZZER_FIELD_VECTOR:
+                        (void)snprintf(register_label,
+                                       sizeof(register_label),
+                                       "v%u.%s",
+                                       divergence_cursor->register_index / 2U,
+                                       0U == divergence_cursor->register_index % 2U ? "lo" : "hi");
+                        field_name = register_label;
+                        break;
                     default:
                         break;
                 }
@@ -282,6 +290,15 @@ main(const int argc, const char **argv)
     return EXIT_SUCCESS;
 }
 
+/// Returns the SplitMix64 finalizer of `value`.
+static uint64_t
+mix(uint64_t value)
+{
+    value = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31U);
+}
+
 /// Fills the guest registers and flags with values derived from the seed index.
 ///
 /// Starting every seed from all-zero registers hides most data processing bugs, since any operation
@@ -294,12 +311,7 @@ fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, const uint64_t seed_index)
 
     for (uint64_t i = 0U; i < 32U; ++i)
     {
-        // SplitMix64 finalizer.
-        uint64_t value   = (seed_index * 32U + i + 1U) * 0x9E3779B97F4A7C15ULL;
-        value            = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
-        value            = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
-        value            = value ^ (value >> 31U);
-        *register_cursor = value;
+        *register_cursor = mix((seed_index * 32U + i + 1U) * 0x9E3779B97F4A7C15ULL);
         ++register_cursor;
     }
 
@@ -308,4 +320,10 @@ fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, const uint64_t seed_index)
     state->flag_z            = (uint8_t)((flag_bits >> 2U) & 1U);
     state->flag_c            = (uint8_t)((flag_bits >> 1U) & 1U);
     state->flag_v            = (uint8_t)(flag_bits & 1U);
+
+    // The SIMD&FP registers come from a separate stream so they do not repeat the X registers.
+    for (uint64_t i = 0U; i < 64U; ++i)
+    {
+        state->v[i / 2U][i % 2U] = mix((seed_index * 64U + i + 1U) * 0xD1B54A32D192ED03ULL);
+    }
 }

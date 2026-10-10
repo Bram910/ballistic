@@ -55,6 +55,11 @@ extern "C"
         uint64_t fpcr;
         uint64_t fpsr;
 
+        /// The SIMD&FP registers V0-V31. v[n][0] holds bits 63:0 and v[n][1] bits 127:64. The
+        /// scalar B, H, S and D views are the low bits of v[n][0]; writing one clears the rest of
+        /// the register.
+        uint64_t v[32][2];
+
         /// The local exclusive monitor. A load-exclusive sets `exclusive_state` to 1 and records
         /// the address and the value it read; a store-exclusive, CLREX, or a host that wants to
         /// break the reservation sets it back to 0. Zero-initialised state has no reservation.

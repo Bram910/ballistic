@@ -38,6 +38,27 @@ bal_fuzzer_state_compare(const bal_fuzzer_cpu_snapshot_t *expected,
         ++actual_register_cursor;
     }
 
+    for (uint32_t i = 0U; i < 64U; ++i)
+    {
+        const uint64_t expected_half = expected->v[i / 2U][i % 2U];
+        const uint64_t actual_half   = actual->v[i / 2U][i % 2U];
+
+        if (expected_half != actual_half)
+        {
+            if (divergence_count < BAL_FUZZER_MAX_DIVERGENCES)
+            {
+                bal_fuzzer_divergence_t *BAL_RESTRICT divergence
+                    = &result.divergences[divergence_count];
+                divergence->field          = BAL_FUZZER_FIELD_VECTOR;
+                divergence->register_index = i;
+                divergence->expected_value = expected_half;
+                divergence->actual_value   = actual_half;
+            }
+
+            ++divergence_count;
+        }
+    }
+
     if (expected->pc != actual->pc)
     {
         if (divergence_count < BAL_FUZZER_MAX_DIVERGENCES)
@@ -123,6 +144,7 @@ bal_fuzzer_state_capture_bal_cpu(bal_fuzzer_cpu_snapshot_t *snapshot, const bal_
     snapshot->flag_n            = cpu->flag_n;
     snapshot->flag_v            = cpu->flag_v;
     snapshot->instruction_count = cpu->instruction_count;
+    (void)memcpy(snapshot->v, cpu->v, sizeof(snapshot->v));
 }
 
 void
@@ -162,6 +184,13 @@ bal_fuzzer_state_capture_unicorn_cpu(bal_fuzzer_cpu_snapshot_t *snapshot, uc_eng
     snapshot->flag_z = (uint8_t)((nzcv >> 30U) & 1U);
     snapshot->flag_c = (uint8_t)((nzcv >> 29U) & 1U);
     snapshot->flag_v = (uint8_t)((nzcv >> 28U) & 1U);
+
+    // Q0-Q31 are contiguous in Unicorn's enum and read as {bits 63:0, bits 127:64}.
+    for (uint32_t vector_register = 0U; vector_register < 32U; ++vector_register)
+    {
+        (void)uc_reg_read(
+            cpu, UC_ARM64_REG_Q0 + (int)vector_register, snapshot->v[vector_register]);
+    }
 }
 
 /*** end of file ***/

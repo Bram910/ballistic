@@ -18,6 +18,7 @@ typedef enum
     /// Half of a SIMD&FP register: register_index is the register number times two, plus one
     /// for bits 127:64.
     BAL_FUZZER_FIELD_VECTOR,
+    BAL_FUZZER_FIELD_EXCEPTION,
 } bal_fuzzer_field_t;
 
 typedef struct

@@ -69,6 +69,7 @@ extern "C"
         OPCODE_SYSTEM_REGISTER,
         OPCODE_ATOMIC,
         OPCODE_FLOAT,
+        OPCODE_EXCEPTION,
         OPCODE_ENUM_END = 0x7FF
     } bal_opcode_t;
 

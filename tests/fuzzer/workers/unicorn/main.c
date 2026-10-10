@@ -9,9 +9,12 @@
 #define GUEST_BASE_ADDRESS 0x0
 #define GUEST_MEMORY_SIZE  0X1000ULL // 4 KiB, one page.
 
-// QEMU's exception number for a data abort, which Unicorn raises for misaligned exclusive and
-// atomic accesses.
+// QEMU's exception numbers: an undefined instruction, an SVC, a data abort, which Unicorn raises
+// for misaligned exclusive and atomic accesses, and a BRK.
+#define UNICORN_EXCEPTION_UNDEFINED  1U
+#define UNICORN_EXCEPTION_SVC        2U
 #define UNICORN_EXCEPTION_DATA_ABORT 4U
+#define UNICORN_EXCEPTION_BREAKPOINT 7U
 #define UNICORN_EXCEPTION_NONE       0xFFFFFFFFU
 
 /// Records the exception the guest raised and stops emulation at the faulting instruction.
@@ -209,6 +212,12 @@ main(void)
         {
             response.status = BAL_FUZZER_WORKER_MEMORY_FAULT;
         }
+        else if (UNICORN_EXCEPTION_SVC == exception_number
+                 || UNICORN_EXCEPTION_BREAKPOINT == exception_number
+                 || UNICORN_EXCEPTION_UNDEFINED == exception_number)
+        {
+            response.status = BAL_FUZZER_WORKER_GUEST_EXCEPTION;
+        }
         else if (unicorn_error != UC_ERR_OK || exception_number != UNICORN_EXCEPTION_NONE)
         {
             response.status = BAL_FUZZER_WORKER_ERROR_COMPILE_FAILED;
@@ -219,6 +228,28 @@ main(void)
         }
 
         bal_fuzzer_state_capture_unicorn_cpu(&response.final_state, engine);
+
+        switch (exception_number)
+        {
+            case UNICORN_EXCEPTION_DATA_ABORT:
+                response.final_state.exception = BAL_EXCEPTION_DATA_ABORT;
+                break;
+            case UNICORN_EXCEPTION_SVC:
+                response.final_state.exception = BAL_EXCEPTION_SUPERVISOR_CALL;
+                break;
+            case UNICORN_EXCEPTION_BREAKPOINT:
+                response.final_state.exception = BAL_EXCEPTION_BREAKPOINT;
+                break;
+            case UNICORN_EXCEPTION_UNDEFINED:
+                response.final_state.exception = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
+                break;
+            default:
+                // Unmapped accesses fail uc_emu_start() without raising an exception.
+                response.final_state.exception = BAL_FUZZER_WORKER_MEMORY_FAULT == response.status
+                                                     ? BAL_EXCEPTION_DATA_ABORT
+                                                     : BAL_EXCEPTION_NONE;
+                break;
+        }
         (void)uc_mem_unmap(engine, GUEST_BASE_ADDRESS, GUEST_MEMORY_SIZE);
 
         if (bal_fuzzer_ipc_send(STDOUT_FILENO, &response, sizeof(response)) != BAL_SUCCESS)

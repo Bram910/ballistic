@@ -17,8 +17,21 @@ extern "C"
     {
         BAL_EXCEPTION_NONE = 0,
 
-        /// A load or store accessed an address the memory interface does not translate.
+        /// A load or store accessed an address the memory interface does not translate, or was
+        /// misaligned where the architecture requires alignment. `pc` is the faulting
+        /// instruction.
         BAL_EXCEPTION_DATA_ABORT = 1,
+
+        /// SVC: a call into the guest operating system. `pc` is the instruction after the SVC,
+        /// where execution resumes, and `exception_immediate` its 16-bit immediate.
+        BAL_EXCEPTION_SUPERVISOR_CALL = 2,
+
+        /// BRK: a software breakpoint. `pc` is the BRK and `exception_immediate` its immediate.
+        BAL_EXCEPTION_BREAKPOINT = 3,
+
+        /// UDF, and HLT, HVC and SMC, which are undefined at EL0. `pc` is the instruction and
+        /// `exception_immediate` its immediate.
+        BAL_EXCEPTION_UNDEFINED_INSTRUCTION = 4,
     } bal_exception_t;
 
     BAL_ALIGNED(64) typedef struct
@@ -67,8 +80,11 @@ extern "C"
         uint64_t exclusive_address;
         uint64_t exclusive_value[2];
 
+        /// The immediate of the SVC, BRK or undefined instruction that raised `exception`.
+        uint64_t exception_immediate;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[32];
+        uint8_t reserved[24];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

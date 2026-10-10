@@ -128,6 +128,14 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static void emit_guest_exception(bal_tier1_compiler_t *compiler,
+                                 bal_exception_t       exception,
+                                 uint64_t              immediate);
+
+static bool translate_exception(bal_tier1_compiler_t *compiler,
+                                uint32_t              instruction,
+                                bal_guest_address_t   guest_address);
+
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
 
@@ -590,11 +598,21 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     is_block_terminated = true;
                     break;
                 case OPCODE_NOP:
+                    // DSB with the nXS qualifier needs FEAT_XS, which the guest CPU does not
+                    // implement, so it is undefined.
+                    if (0xD503323FU == (instruction & 0xFFFFF3FFU))
+                    {
+                        emit_guest_exception(compiler, BAL_EXCEPTION_UNDEFINED_INSTRUCTION, 0U);
+                        has_branch_target   = true;
+                        branch_target_pc    = guest_address;
+                        is_block_terminated = true;
+                        break;
+                    }
+
                     // DMB and DSB order memory accesses for other observers. x86 keeps loads and
                     // stores in order except for a load passing an earlier store, so a full fence
                     // is always sufficient. ISB, SB, CLREX and the hints need nothing here.
-                    if (0xD503309FU == (instruction & 0xFFFFF0DFU)
-                        || 0xD503323FU == (instruction & 0xFFFFF3FFU))
+                    if (0xD503309FU == (instruction & 0xFFFFF0DFU))
                     {
                         const bal_x86_macro_t fence_macro = {
                             .opcode = BAL_X86_MACRO_MFENCE,
@@ -611,6 +629,17 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_FLOAT:
                     translate_float(compiler, instruction);
+                    break;
+                case OPCODE_EXCEPTION:
+                    // SVC resumes after itself; BRK and the undefined instructions report their
+                    // own address.
+                    if (true == translate_exception(compiler, instruction, guest_address))
+                    {
+                        has_branch_target = true;
+                        branch_target_pc  = guest_address;
+                    }
+
+                    is_block_terminated = true;
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -4819,4 +4848,71 @@ translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
     bal_sliding_window_push(&compiler->window, instruction_macro);
 
     emit_runtime_call(compiler, helper);
+}
+
+/// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception
+/// and exception_immediate set for the host, which bal_engine_run_thread() reports as
+/// BAL_ERROR_GUEST_EXCEPTION.
+///
+/// SVC raises BAL_EXCEPTION_SUPERVISOR_CALL and leaves the PC after it, where the host resumes
+/// once it has handled the call. BRK raises BAL_EXCEPTION_BREAKPOINT, and UDF, HLT, HVC and SMC,
+/// which are undefined at EL0, raise BAL_EXCEPTION_UNDEFINED_INSTRUCTION; those leave the PC on
+/// the instruction. Returns true when the PC stays on the instruction.
+static bool
+translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                    const uint32_t                     instruction,
+                    const bal_guest_address_t          guest_address)
+{
+    (void)guest_address;
+    uint64_t        immediate      = (instruction >> 5U) & 0xFFFFU;
+    bal_exception_t exception      = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
+    bool            is_pc_retained = true;
+
+    // Exception generation: 11010100 opc imm16 op2 LL, with op2 = 000.
+    switch (instruction & 0xFFE0001FU)
+    {
+        case 0xD4000001U: // SVC
+            exception      = BAL_EXCEPTION_SUPERVISOR_CALL;
+            is_pc_retained = false;
+            break;
+        case 0xD4200000U: // BRK
+            exception = BAL_EXCEPTION_BREAKPOINT;
+            break;
+        case 0xD4000002U: // HVC
+        case 0xD4000003U: // SMC
+        case 0xD4400000U: // HLT
+            break;
+        default:
+            if (0U != (instruction & 0xFFFF0000U))
+            {
+                BAL_LOG_ERROR(&bal_thread_logger,
+                              "Aborting function: unsupported exception generating encoding %08x",
+                              instruction);
+                compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                return false;
+            }
+
+            immediate = instruction & 0xFFFFU; // UDF
+            break;
+    }
+
+    emit_guest_exception(compiler, exception, immediate);
+    return is_pc_retained;
+}
+
+/// Sets bal_cpu_t::exception and exception_immediate for the host. The caller ends the block,
+/// and terminate_block() then writes the PC and returns.
+static void
+emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                     const bal_exception_t              exception,
+                     const uint64_t                     immediate)
+{
+    flush_dirty_registers(compiler);
+    bal_sliding_window_flush_all(&compiler->window);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, immediate);
+    bal_x86_emit_store_r64_rbp_offset(
+        assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception_immediate));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, (uint64_t)exception);
+    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
 }

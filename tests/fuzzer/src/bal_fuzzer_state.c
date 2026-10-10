@@ -59,6 +59,21 @@ bal_fuzzer_state_compare(const bal_fuzzer_cpu_snapshot_t *expected,
         }
     }
 
+    if (expected->exception != actual->exception)
+    {
+        if (divergence_count < BAL_FUZZER_MAX_DIVERGENCES)
+        {
+            bal_fuzzer_divergence_t *BAL_RESTRICT divergence
+                = &result.divergences[divergence_count];
+            divergence->field          = BAL_FUZZER_FIELD_EXCEPTION;
+            divergence->register_index = 0U;
+            divergence->expected_value = expected->exception;
+            divergence->actual_value   = actual->exception;
+        }
+
+        ++divergence_count;
+    }
+
     if (expected->pc != actual->pc)
     {
         if (divergence_count < BAL_FUZZER_MAX_DIVERGENCES)
@@ -145,6 +160,7 @@ bal_fuzzer_state_capture_bal_cpu(bal_fuzzer_cpu_snapshot_t *snapshot, const bal_
     snapshot->flag_v            = cpu->flag_v;
     snapshot->instruction_count = cpu->instruction_count;
     (void)memcpy(snapshot->v, cpu->v, sizeof(snapshot->v));
+    snapshot->exception = cpu->exception;
 }
 
 void

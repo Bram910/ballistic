@@ -143,8 +143,14 @@ extern "C"
         uint32_t instruction_cache_invalidated;
         uint32_t instruction_barrier;
 
+        /// PSTATE.DIT (bit 24) and PSTATE.SSBS (bit 12), as MRS DIT and MRS SSBS read them.
+        /// Translated code always runs in constant time with respect to data and never
+        /// speculates past stores in a way the guest can see, so neither changes how it runs.
+        uint64_t dit;
+        uint64_t ssbs;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[16];
+        uint8_t reserved[64];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

@@ -384,6 +384,30 @@ test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress(void)
 }
 
 static void
+test_DitAndSsbs_ReadBackWhatWasWritten(void)
+{
+    const uint32_t program[] = {
+        0xD503415FU, // MSR DIT, #1
+        0xD53B42A0U, // MRS X0, DIT
+        0xD503413FU, // MSR SSBS, #1
+        0xD53B42C1U, // MRS X1, SSBS
+        0xD51B42BFU, // MSR DIT, XZR
+        0xD53B42A2U, // MRS X2, DIT
+        0xD51B42C4U, // MSR SSBS, X4
+        0xD53B42C3U, // MRS X3, SSBS
+    };
+    load_program(program, 8U);
+    g_cpu.x[4] = ~0ULL;
+
+    // Only the field's own bit is kept: DIT is bit 24 and SSBS bit 12.
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 24U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 12U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 12U, g_cpu.x[3]);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -422,5 +446,6 @@ main(void)
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);
     RUN_TEST(test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress);
+    RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
     return UNITY_END();
 }

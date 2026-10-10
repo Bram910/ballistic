@@ -287,6 +287,26 @@ test_PointerAuthenticationHints_AreNopsWhileDisabled(void)
 }
 
 static void
+test_Pacibsp_FollowsTheBKeyEnable(void)
+{
+    // PACIBSP; MOV X1, X30; AUTIBSP, with only the A key enabled and then with the B key too.
+    const uint32_t program[] = { 0xD503237FU, 0xAA1E03E1U, 0xD50323FFU };
+    load_program(program, 3U);
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+
+    g_cpu.pc        = 0U;
+    g_cpu.x[30]     = BAL_ENGINE_SENTINEL;
+    g_cpu.sctlr_el1 = 1ULL << 30U;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -319,6 +339,7 @@ main(void)
     RUN_TEST(test_Autia_FailureMakesThePointerNonCanonical);
     RUN_TEST(test_Paciasp_AutiaspRestoreTheLinkRegister);
     RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
+    RUN_TEST(test_Pacibsp_FollowsTheBKeyEnable);
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
     return UNITY_END();
 }

@@ -5017,6 +5017,33 @@ translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         comp
         return false;
     }
 
+    // The hint-space forms other than XPACLRI do nothing while their key is disabled, which is
+    // the common case, so they test the enable bit and skip the call. The test happens at run time
+    // because the host may enable the keys after the code is translated.
+    const bool is_keyed_hint
+        = 0xD503201FU == (instruction & 0xFFFFF01FU) && instruction != 0xD50320FFU;
+
+    if (true == is_keyed_hint)
+    {
+        flush_dirty_registers(compiler);
+        reset_register_allocator(compiler);
+        bal_sliding_window_flush_all(&compiler->window);
+
+        // op2 bit 1 picks the B key, enabled by SCTLR_EL1.EnIB (bit 30) rather than EnIA (31).
+        bal_x86_assembler_t *BAL_RESTRICT assembler  = &compiler->assembler;
+        const uint8_t                     enable_bit = 0U != ((instruction >> 6U) & 1U) ? 30U : 31U;
+        bal_x86_emit_load_r64_rbp_offset(
+            assembler, BAL_X86_REGISTER_DISCARD_RESULT, (int32_t)offsetof(bal_cpu_t, sctlr_el1));
+        bal_x86_emit_bt_r64_imm8(assembler, BAL_X86_REGISTER_DISCARD_RESULT, enable_bit);
+        const size_t skip = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+
+        emit_register_helper_call(
+            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
+        bal_sliding_window_flush_all(&compiler->window);
+        patch_forward_jump(assembler, skip, true);
+        return false;
+    }
+
     emit_register_helper_call(
         compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
 

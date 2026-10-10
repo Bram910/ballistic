@@ -2,6 +2,7 @@
 #include "backend/bal_atomic.h"
 #include "backend/bal_cpu.h"
 #include "backend/bal_float.h"
+#include "backend/bal_simd.h"
 #include "bal_decoder.h"
 #include "bal_engine.h"
 #include "bal_engine_flags.h"
@@ -4742,23 +4743,30 @@ translate_atomic(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
 }
 
-/// Translates the scalar floating-point instructions: moves, arithmetic, comparisons, conditional
-/// select, rounding and the conversions to and from integers.
+/// Translates the SIMD&FP data processing instructions: the scalar floating-point ones through
+/// bal_execute_float() and the Advanced SIMD ones through bal_execute_simd().
 ///
-/// Tier 1 calls bal_execute_float() for each one with the guest registers flushed, so every
-/// instruction gets the exact AArch64 behaviour: NaN propagation, FPCR.DN, FPCR.FZ, the FPCR
-/// rounding mode and the FPSR flags. Inline fast paths for the common cases can sit in front of
-/// it later.
+/// Tier 1 calls the helper for each one with the guest registers flushed, so every instruction
+/// gets the exact AArch64 behaviour: NaN propagation, FPCR.DN, FPCR.FZ, the FPCR rounding mode,
+/// the FPSR flags and saturation. Inline fast paths for the common cases can sit in front of the
+/// helpers later.
 static void
 translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
-    if (BAL_UNLIKELY(false == bal_is_float_supported(instruction)))
+    uint64_t helper = (uint64_t)(uintptr_t)&bal_execute_float;
+
+    if (false == bal_is_float_supported(instruction))
     {
-        BAL_LOG_ERROR(&bal_thread_logger,
-                      "Aborting function: unsupported floating-point encoding %08x",
-                      instruction);
-        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
-        return;
+        if (BAL_UNLIKELY(false == bal_is_simd_supported(instruction)))
+        {
+            BAL_LOG_ERROR(&bal_thread_logger,
+                          "Aborting function: unsupported SIMD&FP encoding %08x",
+                          instruction);
+            compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+            return;
+        }
+
+        helper = (uint64_t)(uintptr_t)&bal_execute_simd;
     }
 
     flush_dirty_registers(compiler);
@@ -4773,5 +4781,5 @@ translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
     };
     bal_sliding_window_push(&compiler->window, instruction_macro);
 
-    emit_runtime_call(compiler, (uint64_t)(uintptr_t)&bal_execute_float);
+    emit_runtime_call(compiler, helper);
 }

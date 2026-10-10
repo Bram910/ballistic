@@ -6,6 +6,7 @@
 #include "bal_engine_flags.h"
 #include "bal_log.h"
 #include "unity.h"
+#include <stdbool.h>
 #include <string.h>
 
 #define GUEST_MEMORY_SIZE 0x4000U
@@ -464,6 +465,163 @@ test_ChainedLoop_ComputesTheSameResult(void)
 }
 
 static void
+test_IndirectBranches_ReachTheirTargets(void)
+{
+    // A loop that calls a function with BL and RET and branches through a two-entry jump table
+    // with BR, so the indirect branches look up changing targets.
+    static const uint32_t program[] = {
+        0x94000010U, // 0x00: BL 0x40
+        0x92400026U, // 0x04: AND X6, X1, #1
+        0x8B060D07U, // 0x08: ADD X7, X8, X6, LSL #3
+        0xD61F00E0U, // 0x0C: BR X7
+        0U,          0U, 0U, 0U,
+        0x91000442U, // 0x20: ADD X2, X2, #1
+        0x14000003U, // 0x24: B 0x30
+        0x91000463U, // 0x28: ADD X3, X3, #1
+        0x14000001U, // 0x2C: B 0x30
+        0xF1000421U, // 0x30: SUBS X1, X1, #1
+        0x54FFFE61U, // 0x34: B.NE 0x00
+        0xAA1403FEU, // 0x38: MOV X30, X20
+        RET,         // 0x3C
+        0x91000400U, // 0x40: ADD X0, X0, #1
+        RET,         // 0x44
+    };
+    (void)memcpy(g_memory, program, sizeof(program));
+    g_cpu.x[1]  = 1000U;
+    g_cpu.x[8]  = 0x20U;
+    g_cpu.x[20] = BAL_ENGINE_SENTINEL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_UINT64(1000U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_UINT64(500U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT64(500U, g_cpu.x[3]);
+}
+
+static void
+test_Reset_RetranslatesTheGuestCode(void)
+{
+    // MOVZ X0, #1, run once; then MOVZ X0, #2 in its place after bal_engine_reset().
+    const uint32_t program[] = { 0xD2800020U };
+    load_program(program, 1U);
+    bal_engine_t engine;
+    (void)memset(&engine, 0, sizeof(engine));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS,
+                      bal_engine_init(&engine, &g_cpu, &g_allocator, &g_memory_interface));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+
+    const uint32_t replacement = 0xD2800040U;
+    (void)memcpy(g_memory, &replacement, sizeof(replacement));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_reset(&engine));
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    TEST_ASSERT_EQUAL_UINT64(2U, g_cpu.x[0]);
+    bal_engine_destroy(&engine);
+}
+
+/// Guest page 0x10000 maps to g_page_a or, once g_use_page_b is set, to g_page_b; everything else
+/// goes to the flat test memory.
+static uint8_t                g_page_a[4096];
+static uint8_t                g_page_b[4096];
+static bool                   g_use_page_b;
+static bal_memory_interface_t g_switching_interface;
+static bal_engine_t           g_switching_engine;
+
+static const uint8_t *
+switching_translate(void *context, const bal_guest_address_t address, size_t *available)
+{
+    (void)context;
+
+    if (address >= 0x10000U && address < 0x11000U)
+    {
+        *available = 0x11000U - (size_t)address;
+        return (true == g_use_page_b ? g_page_b : g_page_a) + (address - 0x10000U);
+    }
+
+    return g_memory_interface.translate(&g_memory_interface, address, available);
+}
+
+static void
+set_up_switching_memory(void)
+{
+    const uint64_t a = 0x1111U;
+    const uint64_t b = 0x2222U;
+    (void)memcpy(g_page_a + 8U, &a, sizeof(a));
+    (void)memcpy(g_page_b + 8U, &b, sizeof(b));
+    g_use_page_b                    = false;
+    g_switching_interface.context   = &g_memory_interface;
+    g_switching_interface.translate = switching_translate;
+    (void)memset(&g_switching_engine, 0, sizeof(g_switching_engine));
+    TEST_ASSERT_EQUAL(
+        BAL_SUCCESS,
+        bal_engine_init(&g_switching_engine, &g_cpu, &g_allocator, &g_switching_interface));
+}
+
+static void
+test_MemoryMapChange_IsSeenByTheNextRun(void)
+{
+    // LDR X0, [X1], run with the page mapped to A and then to B.
+    const uint32_t program[] = { 0xF9400020U };
+    load_program(program, 1U);
+    set_up_switching_memory();
+    g_cpu.x[1] = 0x10008U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&g_switching_engine));
+    TEST_ASSERT_EQUAL_HEX64(0x1111U, g_cpu.x[0]);
+
+    g_use_page_b = true;
+    g_cpu.pc     = 0U;
+    g_cpu.x[30]  = BAL_ENGINE_SENTINEL;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&g_switching_engine));
+    TEST_ASSERT_EQUAL_HEX64(0x2222U, g_cpu.x[0]);
+    bal_engine_destroy(&g_switching_engine);
+}
+
+/// Remaps the switching page while the engine runs.
+static uint64_t
+remap_while_running(void *context)
+{
+    (void)context;
+    g_use_page_b = true;
+    bal_engine_invalidate_memory(&g_switching_engine);
+    return 0U;
+}
+
+static void
+test_InvalidateMemory_TakesEffectAtTheNextBlock(void)
+{
+    const uint32_t program[] = {
+        0xF9400020U, // LDR X0, [X1]
+        0xD53BE025U, // MRS X5, CNTPCT_EL0, which remaps the page
+        0x14000001U, // B to the next instruction, ending the block
+        0xF9400022U, // LDR X2, [X1]
+    };
+    load_program(program, 4U);
+    set_up_switching_memory();
+    g_cpu.x[1]         = 0x10008U;
+    g_cpu.read_counter = remap_while_running;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&g_switching_engine));
+    TEST_ASSERT_EQUAL_HEX64(0x1111U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2222U, g_cpu.x[2]);
+    bal_engine_destroy(&g_switching_engine);
+}
+
+static void
+test_DataAbort_WritesTheRegistersBack(void)
+{
+    // MOVZ X3, #7 stays in a host register until LDR X0, [X1] faults.
+    const uint32_t program[] = { 0xD28000E3U, 0xF9400020U };
+    load_program(program, 2U);
+    g_cpu.x[1] = 0x200000U;
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_MEMORY_FAULT, run());
+    TEST_ASSERT_EQUAL_UINT64(7U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(4U, g_cpu.pc);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -505,5 +663,10 @@ main(void)
     RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
     RUN_TEST(test_StopThread_LeavesChainedBlocks);
     RUN_TEST(test_ChainedLoop_ComputesTheSameResult);
+    RUN_TEST(test_IndirectBranches_ReachTheirTargets);
+    RUN_TEST(test_Reset_RetranslatesTheGuestCode);
+    RUN_TEST(test_MemoryMapChange_IsSeenByTheNextRun);
+    RUN_TEST(test_InvalidateMemory_TakesEffectAtTheNextBlock);
+    RUN_TEST(test_DataAbort_WritesTheRegistersBack);
     return UNITY_END();
 }

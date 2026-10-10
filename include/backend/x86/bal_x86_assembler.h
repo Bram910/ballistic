@@ -367,6 +367,19 @@ extern "C"
     /// - `assembler->buffer` is full.
     void bal_x86_emit_jmp_rel32(bal_x86_assembler_t *assembler, int32_t offset);
 
+    /// Emits a call to a relative 32-bit offset from the end of the instruction.
+    ///
+    /// Assembly equivalent: `call offset`
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_call_rel32(bal_x86_assembler_t *assembler, int32_t offset);
+
     /// Emits a memory load using the 32-bit displacement `offset`.
     ///
     /// Assembler equivalent: `mov destination, [rbp + offset]`

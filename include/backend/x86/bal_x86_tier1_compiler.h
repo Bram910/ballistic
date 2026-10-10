@@ -61,6 +61,35 @@ extern "C"
     /// this many bytes after its start, where the registers the prologue saves already are.
 #define BAL_TIER1_BLOCK_PROLOGUE_SIZE 12U
 
+    /// A translated block that indirect branches (BR, BLR, RET and their authenticated forms)
+    /// can jump to without returning to the engine: its guest address and the host address just
+    /// past its prologue. The table is direct-mapped on bits 13:2 of the guest address; an
+    /// empty entry has a NULL `host_code`.
+    typedef struct
+    {
+        uint64_t guest_address;
+        void    *host_code;
+    } bal_tier1_lookup_entry_t;
+
+#define BAL_TIER1_LOOKUP_ENTRIES 4096U
+
+    /// A guest page that loads and stores reach without calling the memory interface: its page
+    /// number (the guest address shifted right by 12) and the value to add to a guest address in
+    /// it to get the host address. The table is direct-mapped on the low bits of the page number;
+    /// an empty entry has a page number no address has.
+    typedef struct
+    {
+        uint64_t page;
+        uint64_t host_offset;
+    } bal_tier1_tlb_entry_t;
+
+#define BAL_TIER1_TLB_ENTRIES     256U
+#define BAL_TIER1_TLB_EMPTY_PAGE  0xFFFFFFFFFFFFFFFFULL
+#define BAL_TIER1_GUEST_PAGE_SIZE 4096U
+
+    /// Empties a software TLB of BAL_TIER1_TLB_ENTRIES entries.
+    void bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb);
+
     BAL_HOT void *bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                                                const bal_memory_interface_t *memory_interface,
                                                bal_guest_address_t           guest_address,

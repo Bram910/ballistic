@@ -63,10 +63,17 @@ typedef struct
         atomic_bool is_executing;
         atomic_bool stop_requested;
         atomic_bool clear_cache_requested;
-        char        pad1[61];
+        atomic_bool invalidate_memory_requested;
+        char        pad1[60];
     } thread_state;
 
     BAL_ALIGNED(64) block_cache_set_t block_cache[BLOCK_CACHE_SETS];
+
+    /// The blocks indirect branches jump to directly; see bal_tier1_lookup_entry_t.
+    BAL_ALIGNED(64) bal_tier1_lookup_entry_t lookup_table[BAL_TIER1_LOOKUP_ENTRIES];
+
+    /// The guest pages loads and stores reach directly; see bal_tier1_tlb_entry_t.
+    BAL_ALIGNED(64) bal_tier1_tlb_entry_t memory_tlb[BAL_TIER1_TLB_ENTRIES];
 } internal_engine_state_t;
 
 // Disable address sanitizers when executing jit code because it introduces very subtle but
@@ -83,6 +90,9 @@ static void *block_cache_lookup(const block_cache_set_t *BAL_RESTRICT cache,
 static void block_cache_insert(block_cache_set_t *BAL_RESTRICT cache,
                                const bal_guest_address_t       pc,
                                void                           *host_code);
+
+static void discard_translations(const bal_engine_t *BAL_RESTRICT      engine,
+                                 internal_engine_state_t *BAL_RESTRICT engine_state);
 
 static void link_block(internal_engine_state_t *BAL_RESTRICT engine_state,
                        uint64_t                              link_site,
@@ -277,7 +287,14 @@ bal_engine_run_thread(bal_engine_t *engine)
     }
 
     // The link jump of the exit the last block left through, which the next block is chained to.
-    uint64_t link_site = 0U;
+    uint64_t link_site            = 0U;
+    engine->cpu->jit_lookup_table = (uint64_t)(uintptr_t)internal_engine_state->lookup_table;
+
+    // The host may have changed the guest's memory map since the last run, so the TLB starts
+    // empty; see bal_engine_invalidate_memory() for changes while the engine runs.
+    engine->cpu->jit_memory_tlb       = (uint64_t)(uintptr_t)internal_engine_state->memory_tlb;
+    engine->cpu->jit_memory_interface = (uint64_t)(uintptr_t)engine->memory_interface;
+    bal_tier1_tlb_clear(internal_engine_state->memory_tlb);
 
     while (true)
     {
@@ -312,17 +329,19 @@ bal_engine_run_thread(bal_engine_t *engine)
             BAL_LOG_INFO(&bal_thread_logger,
                          "Clear cache requested. Resetting JIT layout and block cache.");
 
-            // Resetting clears the code buffer, which is executable-only between translations.
-            engine->allocator->protect_rw(engine->allocator->context,
-                                          internal_engine_state->tier1_buffer,
-                                          internal_engine_state->tier1_buffer_size);
-            bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
-            (void)memset(
-                internal_engine_state->block_cache, 0, sizeof(internal_engine_state->block_cache));
+            discard_translations(engine, internal_engine_state);
             link_site = 0U;
             atomic_store_explicit(&internal_engine_state->thread_state.clear_cache_requested,
                                   false,
                                   memory_order_release);
+        }
+
+        if (BAL_UNLIKELY(atomic_exchange_explicit(
+                &internal_engine_state->thread_state.invalidate_memory_requested,
+                false,
+                memory_order_acq_rel)))
+        {
+            bal_tier1_tlb_clear(internal_engine_state->memory_tlb);
         }
 
         if (engine->flags & BAL_ENGINE_FLAG_INTERRUPT_PENDING)
@@ -379,10 +398,7 @@ bal_engine_run_thread(bal_engine_t *engine)
                 {
                     BAL_LOG_INFO(&bal_thread_logger,
                                  "Tier 1 executable buffer full. Resetting JIT layout cache");
-                    bal_tier1_compiler_reset(&internal_engine_state->tier1_compiler);
-                    (void)memset(internal_engine_state->block_cache,
-                                 0,
-                                 sizeof(internal_engine_state->block_cache));
+                    discard_translations(engine, internal_engine_state);
                     link_site = 0U;
                     entry_point
                         = bal_tier1_compiler_translate(&internal_engine_state->tier1_compiler,
@@ -432,6 +448,13 @@ bal_engine_run_thread(bal_engine_t *engine)
         if (BAL_LIKELY(!(engine->flags & BAL_ENGINE_FLAG_DISABLE_BLOCK_CACHE)))
         {
             block_cache_insert(internal_engine_state->block_cache, pc, entry_point);
+
+            // Indirect branches to this PC can now jump straight in.
+            bal_tier1_lookup_entry_t *BAL_RESTRICT lookup
+                = &internal_engine_state
+                       ->lookup_table[(pc >> 2U) & (BAL_TIER1_LOOKUP_ENTRIES - 1U)];
+            lookup->guest_address = pc;
+            lookup->host_code     = (uint8_t *)entry_point + BAL_TIER1_BLOCK_PROLOGUE_SIZE;
         }
 
         const bal_jit_block_t compiled_block = (bal_jit_block_t)entry_point;
@@ -500,12 +523,28 @@ bal_engine_reset(bal_engine_t *BAL_RESTRICT engine)
         return BAL_ERROR_INVALID_ARGUMENT;
     }
 
+    if (BAL_UNLIKELY(NULL == engine->engine_state))
+    {
+        return BAL_ERROR_INVALID_ARGUMENT;
+    }
+
     engine->status = BAL_SUCCESS;
-    internal_engine_state_t *BAL_RESTRICT engine_state
-        = (internal_engine_state_t *)engine->engine_state;
-    (void)memset(&engine_state->tier1_buffer, 0, engine_state->tier1_buffer_size);
-    bal_tier1_compiler_reset(&engine_state->tier1_compiler);
+    discard_translations(engine, (internal_engine_state_t *)engine->engine_state);
     return engine->status;
+}
+
+/// Throws every translation away: the code buffer, the block cache and the indirect branch
+/// lookup table, which point into it, and with them every chained jump.
+static void
+discard_translations(const bal_engine_t *BAL_RESTRICT      engine,
+                     internal_engine_state_t *BAL_RESTRICT engine_state)
+{
+    // Resetting clears the code buffer, which may be executable-only between translations.
+    engine->allocator->protect_rw(
+        engine->allocator->context, engine_state->tier1_buffer, engine_state->tier1_buffer_size);
+    bal_tier1_compiler_reset(&engine_state->tier1_compiler);
+    (void)memset(engine_state->block_cache, 0, sizeof(engine_state->block_cache));
+    (void)memset(engine_state->lookup_table, 0, sizeof(engine_state->lookup_table));
 }
 
 void
@@ -602,6 +641,21 @@ bal_engine_clear_cache(bal_engine_t *engine)
         = (internal_engine_state_t *)engine->engine_state;
     atomic_store_explicit(
         &engine_state->thread_state.clear_cache_requested, true, memory_order_release);
+    bal_engine_request_exit(engine);
+}
+
+void
+bal_engine_invalidate_memory(bal_engine_t *engine)
+{
+    if (BAL_UNLIKELY(NULL == engine) || BAL_UNLIKELY(NULL == engine->engine_state))
+    {
+        return;
+    }
+
+    internal_engine_state_t *BAL_RESTRICT engine_state
+        = (internal_engine_state_t *)engine->engine_state;
+    atomic_store_explicit(
+        &engine_state->thread_state.invalidate_memory_requested, true, memory_order_release);
     bal_engine_request_exit(engine);
 }
 

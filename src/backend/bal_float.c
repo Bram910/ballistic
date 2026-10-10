@@ -1145,6 +1145,37 @@ execute_two_source(bal_cpu_t *cpu, context_t *context, const uint32_t instructio
     write_vector(cpu, rd, result);
 }
 
+/// Returns addend + n * m with a single rounding, with the NaN priority of FPMulAdd(): the addend
+/// first, and infinity times zero with a quiet NaN addend giving the default NaN.
+static uint64_t
+fused_multiply_add(context_t *context, uint64_t addend, uint64_t n, uint64_t m)
+{
+    addend = flush_input(context, addend);
+    n      = flush_input(context, n);
+    m      = flush_input(context, m);
+
+    const layout_t *layout                 = &context->layout;
+    const bool      is_infinity_times_zero = (is_infinity(layout, n) && is_zero(layout, m))
+                                        || (is_zero(layout, n) && is_infinity(layout, m));
+    uint64_t result = 0U;
+
+    if (true == is_nan(layout, addend) && false == is_signalling_nan(layout, addend)
+        && true == is_infinity_times_zero)
+    {
+        context->flags |= FPSR_IOC;
+        return default_nan(layout);
+    }
+
+    const uint64_t operands[3] = { addend, n, m };
+
+    if (false == process_nans(context, operands, 3U, &result))
+    {
+        result = host_operation(context, OPERATION_FUSED_MULTIPLY_ADD, n, m, addend);
+    }
+
+    return result;
+}
+
 static void
 execute_three_source(bal_cpu_t *cpu, context_t *context, const uint32_t instruction)
 {
@@ -1164,31 +1195,7 @@ execute_three_source(bal_cpu_t *cpu, context_t *context, const uint32_t instruct
     addend          = true == o1 ? addend ^ sign : addend;
     n               = o0 != o1 ? n ^ sign : n;
 
-    addend = flush_input(context, addend);
-    n      = flush_input(context, n);
-    m      = flush_input(context, m);
-
-    const layout_t *layout                 = &context->layout;
-    const bool      is_infinity_times_zero = (is_infinity(layout, n) && is_zero(layout, m))
-                                        || (is_zero(layout, n) && is_infinity(layout, m));
-    uint64_t result = 0U;
-
-    if (true == is_nan(layout, addend) && false == is_signalling_nan(layout, addend)
-        && true == is_infinity_times_zero)
-    {
-        context->flags |= FPSR_IOC;
-        write_vector(cpu, rd, default_nan(layout));
-        return;
-    }
-
-    const uint64_t operands[3] = { addend, n, m };
-
-    if (false == process_nans(context, operands, 3U, &result))
-    {
-        result = host_operation(context, OPERATION_FUSED_MULTIPLY_ADD, n, m, addend);
-    }
-
-    write_vector(cpu, rd, result);
+    write_vector(cpu, rd, fused_multiply_add(context, addend, n, m));
 }
 
 uint64_t
@@ -1285,6 +1292,483 @@ bal_execute_float(bal_cpu_t *cpu, const uint32_t instruction)
 
     cpu->fpsr |= context.flags;
     return 1U;
+}
+
+static context_t
+element_context(const uint64_t fpcr, const bool is_double)
+{
+    const precision_t precision = true == is_double ? PRECISION_DOUBLE : PRECISION_SINGLE;
+    context_t         context   = {
+                  .fpcr      = fpcr,
+                  .flags     = 0U,
+                  .layout    = layout_of(precision),
+                  .precision = precision,
+                  .pad       = 0U,
+    };
+    return context;
+}
+
+/// Returns +2.0 (FMULX, FRECPS) or +1.5 (FRSQRTS) with the given sign.
+static uint64_t
+constant(const context_t *context, const bool is_two, const uint64_t sign)
+{
+    if (PRECISION_DOUBLE == context->precision)
+    {
+        return sign | (true == is_two ? 0x4000000000000000ULL : 0x3FF8000000000000ULL);
+    }
+
+    return sign | (true == is_two ? 0x40000000ULL : 0x3FC00000ULL);
+}
+
+/// FRECPS (`is_reciprocal`) or FRSQRTS: 2 - a * b, or (3 - a * b) / 2, with a single rounding.
+static uint64_t
+reciprocal_step(context_t *context, uint64_t a, uint64_t b, const bool is_reciprocal)
+{
+    const layout_t *layout     = &context->layout;
+    a                          = flush_input(context, a ^ layout->sign_mask);
+    b                          = flush_input(context, b);
+    const uint64_t operands[2] = { a, b };
+    uint64_t       result      = 0U;
+
+    if (true == process_nans(context, operands, 2U, &result))
+    {
+        return result;
+    }
+
+    if ((is_infinity(layout, a) && is_zero(layout, b))
+        || (is_zero(layout, a) && is_infinity(layout, b)))
+    {
+        return constant(context, is_reciprocal, 0U);
+    }
+
+    if (true == is_infinity(layout, a) || true == is_infinity(layout, b))
+    {
+        return layout->exponent_mask | ((a ^ b) & layout->sign_mask);
+    }
+
+    const int previous_mode = fegetround();
+    (void)fesetround(host_rounding_mode(FPCR_RMODE(context->fpcr)));
+    (void)feclearexcept(FE_ALL_EXCEPT);
+
+    // (3 - a * b) / 2 must round once, so the halving goes into an operand rather than the
+    // result: halving a normal operand is exact. With both operands denormal the product is
+    // negligible next to 3 and the final halving is exact instead.
+    const uint64_t smallest_normal  = 1ULL << layout->fraction_bits;
+    const bool     can_halve_a      = (a & ~layout->sign_mask) >= (smallest_normal << 1U);
+    const bool     can_halve_b      = (b & ~layout->sign_mask) >= (smallest_normal << 1U);
+    const bool     is_halved_inside = false == is_reciprocal && (can_halve_a || can_halve_b);
+
+    if (PRECISION_DOUBLE == context->precision)
+    {
+        double x = to_double(a);
+        double y = to_double(b);
+
+        if (true == is_halved_inside)
+        {
+            x = true == can_halve_a ? x * 0.5 : x;
+            y = true == can_halve_a ? y : y * 0.5;
+        }
+
+        const double value
+            = fma(x, y, true == is_reciprocal ? 2.0 : (is_halved_inside ? 1.5 : 3.0));
+        result = from_double(true == is_reciprocal || is_halved_inside ? value : value / 2.0);
+    }
+    else
+    {
+        float x = to_float(a);
+        float y = to_float(b);
+
+        if (true == is_halved_inside)
+        {
+            x = true == can_halve_a ? x * 0.5F : x;
+            y = true == can_halve_a ? y : y * 0.5F;
+        }
+
+        const float value
+            = fmaf(x, y, true == is_reciprocal ? 2.0F : (is_halved_inside ? 1.5F : 3.0F));
+        result = from_float(true == is_reciprocal || is_halved_inside ? value : value / 2.0F);
+    }
+
+    const uint64_t flags = host_flags();
+    (void)fesetround(previous_mode);
+    return finish(context, result, flags);
+}
+
+/// The 9-bit reciprocal estimate of RecipEstimate(): `a` is in [256, 512).
+static uint64_t
+reciprocal_estimate_table(uint64_t a)
+{
+    a                = (a * 2U) + 1U;
+    const uint64_t b = (1ULL << 19U) / a;
+    return (b + 1U) / 2U;
+}
+
+/// The 9-bit reciprocal square root estimate of RecipSqrtEstimate(): `a` is in [128, 512).
+static uint64_t
+reciprocal_square_root_estimate_table(uint64_t a)
+{
+    if (a < 256U)
+    {
+        a = (a * 2U) + 1U;
+    }
+    else
+    {
+        a = (a >> 1U) << 1U;
+        a = (a + 1U) * 2U;
+    }
+
+    uint64_t b = 512U;
+
+    while (a * (b + 1U) * (b + 1U) < (1ULL << 28U))
+    {
+        ++b;
+    }
+
+    return (b + 1U) / 2U;
+}
+
+/// FRECPE and FRSQRTE, following FPRecipEstimate() and FPRSqrtEstimate() without FEAT_RPRES.
+static uint64_t
+estimate(context_t *context, uint64_t value, const bool is_square_root)
+{
+    const layout_t *layout     = &context->layout;
+    value                      = flush_input(context, value);
+    const uint64_t operands[1] = { value };
+    uint64_t       result      = 0U;
+    const uint64_t sign        = value & layout->sign_mask;
+    const bool     is_double   = PRECISION_DOUBLE == context->precision;
+
+    if (true == process_nans(context, operands, 1U, &result))
+    {
+        return result;
+    }
+
+    if (true == is_zero(layout, value))
+    {
+        context->flags |= FPSR_DZC;
+        return sign | layout->exponent_mask;
+    }
+
+    if (true == is_square_root)
+    {
+        if (sign != 0U)
+        {
+            context->flags |= FPSR_IOC;
+            return default_nan(layout);
+        }
+
+        if (true == is_infinity(layout, value))
+        {
+            return 0U;
+        }
+    }
+    else if (true == is_infinity(layout, value))
+    {
+        return sign;
+    }
+
+    // The fraction is held in 52 bits whatever the precision.
+    uint64_t fraction = value & layout->fraction_mask;
+    int64_t  exponent = (int64_t)((value & layout->exponent_mask) >> layout->fraction_bits);
+    fraction          = true == is_double ? fraction : fraction << 29U;
+
+    if (false == is_square_root)
+    {
+        // Too small a value overflows: to infinity or the largest normal, by rounding mode.
+        const uint64_t magnitude = value & ~layout->sign_mask;
+        const bool     is_tiny
+            = true == is_double ? magnitude < 0x0004000000000000ULL : magnitude < 0x00200000ULL;
+
+        if (true == is_tiny)
+        {
+            const uint32_t rmode = FPCR_RMODE(context->fpcr);
+            const bool     is_to_infinity
+                = 0U == rmode || (1U == rmode && 0U == sign) || (2U == rmode && sign != 0U);
+            context->flags |= FPSR_OFC | FPSR_IXC;
+            return true == is_to_infinity
+                       ? sign | layout->exponent_mask
+                       : sign | (layout->exponent_mask - (1ULL << layout->fraction_bits))
+                             | layout->fraction_mask;
+        }
+
+        const bool is_huge
+            = true == is_double ? magnitude >= 0x7FD0000000000000ULL : magnitude >= 0x7E800000ULL;
+
+        if (0U != (context->fpcr & FPCR_FZ) && true == is_huge)
+        {
+            context->flags |= FPSR_UFC;
+            return sign;
+        }
+
+        if (0 == exponent)
+        {
+            if (0U == (fraction & (1ULL << 51U)))
+            {
+                exponent = -1;
+                fraction = (fraction << 2U) & ((1ULL << 52U) - 1U);
+            }
+            else
+            {
+                fraction = (fraction << 1U) & ((1ULL << 52U) - 1U);
+            }
+        }
+
+        const uint64_t scaled          = 0x100U | (fraction >> 44U);
+        int64_t        result_exponent = (true == is_double ? 2045 : 253) - exponent;
+        uint64_t       result_fraction = (reciprocal_estimate_table(scaled) & 0xFFU) << 44U;
+
+        if (0 == result_exponent)
+        {
+            result_fraction = (1ULL << 51U) | (result_fraction >> 1U);
+        }
+        else if (-1 == result_exponent)
+        {
+            result_fraction = (1ULL << 50U) | (result_fraction >> 2U);
+            result_exponent = 0;
+        }
+
+        result_fraction = true == is_double ? result_fraction : result_fraction >> 29U;
+        return sign | ((uint64_t)result_exponent << layout->fraction_bits) | result_fraction;
+    }
+
+    if (0 == exponent)
+    {
+        while (0U == (fraction & (1ULL << 51U)))
+        {
+            fraction = (fraction << 1U) & ((1ULL << 52U) - 1U);
+            --exponent;
+        }
+
+        fraction = (fraction << 1U) & ((1ULL << 52U) - 1U);
+    }
+
+    // An even exponent scales to [256, 512), an odd one to [128, 256).
+    const uint64_t scaled
+        = 0 == (exponent & 1) ? 0x100U | (fraction >> 44U) : 0x80U | (fraction >> 45U);
+    const int64_t  result_exponent = ((true == is_double ? 3068 : 380) - exponent) / 2;
+    const uint64_t estimate_bits   = reciprocal_square_root_estimate_table(scaled) & 0xFFU;
+    const uint64_t result_fraction
+        = true == is_double ? estimate_bits << 44U : estimate_bits << 15U;
+    return ((uint64_t)result_exponent << layout->fraction_bits) | result_fraction;
+}
+
+/// FCMEQ, FCMGE, FCMGT, FACGE and FACGT: all ones when the comparison holds.
+static uint64_t
+compare_mask(context_t *context, uint64_t a, uint64_t b, const bal_float_operation_t operation)
+{
+    const layout_t *layout   = &context->layout;
+    const uint64_t  all_ones = layout->bits >= 64U ? ~0ULL : (1ULL << layout->bits) - 1U;
+    a                        = flush_input(context, a);
+    b                        = flush_input(context, b);
+
+    if (true == is_nan(layout, a) || true == is_nan(layout, b))
+    {
+        // FCMEQ is a quiet comparison; the ordered ones signal on every NaN.
+        if (operation != BAL_FLOAT_COMPARE_EQUAL || true == is_signalling_nan(layout, a)
+            || true == is_signalling_nan(layout, b))
+        {
+            context->flags |= FPSR_IOC;
+        }
+
+        return 0U;
+    }
+
+    if (BAL_FLOAT_ABSOLUTE_COMPARE_GREATER_EQUAL == operation
+        || BAL_FLOAT_ABSOLUTE_COMPARE_GREATER == operation)
+    {
+        a &= ~layout->sign_mask;
+        b &= ~layout->sign_mask;
+    }
+
+    const bool is_equal_result = is_equal(context, a, b);
+    bool       holds           = false;
+
+    switch (operation)
+    {
+        case BAL_FLOAT_COMPARE_EQUAL:
+            holds = is_equal_result;
+            break;
+        case BAL_FLOAT_COMPARE_GREATER_EQUAL:
+        case BAL_FLOAT_ABSOLUTE_COMPARE_GREATER_EQUAL:
+            holds = is_equal_result || is_less(context, b, a);
+            break;
+        default:
+            holds = false == is_equal_result && is_less(context, b, a);
+            break;
+    }
+
+    return true == holds ? all_ones : 0U;
+}
+
+/// FMULX: a multiply where infinity times zero gives 2 with the sign of the product.
+static uint64_t
+multiply_extended(context_t *context, uint64_t a, uint64_t b)
+{
+    const layout_t *layout     = &context->layout;
+    a                          = flush_input(context, a);
+    b                          = flush_input(context, b);
+    const uint64_t operands[2] = { a, b };
+    uint64_t       result      = 0U;
+
+    if (true == process_nans(context, operands, 2U, &result))
+    {
+        return result;
+    }
+
+    if ((is_infinity(layout, a) && is_zero(layout, b))
+        || (is_zero(layout, a) && is_infinity(layout, b)))
+    {
+        return constant(context, true, (a ^ b) & layout->sign_mask);
+    }
+
+    return host_operation(context, OPERATION_MULTIPLY, a, b, 0U);
+}
+
+/// FADD, FSUB, FMUL, FDIV and FSQRT with NaN processing and FPCR.FZ.
+static uint64_t
+arithmetic(context_t *context, const operation_t operation, uint64_t a, uint64_t b)
+{
+    const uint32_t count       = OPERATION_SQUARE_ROOT == operation ? 1U : 2U;
+    a                          = flush_input(context, a);
+    b                          = 2U == count ? flush_input(context, b) : 0U;
+    const uint64_t operands[2] = { a, b };
+    uint64_t       result      = 0U;
+
+    if (true == process_nans(context, operands, count, &result))
+    {
+        return result;
+    }
+
+    return host_operation(context, operation, a, b, 0U);
+}
+
+uint64_t
+bal_float_element(const uint64_t              fpcr,
+                  uint64_t                   *fpsr,
+                  const bool                  is_double,
+                  const bal_float_operation_t operation,
+                  const uint64_t              a,
+                  const uint64_t              b,
+                  const uint64_t              c)
+{
+    context_t context = element_context(fpcr, is_double);
+    uint64_t  result  = 0U;
+
+    switch (operation)
+    {
+        case BAL_FLOAT_ADD:
+            result = arithmetic(&context, OPERATION_ADD, a, b);
+            break;
+        case BAL_FLOAT_SUBTRACT:
+            result = arithmetic(&context, OPERATION_SUBTRACT, a, b);
+            break;
+        case BAL_FLOAT_MULTIPLY:
+            result = arithmetic(&context, OPERATION_MULTIPLY, a, b);
+            break;
+        case BAL_FLOAT_DIVIDE:
+            result = arithmetic(&context, OPERATION_DIVIDE, a, b);
+            break;
+        case BAL_FLOAT_SQUARE_ROOT:
+            result = arithmetic(&context, OPERATION_SQUARE_ROOT, a, 0U);
+            break;
+        case BAL_FLOAT_MAXIMUM:
+        case BAL_FLOAT_MINIMUM:
+        case BAL_FLOAT_MAXIMUM_NUMBER:
+        case BAL_FLOAT_MINIMUM_NUMBER:
+            result = minimum_maximum(
+                &context,
+                a,
+                b,
+                BAL_FLOAT_MAXIMUM == operation || BAL_FLOAT_MAXIMUM_NUMBER == operation,
+                BAL_FLOAT_MAXIMUM_NUMBER == operation || BAL_FLOAT_MINIMUM_NUMBER == operation);
+            break;
+        case BAL_FLOAT_MULTIPLY_EXTENDED:
+            result = multiply_extended(&context, a, b);
+            break;
+        case BAL_FLOAT_MULTIPLY_ADD:
+            result = fused_multiply_add(&context, c, a, b);
+            break;
+        case BAL_FLOAT_ABSOLUTE_DIFFERENCE:
+            result = arithmetic(&context, OPERATION_SUBTRACT, a, b) & ~context.layout.sign_mask;
+            break;
+        case BAL_FLOAT_RECIPROCAL_STEP:
+            result = reciprocal_step(&context, a, b, true);
+            break;
+        case BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP:
+            result = reciprocal_step(&context, a, b, false);
+            break;
+        case BAL_FLOAT_RECIPROCAL_ESTIMATE:
+            result = estimate(&context, a, false);
+            break;
+        case BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE:
+            result = estimate(&context, a, true);
+            break;
+        default:
+            result = compare_mask(&context, a, b, operation);
+            break;
+    }
+
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_round_element(const uint64_t fpcr,
+                        uint64_t      *fpsr,
+                        const bool     is_double,
+                        const uint64_t value,
+                        const uint32_t rmode,
+                        const bool     exact)
+{
+    context_t      context = element_context(fpcr, is_double);
+    const uint64_t result  = round_to_integral(&context, value, rmode, exact);
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_to_integer_element(const uint64_t fpcr,
+                             uint64_t      *fpsr,
+                             const bool     is_double,
+                             const uint64_t value,
+                             const uint32_t fraction_bits,
+                             const uint32_t rmode,
+                             const bool     is_unsigned,
+                             const uint32_t bits)
+{
+    context_t      context = element_context(fpcr, is_double);
+    const uint64_t result
+        = convert_to_integer(&context, value, fraction_bits, rmode, is_unsigned, bits);
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_from_integer_element(const uint64_t fpcr,
+                               uint64_t      *fpsr,
+                               const bool     is_double,
+                               const uint64_t value,
+                               const uint32_t fraction_bits,
+                               const bool     is_unsigned,
+                               const uint32_t bits)
+{
+    context_t      context = element_context(fpcr, is_double);
+    const uint64_t result = convert_from_integer(&context, value, fraction_bits, is_unsigned, bits);
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_convert_element(const uint64_t fpcr,
+                          uint64_t      *fpsr,
+                          const bool     to_double,
+                          const uint64_t value)
+{
+    context_t      context = element_context(fpcr, false == to_double);
+    const uint64_t result  = convert_precision(
+        &context, value, true == to_double ? PRECISION_DOUBLE : PRECISION_SINGLE);
+    *fpsr |= context.flags;
+    return result;
 }
 
 /*** end of file ***/

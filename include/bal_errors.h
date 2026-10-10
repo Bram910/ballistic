@@ -51,6 +51,10 @@ extern "C"
         /// Ballistic tried to access memory it was not allowed to access.
         BAL_ERROR_UNKNOWN_INSTRUCTION = -102,
 
+        /// The guest raised an exception other than a data abort, such as an SVC, that the host
+        /// handles; bal_cpu_t::exception says which. The host clears it before resuming.
+        BAL_ERROR_GUEST_EXCEPTION = -103,
+
         // Thread Errors
 
         /// Error when creating a thread.

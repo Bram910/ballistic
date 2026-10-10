@@ -152,18 +152,23 @@ main(const int argc, const char **argv)
             continue;
         }
 
-        // A memory fault is a valid outcome when both engines raise it; their final states are
-        // then compared like any other. A fault in only one of them is a mismatch.
-        const bool is_ballistic_fault = BAL_FUZZER_WORKER_MEMORY_FAULT == ballistic_response.status;
-        const bool is_unicorn_fault   = BAL_FUZZER_WORKER_MEMORY_FAULT == unicorn_response.status;
+        // A memory fault or another guest exception is a valid outcome when both engines raise
+        // it; their final states, including which exception it was, are then compared like any
+        // other. An exception in only one of them is a mismatch.
+        const bool is_ballistic_fault
+            = BAL_FUZZER_WORKER_MEMORY_FAULT == ballistic_response.status
+              || BAL_FUZZER_WORKER_GUEST_EXCEPTION == ballistic_response.status;
+        const bool is_unicorn_fault
+            = BAL_FUZZER_WORKER_MEMORY_FAULT == unicorn_response.status
+              || BAL_FUZZER_WORKER_GUEST_EXCEPTION == unicorn_response.status;
 
         if (is_ballistic_fault != is_unicorn_fault)
         {
             BAL_LOG_ERROR(&bal_thread_logger,
-                          "Memory fault mismatch for seed 0x%08X: Ballistic %s, Unicorn %s.",
+                          "Exception mismatch for seed 0x%08X: Ballistic %s, Unicorn %s.",
                           *seed_cursor,
-                          true == is_ballistic_fault ? "faulted" : "did not fault",
-                          true == is_unicorn_fault ? "faulted" : "did not fault");
+                          true == is_ballistic_fault ? "raised one" : "did not",
+                          true == is_unicorn_fault ? "raised one" : "did not");
             ++seeds_failed;
             ++seed_cursor;
             continue;
@@ -247,6 +252,9 @@ main(const int argc, const char **argv)
                         break;
                     case BAL_FUZZER_FIELD_FLAG_V:
                         field_name = "flag_v";
+                        break;
+                    case BAL_FUZZER_FIELD_EXCEPTION:
+                        field_name = "exception";
                         break;
                     case BAL_FUZZER_FIELD_VECTOR:
                         (void)snprintf(register_label,

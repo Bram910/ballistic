@@ -150,6 +150,10 @@ main(int argc, char **argv)
         {
             response.status = BAL_FUZZER_WORKER_MEMORY_FAULT;
         }
+        else if (BAL_ERROR_GUEST_EXCEPTION == status)
+        {
+            response.status = BAL_FUZZER_WORKER_GUEST_EXCEPTION;
+        }
         else if (status != BAL_SUCCESS)
         {
             response.status = BAL_FUZZER_WORKER_ERROR_EXECUTION_FAILED;

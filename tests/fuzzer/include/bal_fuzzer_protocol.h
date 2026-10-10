@@ -15,7 +15,8 @@ BAL_ALIGNED(64) typedef struct
     uint8_t  flag_z;
     uint8_t  flag_n;
     uint8_t  flag_v;
-    uint32_t pad0;
+    /// The bal_exception_t the instruction raised, or BAL_EXCEPTION_NONE.
+    uint32_t exception;
     uint64_t instruction_count;
     uint64_t v[32][2];
     uint64_t pad1[13];
@@ -35,6 +36,10 @@ typedef enum
     /// The instruction accessed memory the worker does not map. The final state is still sent so
     /// it can be compared with the other engine.
     BAL_FUZZER_WORKER_MEMORY_FAULT,
+
+    /// The instruction raised another guest exception, such as an SVC; final_state.exception
+    /// says which.
+    BAL_FUZZER_WORKER_GUEST_EXCEPTION,
     BAL_FUZZER_WORKER_ERROR_END
 } bal_fuzzer_worker_status_t;
 

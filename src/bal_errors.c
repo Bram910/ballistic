@@ -29,6 +29,8 @@ bal_error_to_string(const bal_error_t error)
             return "guest code tried to execute an unaligned instruction";
         case BAL_ERROR_UNKNOWN_INSTRUCTION:
             return "failed to decode ARM instruction";
+        case BAL_ERROR_GUEST_EXCEPTION:
+            return "guest raised an exception for the host to handle";
 
             // --- Threading ---
         case BAL_ERROR_THREAD_CREATION:

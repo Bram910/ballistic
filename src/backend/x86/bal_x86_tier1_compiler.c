@@ -3,6 +3,7 @@
 #include "backend/bal_cpu.h"
 #include "backend/bal_float.h"
 #include "backend/bal_simd.h"
+#include "backend/bal_system.h"
 #include "bal_decoder.h"
 #include "bal_engine.h"
 #include "bal_engine_flags.h"
@@ -127,6 +128,21 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
                              bal_guest_address_t           guest_address);
 
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void emit_guest_exception(bal_tier1_compiler_t *compiler,
+                                 bal_exception_t       exception,
+                                 uint64_t              immediate);
+
+static bool translate_exception(bal_tier1_compiler_t *compiler,
+                                uint32_t              instruction,
+                                bal_guest_address_t   guest_address);
+
+static void translate_system(bal_tier1_compiler_t         *compiler,
+                             const bal_memory_interface_t *memory_interface,
+                             uint32_t                      instruction,
+                             bal_guest_address_t           guest_address);
 
 static void translate_data_processing_1_source(bal_tier1_compiler_t *compiler,
                                                uint32_t              instruction);
@@ -590,11 +606,21 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     is_block_terminated = true;
                     break;
                 case OPCODE_NOP:
+                    // DSB with the nXS qualifier needs FEAT_XS, which the guest CPU does not
+                    // implement, so it is undefined.
+                    if (0xD503323FU == (instruction & 0xFFFFF3FFU))
+                    {
+                        emit_guest_exception(compiler, BAL_EXCEPTION_UNDEFINED_INSTRUCTION, 0U);
+                        has_branch_target   = true;
+                        branch_target_pc    = guest_address;
+                        is_block_terminated = true;
+                        break;
+                    }
+
                     // DMB and DSB order memory accesses for other observers. x86 keeps loads and
                     // stores in order except for a load passing an earlier store, so a full fence
                     // is always sufficient. ISB, SB, CLREX and the hints need nothing here.
-                    if (0xD503309FU == (instruction & 0xFFFFF0DFU)
-                        || 0xD503323FU == (instruction & 0xFFFFF3FFU))
+                    if (0xD503309FU == (instruction & 0xFFFFF0DFU))
                     {
                         const bal_x86_macro_t fence_macro = {
                             .opcode = BAL_X86_MACRO_MFENCE,
@@ -611,6 +637,20 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_FLOAT:
                     translate_float(compiler, instruction);
+                    break;
+                case OPCODE_INTEGER_HELPER:
+                    translate_integer_helper(compiler, instruction);
+                    break;
+                case OPCODE_EXCEPTION:
+                    // SVC resumes after itself; BRK and the undefined instructions report their
+                    // own address.
+                    if (true == translate_exception(compiler, instruction, guest_address))
+                    {
+                        has_branch_target = true;
+                        branch_target_pc  = guest_address;
+                    }
+
+                    is_block_terminated = true;
                     break;
                 case OPCODE_TRAP:
                     BAL_LOG_INFO(&bal_thread_logger,
@@ -683,6 +723,13 @@ bal_tier1_compiler_translate(bal_tier1_compiler_t         *compiler,
                     if (0xD5100000U == (instruction & 0xFFD00000U))
                     {
                         translate_system_register(compiler, instruction);
+                        break;
+                    }
+
+                    // SYS: bits 31:19 = 1101010100001.
+                    if (0xD5080000U == (instruction & 0xFFF80000U))
+                    {
+                        translate_system(compiler, memory_interface, instruction, guest_address);
                         break;
                     }
 
@@ -4118,6 +4165,28 @@ emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     }
 }
 
+/// Calls a runtime helper `function(cpu, instruction)` that executes one instruction on the guest
+/// registers, which are flushed to the cpu structure first.
+static void
+emit_register_helper_call(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                          const uint32_t                     instruction,
+                          const uint64_t                     function)
+{
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+
+    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+
+    const bal_x86_macro_t instruction_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = BAL_X86_ABI_ARG2,
+        .immediate_or_offset = instruction,
+    };
+    bal_sliding_window_push(&compiler->window, instruction_macro);
+
+    emit_runtime_call(compiler, function);
+}
+
 /// Calls a runtime helper `function(cpu, memory_interface, instruction)` that executes one
 /// memory instruction on the guest state, and raises a data abort when it returns zero.
 ///
@@ -4806,17 +4875,126 @@ translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
         helper = (uint64_t)(uintptr_t)&bal_execute_simd;
     }
 
+    emit_register_helper_call(compiler, instruction, helper);
+}
+
+/// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8 and SETF16
+/// through bal_execute_integer_helper(). They are rare enough not to need inline code.
+static void
+translate_integer_helper(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    if (BAL_UNLIKELY(false == bal_is_integer_helper_supported(instruction)))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: unsupported encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    emit_register_helper_call(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_integer_helper);
+}
+
+/// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception
+/// and exception_immediate set for the host, which bal_engine_run_thread() reports as
+/// BAL_ERROR_GUEST_EXCEPTION.
+///
+/// SVC raises BAL_EXCEPTION_SUPERVISOR_CALL and leaves the PC after it, where the host resumes
+/// once it has handled the call. BRK raises BAL_EXCEPTION_BREAKPOINT, and UDF, HLT, HVC and SMC,
+/// which are undefined at EL0, raise BAL_EXCEPTION_UNDEFINED_INSTRUCTION; those leave the PC on
+/// the instruction. Returns true when the PC stays on the instruction.
+static bool
+translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                    const uint32_t                     instruction,
+                    const bal_guest_address_t          guest_address)
+{
+    (void)guest_address;
+    uint64_t        immediate      = (instruction >> 5U) & 0xFFFFU;
+    bal_exception_t exception      = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
+    bool            is_pc_retained = true;
+
+    // Exception generation: 11010100 opc imm16 op2 LL, with op2 = 000.
+    switch (instruction & 0xFFE0001FU)
+    {
+        case 0xD4000001U: // SVC
+            exception      = BAL_EXCEPTION_SUPERVISOR_CALL;
+            is_pc_retained = false;
+            break;
+        case 0xD4200000U: // BRK
+            exception = BAL_EXCEPTION_BREAKPOINT;
+            break;
+        case 0xD4000002U: // HVC
+        case 0xD4000003U: // SMC
+        case 0xD4400000U: // HLT
+            break;
+        default:
+            if (0U != (instruction & 0xFFFF0000U))
+            {
+                BAL_LOG_ERROR(&bal_thread_logger,
+                              "Aborting function: unsupported exception generating encoding %08x",
+                              instruction);
+                compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+                return false;
+            }
+
+            immediate = instruction & 0xFFFFU; // UDF
+            break;
+    }
+
+    emit_guest_exception(compiler, exception, immediate);
+    return is_pc_retained;
+}
+
+/// Sets bal_cpu_t::exception and exception_immediate for the host. The caller ends the block,
+/// and terminate_block() then writes the PC and returns.
+static void
+emit_guest_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                     const bal_exception_t              exception,
+                     const uint64_t                     immediate)
+{
     flush_dirty_registers(compiler);
-    reset_register_allocator(compiler);
+    bal_sliding_window_flush_all(&compiler->window);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, immediate);
+    bal_x86_emit_store_r64_rbp_offset(
+        assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception_immediate));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, (uint64_t)exception);
+    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+}
 
-    push_macro(compiler, BAL_X86_MACRO_MOV_REGISTER_REGISTER, BAL_X86_ABI_ARG1, BAL_X86_RBP);
+/// Translates the SYS instructions EL0 can execute: DC ZVA zeroes a 64-byte block through
+/// bal_execute_cache_zero(), and the cache maintenance operations DC CVAC, CVAU, CVAP, CVADP,
+/// CIVAC and IC IVAU do nothing, since translated code never caches guest memory.
+static void
+translate_system(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                 const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                 const uint32_t                             instruction,
+                 const bal_guest_address_t                  guest_address)
+{
+    // SYS #op1, Cn, Cm, #op2: op1 = 011 for the EL0 operations, Cn = C7.
+    const uint32_t operation = (instruction >> 5U) & 0x3FFFU; // op1:CRn:CRm:op2
 
-    const bal_x86_macro_t instruction_macro = {
-        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
-        .destination         = BAL_X86_ABI_ARG2,
-        .immediate_or_offset = instruction,
-    };
-    bal_sliding_window_push(&compiler->window, instruction_macro);
-
-    emit_runtime_call(compiler, helper);
+    switch (operation)
+    {
+        case (3U << 11U) | (7U << 7U) | (4U << 3U) | 1U: // DC ZVA
+            emit_memory_helper_call(compiler,
+                                    memory_interface,
+                                    instruction,
+                                    guest_address,
+                                    (uint64_t)(uintptr_t)&bal_execute_cache_zero);
+            return;
+        case (3U << 11U) | (7U << 7U) | (10U << 3U) | 1U: // DC CVAC
+        case (3U << 11U) | (7U << 7U) | (11U << 3U) | 1U: // DC CVAU
+        case (3U << 11U) | (7U << 7U) | (12U << 3U) | 1U: // DC CVAP
+        case (3U << 11U) | (7U << 7U) | (13U << 3U) | 1U: // DC CVADP
+        case (3U << 11U) | (7U << 7U) | (14U << 3U) | 1U: // DC CIVAC
+        case (3U << 11U) | (7U << 7U) | (5U << 3U) | 1U:  // IC IVAU
+            return;
+        default:
+            BAL_LOG_ERROR(&bal_thread_logger,
+                          "Aborting function: unsupported SYS operation %08x",
+                          instruction);
+            compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+            return;
+    }
 }

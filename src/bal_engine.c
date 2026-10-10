@@ -399,14 +399,16 @@ bal_engine_run_thread(bal_engine_t *engine)
 
         execute_jit_block(compiled_block, engine->cpu);
 
-        // The block stopped on a guest exception; pc holds the instruction that raised it.
+        // The block stopped on a guest exception; see bal_exception_t for what pc holds.
         if (BAL_UNLIKELY(engine->cpu->exception != BAL_EXCEPTION_NONE))
         {
             BAL_LOG_INFO(&bal_thread_logger,
                          "Guest exception %u at PC 0x%016llX",
                          engine->cpu->exception,
                          (unsigned long long)engine->cpu->pc);
-            engine->status = BAL_ERROR_MEMORY_FAULT;
+            engine->status = BAL_EXCEPTION_DATA_ABORT == engine->cpu->exception
+                                 ? BAL_ERROR_MEMORY_FAULT
+                                 : BAL_ERROR_GUEST_EXCEPTION;
             break;
         }
 

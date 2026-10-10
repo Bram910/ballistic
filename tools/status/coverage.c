@@ -302,8 +302,12 @@ main(void)
 
             // Unicorn compares the zero-extended memory value in LDSMAX and LDSMIN narrower than
             // 64 bits, which the architecture compares signed, so it cannot verify them.
+            // Unicorn also writes the 16-bit result of FCVTZS and FCVTZU (scalar, fixed-point) on
+            // half precision sign-extended to 32 bits instead of clearing the register above it.
             const bool is_known_unicorn_bug
-                = 0x38204000U == (instruction & 0x3F20EC00U) && (instruction >> 30U) != 3U;
+                = (0x38204000U == (instruction & 0x3F20EC00U) && (instruction >> 30U) != 3U)
+                  || (0x5F00FC00U == (instruction & 0xDF80FC00U)
+                      && 1U == ((instruction >> 20U) & 0x7U));
 
             if (true == is_known_unicorn_bug)
             {

@@ -15,8 +15,9 @@
 //! - `todo`: tier 1 rejected every sample.
 //!
 //! Half of the general purpose registers hold addresses inside a mapped data area, so loads and
-//! stores mostly reach memory. An access that faults in both engines is a match when the
-//! registers agree, as in the fuzzer; a fault in only one of them is a mismatch.
+//! stores mostly reach memory. A memory fault or another guest exception, such as an SVC, raised
+//! by both engines is a match when it is the same exception and the registers agree, as in the
+//! fuzzer; one raised by only one of them is a mismatch.
 
 #include "bal_decoder.h"
 #include "bal_engine.h"
@@ -37,14 +38,19 @@
 // The FPSR cumulative flags (IOC, DZC, OFC, UFC, IXC, IDC) and QC.
 #define FPSR_COMPARED_BITS 0x0800009FULL
 
-// QEMU's exception number for a data abort, which Unicorn raises for alignment faults.
+// QEMU's exception numbers: an undefined instruction, an SVC, a data abort, which Unicorn raises
+// for alignment faults, and a BRK.
+#define UNICORN_EXCEPTION_UNDEFINED  1U
+#define UNICORN_EXCEPTION_SVC        2U
 #define UNICORN_EXCEPTION_DATA_ABORT 4U
+#define UNICORN_EXCEPTION_BREAKPOINT 7U
 #define UNICORN_EXCEPTION_NONE       0xFFFFFFFFU
 
 typedef enum
 {
     RUN_OK,
     RUN_MEMORY_FAULT,
+    RUN_EXCEPTION,
     RUN_REJECTED,
 } run_result_t;
 
@@ -55,7 +61,8 @@ typedef struct
     uint64_t pc;
     uint64_t fpsr;
     uint32_t nzcv;
-    uint32_t pad;
+    /// The bal_exception_t raised, or BAL_EXCEPTION_NONE.
+    uint32_t exception;
 } state_t;
 
 static uint64_t g_random_state = 0x2545F4914F6CDD1DULL;
@@ -144,7 +151,23 @@ run_unicorn(uint32_t instruction, state_t *state)
     if (UC_ERR_READ_UNMAPPED == error || UC_ERR_WRITE_UNMAPPED == error
         || UNICORN_EXCEPTION_DATA_ABORT == exception_number)
     {
+        state->exception = BAL_EXCEPTION_DATA_ABORT;
         return RUN_MEMORY_FAULT;
+    }
+
+    switch (exception_number)
+    {
+        case UNICORN_EXCEPTION_SVC:
+            state->exception = BAL_EXCEPTION_SUPERVISOR_CALL;
+            return RUN_EXCEPTION;
+        case UNICORN_EXCEPTION_BREAKPOINT:
+            state->exception = BAL_EXCEPTION_BREAKPOINT;
+            return RUN_EXCEPTION;
+        case UNICORN_EXCEPTION_UNDEFINED:
+            state->exception = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
+            return RUN_EXCEPTION;
+        default:
+            break;
     }
 
     return UC_ERR_OK == error && UNICORN_EXCEPTION_NONE == exception_number ? RUN_OK : RUN_REJECTED;
@@ -189,7 +212,8 @@ run_ballistic(uint32_t instruction, state_t *state)
     bal_engine_destroy(&engine);
     (void)bal_flat_translation_interface_destroy(&allocator, &memory_interface);
 
-    if (status != BAL_SUCCESS && status != BAL_ERROR_MEMORY_FAULT)
+    if (status != BAL_SUCCESS && status != BAL_ERROR_MEMORY_FAULT
+        && status != BAL_ERROR_GUEST_EXCEPTION)
     {
         return RUN_REJECTED;
     }
@@ -198,8 +222,15 @@ run_ballistic(uint32_t instruction, state_t *state)
     (void)memcpy(state->v, cpu.v, sizeof(cpu.v));
     state->nzcv = ((uint32_t)cpu.flag_n << 31U) | ((uint32_t)cpu.flag_z << 30U)
                   | ((uint32_t)cpu.flag_c << 29U) | ((uint32_t)cpu.flag_v << 28U);
-    state->pc   = cpu.pc;
-    state->fpsr = cpu.fpsr;
+    state->pc        = cpu.pc;
+    state->fpsr      = cpu.fpsr;
+    state->exception = cpu.exception;
+
+    if (BAL_ERROR_GUEST_EXCEPTION == status)
+    {
+        return RUN_EXCEPTION;
+    }
+
     return BAL_ERROR_MEMORY_FAULT == status ? RUN_MEMORY_FAULT : RUN_OK;
 }
 
@@ -288,12 +319,12 @@ main(void)
 
             ++compared;
             const int is_match
-                = ballistic_result == unicorn_result
+                = ballistic_result == unicorn_result && expected.exception == actual.exception
                   && 0 == memcmp(expected.x, actual.x, sizeof(expected.x))
                   && 0 == memcmp(expected.v, actual.v, sizeof(expected.v))
                   && expected.nzcv == actual.nzcv && expected.pc == actual.pc
                   && (expected.fpsr & FPSR_COMPARED_BITS) == (actual.fpsr & FPSR_COMPARED_BITS)
-                  && (RUN_MEMORY_FAULT == ballistic_result
+                  && (RUN_MEMORY_FAULT == ballistic_result || RUN_EXCEPTION == ballistic_result
                       || 0 == memcmp(g_unicorn_memory, g_ballistic_memory, GUEST_MEMORY_SIZE));
             matched += is_match ? 1U : 0U;
         }

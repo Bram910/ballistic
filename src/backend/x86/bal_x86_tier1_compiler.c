@@ -8120,8 +8120,16 @@ emit_fast_float_to_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const ui
 
     slow_jumps[0] = begin_float_sequence(compiler);
 
-    // Magnitudes of 2^64 and more saturate; checking first keeps the scaling from overflowing.
-    if (fbits != 0U && true == in_double)
+    // An unsigned X of 2^63 or more is in range but would make the signed conversion raise
+    // Invalid, and magnitudes of 2^64 and more saturate; checking first also keeps the scaling
+    // from overflowing.
+    const uint64_t bias = true == in_double ? 1023U : 127U;
+
+    if (true == is_unsigned && true == is_64bit)
+    {
+        slow_jumps[count++] = emit_magnitude_check(compiler, rn, in_double, bias + 63U - fbits);
+    }
+    else if (fbits != 0U && true == in_double)
     {
         slow_jumps[count++] = emit_magnitude_check(compiler, rn, true, 1023U + 64U);
     }
@@ -8401,11 +8409,25 @@ emit_fast_vector_convert(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
     const uint32_t                    rd        = instruction & 0x1FU;
     const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-    size_t                            slow_jumps[2];
+    size_t                            slow_jumps[3];
     uint32_t                          count = 1U;
 
     slow_jumps[0] = begin_float_sequence(compiler);
     emit_load_vector(assembler, XMM0, rn, is_quad);
+
+    if (true == is_unsigned)
+    {
+        // Lanes of 2^31 and more (and NaNs) would make the signed conversion raise Invalid,
+        // although some are in range: their exponents, above 157, take the slow path first.
+        emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM2, 1U, "pslld");
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 24U, "psrld");
+        emit_broadcast_pattern(assembler, XMM3, 0x0000009D0000009DULL);
+        emit_sse(assembler, 0x66, false, 0x66, XMM2, XMM3, "pcmpgtd");
+        emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM2, "movmskps");
+        bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    }
 
     if (4U == mode)
     {

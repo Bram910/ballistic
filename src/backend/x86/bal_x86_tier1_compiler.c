@@ -6330,103 +6330,6 @@ emit_fast_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t in
     return true;
 }
 
-/// SCVTF (scalar, integer) from a W or X register to single or double precision: CVTSI2SS rounds
-/// to nearest under GUEST_MXCSR and raises Inexact as SCVTF raises IXC, and the result is never a
-/// NaN or tiny.
-static bool
-emit_fast_convert_from_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler,
-                               const uint32_t                     instruction)
-{
-    // sf 0 0 11110 ftype 1 00 010 000000 Rn Rd.
-    const uint32_t ftype = (instruction >> 22U) & 0x3U;
-
-    if (0x1E220000U != (instruction & 0x7F3FFC00U) || ftype > 1U)
-    {
-        return false;
-    }
-
-    const bool                        is_double = 1U == ftype;
-    const bool                        is_64bit  = 1U == (instruction >> 31U);
-    const uint32_t                    rd        = instruction & 0x1FU;
-    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
-    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-    size_t                            slow_jumps[1];
-
-    slow_jumps[0] = begin_float_sequence(compiler);
-
-    if (31U == rn)
-    {
-        bal_x86_emit_xor_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
-    }
-    else
-    {
-        bal_x86_emit_load_r64_rbp_offset(assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, x[rn]));
-    }
-
-    // CVTSI2SS merges into the destination, so xmm0 is cleared first.
-    emit_sse(assembler, 0U, false, 0x57, XMM0, XMM0, "xorps");
-    emit_sse(assembler,
-             true == is_double ? 0xF2 : 0xF3,
-             is_64bit,
-             0x2A,
-             XMM0,
-             (uint8_t)SCRATCH_A,
-             "cvtsi2s");
-    emit_sse(assembler, 0x66, is_double, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movd");
-    emit_store_scalar_result(assembler, rd);
-    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, 1U);
-    return true;
-}
-
-/// FCVTZS (scalar, integer) from single or double precision to a W or X register. CVTTSS2SI
-/// truncates exactly as FCVTZS does and raises Inexact as it raises IXC; out of range values and
-/// NaNs give the integer indefinite value, where AArch64 saturates, so that value takes the slow
-/// path. The most negative integer, a valid result, takes it too and gets the same answer.
-static bool
-emit_fast_convert_to_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler,
-                             const uint32_t                     instruction)
-{
-    // sf 0 0 11110 ftype 1 11 000 000000 Rn Rd.
-    const uint32_t ftype = (instruction >> 22U) & 0x3U;
-
-    if (0x1E380000U != (instruction & 0x7F3FFC00U) || ftype > 1U)
-    {
-        return false;
-    }
-
-    const bool                        is_double = 1U == ftype;
-    const bool                        is_64bit  = 1U == (instruction >> 31U);
-    const uint32_t                    rd        = instruction & 0x1FU;
-    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
-    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-    size_t                            slow_jumps[2];
-
-    slow_jumps[0] = begin_float_sequence(compiler);
-    emit_sse_memory(assembler,
-                    true == is_double ? 0xF2 : 0xF3,
-                    is_64bit,
-                    0x2C,
-                    (uint8_t)SCRATCH_A,
-                    offsetof(bal_cpu_t, v[rn][0]),
-                    "cvtts2si");
-    bal_x86_emit_mov_r64_imm64(
-        assembler, BAL_X86_RAX, true == is_64bit ? 0x8000000000000000ULL : 0x80000000ULL);
-    bal_x86_emit_mov_r64_r64(assembler, SCRATCH_B, SCRATCH_A);
-    push_macro(compiler, BAL_X86_MACRO_SUB_REGISTER_REGISTER, SCRATCH_B, BAL_X86_RAX);
-    bal_sliding_window_flush_all(&compiler->window);
-    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_E);
-
-    // A W result is zero-extended by the 32-bit conversion.
-    if (rd != 31U)
-    {
-        bal_x86_emit_store_r64_rbp_offset(
-            assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, x[rd]));
-    }
-
-    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, 2U);
-    return true;
-}
-
 /// Pushes a LOAD of the 64-bit cpu structure field at `offset` into `destination`.
 static void
 push_load(bal_tier1_compiler_t *BAL_RESTRICT compiler,
@@ -8069,6 +7972,486 @@ emit_fast_float_minmax(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// Inline conversions and rounding
+// -----------------------------------------------------------------------------
+
+/// The ROUNDSS immediates for the AArch64 rounding modes nearest even, toward plus infinity,
+/// toward minus infinity and toward zero, with the precision exception suppressed.
+static const uint8_t ROUND_SUPPRESSED[4] = { 0x08, 0x0A, 0x09, 0x0B };
+
+/// Emits a jump to the slow path, and returns it, for a scalar in SIMD&FP register `index` whose
+/// biased exponent is `exponent` or more, which includes infinities and NaNs. Uses SCRATCH_A and
+/// RAX.
+static size_t
+emit_magnitude_check(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                     const uint32_t                     index,
+                     const bool                         is_double,
+                     const uint64_t                     exponent)
+{
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_x86_emit_load_r64_rbp_offset(
+        assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, v[index][0]));
+
+    // Shifting out the sign (and, for single precision, the 32 bits above the value) leaves the
+    // exponent at the top.
+    bal_x86_emit_shl_r64_imm8(assembler, SCRATCH_A, true == is_double ? 1U : 33U);
+    bal_x86_emit_mov_r64_imm64(
+        assembler, BAL_X86_RAX, exponent << (true == is_double ? 53U : 56U));
+    bal_x86_emit_sub_r64_r64(assembler, SCRATCH_A, BAL_X86_RAX);
+    return emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+}
+
+/// Loads `bits` into the low 64 bits of `xmm`, clearing the rest.
+static void
+emit_load_constant(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const uint8_t                     xmm,
+                   const uint64_t                    bits)
+{
+    bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_A, bits);
+    emit_sse(assembler, 0x66, true, 0x6E, xmm, (uint8_t)SCRATCH_A, "movq");
+}
+
+/// Rounds the scalar in `source` to an integer into `destination` with ROUNDSS or ROUNDSD and
+/// `immediate`. ROUNDSS keeps the upper lanes of its destination, so a copy of the source first
+/// keeps the result from depending on the destination's last writer.
+static void
+emit_round_scalar(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const bool                        is_double,
+                  const uint8_t                     destination,
+                  const uint8_t                     source,
+                  const uint8_t                     immediate)
+{
+    emit_sse(assembler, 0U, false, 0x28, destination, source, "movaps");
+    emit_sse3a(
+        assembler, true == is_double ? 0x0B : 0x0A, destination, destination, immediate, "rounds");
+}
+
+/// Rounds the scalar in xmm0 to an integer with ties away from zero into xmm1, using xmm2 and
+/// xmm3: t = trunc(x), plus copysign(1, x) when |x - t| >= 0.5. Every step is exact for finite
+/// values and raises nothing; an infinity or NaN raises Invalid in the subtraction.
+static void
+emit_round_ties_away(bal_x86_assembler_t *BAL_RESTRICT assembler, const bool is_double)
+{
+    const uint8_t scalar   = true == is_double ? 0xF2 : 0xF3;
+    const uint8_t shift_op = true == is_double ? 0x73 : 0x72;
+
+    emit_round_scalar(assembler, is_double, XMM1, XMM0, 0x0B);
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler, scalar, false, 0x5C, XMM2, XMM1, "subs");
+    emit_all_ones(assembler, XMM3);
+    emit_sse_immediate(assembler, 0x66, shift_op, 2U, XMM3, 1U, "psrl");
+    emit_sse(assembler, 0U, false, 0x54, XMM2, XMM3, "andps");
+    emit_load_constant(
+        assembler, XMM3, true == is_double ? 0x3FE0000000000000ULL : 0x3F000000ULL);
+    emit_sse_immediate(assembler, scalar, 0xC2, XMM2, XMM3, 5U, "cmpnlts");
+    emit_load_constant(
+        assembler, XMM3, true == is_double ? 0x3FF0000000000000ULL : 0x3F800000ULL);
+    emit_sse(assembler, 0U, false, 0x54, XMM2, XMM3, "andps");
+    emit_all_ones(assembler, XMM3);
+    emit_sse_immediate(assembler, 0x66, shift_op, 6U, XMM3, true == is_double ? 63U : 31U, "psll");
+    emit_sse(assembler, 0U, false, 0x54, XMM3, XMM0, "andps");
+    emit_sse(assembler, 0U, false, 0x56, XMM2, XMM3, "orps");
+    emit_sse(assembler, scalar, false, 0x58, XMM1, XMM2, "adds");
+}
+
+/// FCVTNS, FCVTNU, FCVTPS, FCVTPU, FCVTMS, FCVTMU, FCVTZS, FCVTZU, FCVTAS and FCVTAU (scalar,
+/// integer) and FCVTZS and FCVTZU (scalar, fixed-point), from single or double precision to a W
+/// or X register.
+///
+/// FCVTZS converts with CVTTSS2SI, whose Inexact matches IXC and whose integer indefinite value,
+/// given for NaNs and values out of range with Invalid alone, takes the slow path, which
+/// saturates. The other forms round to an integer first, with ROUNDSS (precision exception
+/// suppressed) or emit_round_ties_away(), and convert exactly; once the integer is known to be
+/// in range (for the unsigned forms: not negative, and below 2^32 for a W register), a second
+/// ROUNDSS raises Inexact when the value was not an integer. A saturating conversion so raises
+/// Invalid alone, as AArch64 does. The fixed-point forms scale by 2^fbits in double precision,
+/// exactly, first.
+static bool
+emit_fast_float_to_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // sf 0 0 11110 ftype 1 rmode opcode 000000 Rn Rd, or sf 0 0 11110 ftype 0 11 00U scale Rn Rd.
+    const uint32_t ftype    = (instruction >> 22U) & 0x3U;
+    const uint32_t rmode    = (instruction >> 19U) & 0x3U;
+    const uint32_t opcode   = (instruction >> 16U) & 0x7U;
+    const bool     is_64bit = 1U == (instruction >> 31U);
+    uint32_t       fbits    = 0U;
+    uint32_t       mode     = rmode; // Nearest, plus infinity, minus infinity, zero, ties away.
+
+    if (0x1E200000U == (instruction & 0x7F20FC00U))
+    {
+        if (opcode > 5U || 2U == (opcode & 6U) || (opcode >= 4U && rmode != 0U))
+        {
+            return false;
+        }
+
+        mode = opcode >= 4U ? 4U : rmode;
+    }
+    else if (0x1E180000U == (instruction & 0x7F3E0000U))
+    {
+        const uint32_t scale = (instruction >> 10U) & 0x3FU;
+
+        if (false == is_64bit && scale < 32U)
+        {
+            return false;
+        }
+
+        fbits = 64U - scale;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (ftype > 1U)
+    {
+        return false;
+    }
+
+    const bool                        is_unsigned = 1U == (opcode & 1U);
+    const bool                        is_direct   = 3U == mode && false == is_unsigned;
+    const uint32_t                    rd          = instruction & 0x1FU;
+    const uint32_t                    rn          = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+    bool                              in_double   = 1U == ftype;
+    uint8_t                           source      = XMM0;
+    size_t                            slow_jumps[3];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    // Magnitudes of 2^64 and more saturate; checking first keeps the scaling from overflowing.
+    if (fbits != 0U && true == in_double)
+    {
+        slow_jumps[count++] = emit_magnitude_check(compiler, rn, true, 1023U + 64U);
+    }
+
+    emit_load_scalar(assembler, XMM0, rn, in_double);
+
+    if (fbits != 0U)
+    {
+        if (false == in_double)
+        {
+            emit_sse(assembler, 0xF3, false, 0x5A, XMM0, XMM0, "cvtss2sd");
+            in_double = true;
+        }
+
+        emit_load_constant(assembler, XMM1, (uint64_t)(1023U + fbits) << 52U);
+        emit_sse(assembler, 0xF2, false, 0x59, XMM0, XMM1, "mulsd");
+    }
+
+    if (false == is_direct)
+    {
+        if (4U == mode)
+        {
+            emit_round_ties_away(assembler, in_double);
+        }
+        else
+        {
+            emit_round_scalar(assembler, in_double, XMM1, XMM0, ROUND_SUPPRESSED[mode]);
+        }
+
+        source = XMM1;
+    }
+
+    // An unsigned W converts to 64 bits, so that values up to 2^32 - 1 fit.
+    emit_sse(assembler,
+             true == in_double ? 0xF2 : 0xF3,
+             true == is_64bit || true == is_unsigned,
+             0x2C,
+             (uint8_t)SCRATCH_A,
+             source,
+             "cvtts2si");
+
+    if (false == is_unsigned)
+    {
+        bal_x86_emit_mov_r64_imm64(
+            assembler, BAL_X86_RAX, true == is_64bit ? 0x8000000000000000ULL : 0x80000000ULL);
+        bal_x86_emit_mov_r64_r64(assembler, SCRATCH_B, SCRATCH_A);
+        bal_x86_emit_sub_r64_r64(assembler, SCRATCH_B, BAL_X86_RAX);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_E);
+    }
+    else if (true == is_64bit)
+    {
+        bal_x86_emit_test_r64_r64(assembler, SCRATCH_A, SCRATCH_A);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_S);
+    }
+    else
+    {
+        bal_x86_emit_mov_r64_r64(assembler, SCRATCH_B, SCRATCH_A);
+        bal_x86_emit_shr_r64_imm8(assembler, SCRATCH_B, 32U);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    }
+
+    if (false == is_direct)
+    {
+        // Truncation without suppressing the precision exception raises Inexact exactly when the
+        // value is not an integer.
+        emit_round_scalar(assembler, in_double, XMM2, XMM0, 0x03);
+    }
+
+    if (rd != 31U)
+    {
+        bal_x86_emit_store_r64_rbp_offset(
+            assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, x[rd]));
+    }
+
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, count);
+    return true;
+}
+
+/// SCVTF and UCVTF (scalar, integer and fixed-point) from a W or X register to single or double
+/// precision. CVTSI2SS rounds to nearest under GUEST_MXCSR and raises Inexact as they raise IXC;
+/// an unsigned W converts as a zero-extended X, and an unsigned X of 2^63 or more takes the slow
+/// path. The fixed-point forms then scale by 2^-fbits, which is exact because the converted
+/// integer is zero or at least 1 in magnitude.
+static bool
+emit_fast_integer_to_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // sf 0 0 11110 ftype 1 00 01U 000000 Rn Rd, or sf 0 0 11110 ftype 0 00 01U scale Rn Rd.
+    const uint32_t ftype    = (instruction >> 22U) & 0x3U;
+    const bool     is_64bit = 1U == (instruction >> 31U);
+    uint32_t       fbits    = 0U;
+
+    if (0x1E220000U == (instruction & 0x7F3EFC00U))
+    {
+        // Integer.
+    }
+    else if (0x1E020000U == (instruction & 0x7F3E0000U))
+    {
+        const uint32_t scale = (instruction >> 10U) & 0x3FU;
+
+        if (false == is_64bit && scale < 32U)
+        {
+            return false;
+        }
+
+        fbits = 64U - scale;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (ftype > 1U)
+    {
+        return false;
+    }
+
+    const bool                        is_double   = 1U == ftype;
+    const bool                        is_unsigned = 1U == ((instruction >> 16U) & 1U);
+    const uint32_t                    rd          = instruction & 0x1FU;
+    const uint32_t                    rn          = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+    size_t                            slow_jumps[2];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    if (31U == rn)
+    {
+        bal_x86_emit_xor_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    }
+    else
+    {
+        bal_x86_emit_load_r64_rbp_offset(assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, x[rn]));
+    }
+
+    if (true == is_unsigned)
+    {
+        if (true == is_64bit)
+        {
+            bal_x86_emit_test_r64_r64(assembler, SCRATCH_A, SCRATCH_A);
+            slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_S);
+        }
+        else
+        {
+            bal_x86_emit_mov_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        }
+    }
+
+    // CVTSI2SS merges into the destination, so xmm0 is cleared first.
+    emit_sse(assembler, 0U, false, 0x57, XMM0, XMM0, "xorps");
+    emit_sse(assembler,
+             true == is_double ? 0xF2 : 0xF3,
+             true == is_64bit || true == is_unsigned,
+             0x2A,
+             XMM0,
+             (uint8_t)SCRATCH_A,
+             "cvtsi2s");
+
+    if (fbits != 0U)
+    {
+        emit_load_constant(assembler,
+                           XMM1,
+                           true == is_double ? (uint64_t)(1023U - fbits) << 52U
+                                             : (uint64_t)(127U - fbits) << 23U);
+        emit_sse(assembler, true == is_double ? 0xF2 : 0xF3, false, 0x59, XMM0, XMM1, "muls");
+    }
+
+    emit_sse(assembler, 0x66, is_double, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movd");
+    emit_store_scalar_result(assembler, rd);
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, count);
+    return true;
+}
+
+/// FRINTN, FRINTP, FRINTM, FRINTZ, FRINTA, FRINTX and FRINTI (scalar) in single and double
+/// precision. ROUNDSS rounds as they do, raising Inexact only for FRINTX and quieting NaNs as
+/// AArch64 does under FPCR = 0. FRINTA, which rounds ties away from zero, uses
+/// emit_round_ties_away() on magnitudes below 2^23 (2^52); larger values are already integers
+/// and, with infinities and NaNs, take the slow path.
+static bool
+emit_fast_round(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 0 0 11110 ftype 1 001 rmode 10000 Rn Rd.
+    const uint32_t ftype = (instruction >> 22U) & 0x3U;
+    const uint32_t rmode = (instruction >> 15U) & 0x7U;
+
+    if (0x1E244000U != (instruction & 0xFF3C7C00U) || ftype > 1U || 5U == rmode)
+    {
+        return false;
+    }
+
+    // FRINTN, FRINTP, FRINTM, FRINTZ, FRINTA, -, FRINTX (the current mode, raising Inexact) and
+    // FRINTI (the current mode).
+    static const uint8_t IMMEDIATES[8] = { 0x08, 0x0A, 0x09, 0x0B, 0U, 0U, 0x04, 0x0C };
+    const bool           is_double     = 1U == ftype;
+    const uint32_t       rd            = instruction & 0x1FU;
+    const uint32_t       rn            = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    if (4U == rmode)
+    {
+        slow_jumps[count++]
+            = emit_magnitude_check(compiler, rn, is_double, true == is_double ? 1075U : 150U);
+        emit_load_scalar(assembler, XMM0, rn, is_double);
+        emit_round_ties_away(assembler, is_double);
+    }
+    else
+    {
+        emit_load_scalar(assembler, XMM0, rn, is_double);
+        emit_round_scalar(assembler, is_double, XMM1, XMM0, IMMEDIATES[rmode]);
+    }
+
+    emit_sse(assembler, 0x66, is_double, 0x7E, XMM1, (uint8_t)SCRATCH_A, "movd");
+    emit_store_scalar_result(assembler, rd);
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, count);
+    return true;
+}
+
+/// FCVTNS, FCVTMS, FCVTPS, FCVTZS, FCVTNU, FCVTMU, FCVTPU and FCVTZU (vector) on words, which
+/// round like emit_fast_float_to_integer() lane by lane, and UCVTF (vector) on words, which
+/// converts the upper and lower 16 bits of each lane exactly and rounds once in adding them.
+static bool
+emit_fast_vector_convert(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 a 0 10000 opcode 10 Rn Rd.
+    if (0x0E200800U != (instruction & 0x9F7E0C00U) || false == compiler->has_sse41)
+    {
+        return false;
+    }
+
+    const uint32_t key = (((instruction >> 29U) & 1U) << 6U) | (((instruction >> 23U) & 1U) << 5U)
+                         | ((instruction >> 12U) & 0x1FU);
+    uint32_t mode        = 0U;
+    bool     is_unsigned = false;
+
+    switch (key)
+    {
+        case 0x5AU: // FCVTNU
+            is_unsigned = true;
+            mode        = 0U;
+            break;
+        case 0x1AU: // FCVTNS
+            mode = 0U;
+            break;
+        case 0x7AU: // FCVTPU
+            is_unsigned = true;
+            mode        = 1U;
+            break;
+        case 0x3AU: // FCVTPS
+            mode = 1U;
+            break;
+        case 0x5BU: // FCVTMU
+            is_unsigned = true;
+            mode        = 2U;
+            break;
+        case 0x1BU: // FCVTMS
+            mode = 2U;
+            break;
+        case 0x7BU: // FCVTZU
+            is_unsigned = true;
+            mode        = 3U;
+            break;
+        case 0x5DU: // UCVTF
+            mode = 4U;
+            break;
+        default:
+            return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+
+    if (4U == mode)
+    {
+        // (float)(x >> 16) * 65536 + (float)(x & 0xFFFF): only the addition rounds.
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM1, 16U, "psrld");
+        emit_sse(assembler, 0U, false, 0x5B, XMM1, XMM1, "cvtdq2ps");
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_A, 0x47800000ULL);
+        emit_sse(assembler, 0x66, false, 0x6E, XMM2, (uint8_t)SCRATCH_A, "movd");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM2, XMM2, 0U, "pshufd");
+        emit_sse(assembler, 0U, false, 0x59, XMM1, XMM2, "mulps");
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM0, 16U, "pslld");
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM0, 16U, "psrld");
+        emit_sse(assembler, 0U, false, 0x5B, XMM0, XMM0, "cvtdq2ps");
+        emit_sse(assembler, 0U, false, 0x58, XMM1, XMM0, "addps");
+    }
+    else
+    {
+        emit_sse3a(assembler, 0x08, XMM1, XMM0, ROUND_SUPPRESSED[mode], "roundps");
+        emit_sse(assembler, 0xF3, false, 0x5B, XMM1, XMM1, "cvttps2dq");
+
+        // The indefinite value 0x80000000 marks NaNs and values out of range; the unsigned forms
+        // also send every negative integer (and so each lane of 2^31 or more) to the slow path.
+        if (true == is_unsigned)
+        {
+            emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM1, "movmskps");
+        }
+        else
+        {
+            emit_all_ones(assembler, XMM2);
+            emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM2, 31U, "pslld");
+            emit_sse(assembler, 0x66, false, 0x76, XMM2, XMM1, "pcmpeqd");
+            emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM2, "movmskps");
+        }
+
+        bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+        emit_sse3a(assembler, 0x08, XMM2, XMM0, 0x03, "roundps");
+    }
+
+    emit_store_vector(assembler, XMM1, rd, is_quad);
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, count);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -8079,8 +8462,9 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_vector_float(compiler, instruction)
            || emit_fast_by_element(compiler, instruction)
            || emit_fast_compare(compiler, instruction)
-           || emit_fast_convert_from_integer(compiler, instruction)
-           || emit_fast_convert_to_integer(compiler, instruction)
+           || emit_fast_integer_to_float(compiler, instruction)
+           || emit_fast_float_to_integer(compiler, instruction)
+           || emit_fast_round(compiler, instruction)
            || emit_fast_move(compiler, instruction) || emit_fast_select(compiler, instruction)
            || emit_fast_duplicate(compiler, instruction)
            || emit_fast_vector_integer(compiler, instruction)
@@ -8093,5 +8477,6 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_modified_immediate(compiler, instruction)
            || emit_fast_element_move(compiler, instruction)
            || emit_fast_convert_precision(compiler, instruction)
-           || emit_fast_float_minmax(compiler, instruction);
+           || emit_fast_float_minmax(compiler, instruction)
+           || emit_fast_vector_convert(compiler, instruction);
 }

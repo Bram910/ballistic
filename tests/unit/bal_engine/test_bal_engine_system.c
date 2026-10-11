@@ -622,6 +622,37 @@ test_DataAbort_WritesTheRegistersBack(void)
 }
 
 static void
+test_FloatingPointFlags_FollowChainedBlocks(void)
+{
+    // Flags raised in one block are read by MRS FPSR in a later one, and MSR FPSR clears the ones
+    // still pending. The outer loop runs three times, so the later passes go through chained
+    // jumps.
+    const uint32_t program[] = {
+        0x1E241862U, // 0x00: FDIV S2, S3, S4, dividing by zero
+        0x14000001U, // 0x04: B 0x08
+        0x1E2708C5U, // 0x08: FMUL S5, S6, S7, overflowing
+        0x14000001U, // 0x0C: B 0x10
+        0xD53B4429U, // 0x10: MRS X9, FPSR
+        0xD51B443FU, // 0x14: MSR FPSR, XZR
+        0x14000001U, // 0x18: B 0x1C
+        0x1E2A2928U, // 0x1C: FADD S8, S9, S10, exact
+        0xD53B442AU, // 0x20: MRS X10, FPSR
+        0xF1000694U, // 0x24: SUBS X20, X20, #1
+        0x54FFFEC1U, // 0x28: B.NE 0x00
+    };
+    load_program(program, 11U);
+    g_cpu.x[20]   = 3U;
+    g_cpu.v[3][0] = 0x3F800000U; // 1.0
+    g_cpu.v[6][0] = 0x7149F2CAU; // 1e30
+    g_cpu.v[7][0] = 0x7149F2CAU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x16U, g_cpu.x[9]); // DZC, OFC and IXC
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[10]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.fpsr);
+}
+
+static void
 test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
 {
     // PACIASP; RETAA.
@@ -668,5 +699,6 @@ main(void)
     RUN_TEST(test_MemoryMapChange_IsSeenByTheNextRun);
     RUN_TEST(test_InvalidateMemory_TakesEffectAtTheNextBlock);
     RUN_TEST(test_DataAbort_WritesTheRegistersBack);
+    RUN_TEST(test_FloatingPointFlags_FollowChainedBlocks);
     return UNITY_END();
 }

@@ -4072,8 +4072,9 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         return;
     }
 
-    // FPSR includes the flags that inline floating point has raised into MXCSR in this block.
-    if (SYSTEM_REGISTER_FPSR == system_register && true == compiler->is_guest_mxcsr_active)
+    // FPSR includes the flags inline floating point has raised into MXCSR, in this block or the
+    // ones before it. They go to FPSR first, and MXCSR is cleared so that a write replaces them.
+    if (SYSTEM_REGISTER_FPSR == system_register)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_fold_mxcsr_flags(&compiler->assembler);
@@ -4370,6 +4371,12 @@ translate_data_address(const bal_cpu_t          *cpu,
     return host_address;
 }
 
+uint64_t
+bal_tier1_fpsr_flags_from_mxcsr(const uint32_t mxcsr)
+{
+    return (uint64_t)((mxcsr & 1U) | (((mxcsr >> 2U) & 0xFU) << 1U));
+}
+
 void
 bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb)
 {
@@ -4388,9 +4395,14 @@ bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb)
 static void
 emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t function)
 {
-    // The helpers use the host floating-point environment themselves: the flags the block has
-    // raised so far go to FPSR first, and the guest environment is reloaded after the call.
-    if (true == compiler->is_guest_mxcsr_active)
+    // Translated code runs under BAL_TIER1_GUEST_MXCSR, with the flags inline floating point
+    // raises left in MXCSR. The floating-point helpers clear and test the flags themselves, so
+    // the pending ones go to FPSR first, and whatever the helper leaves behind is cleared after
+    // the call. The other helpers do no floating point.
+    const bool is_float_helper = (uint64_t)(uintptr_t)&bal_execute_float == function
+                                 || (uint64_t)(uintptr_t)&bal_execute_simd == function;
+
+    if (true == is_float_helper)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_fold_mxcsr_flags(&compiler->assembler);
@@ -4425,7 +4437,7 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
         bal_sliding_window_push(&compiler->window, release_macro);
     }
 
-    if (true == compiler->is_guest_mxcsr_active)
+    if (true == is_float_helper)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_load_guest_mxcsr(&compiler->assembler);
@@ -5580,18 +5592,12 @@ emit_fold_mxcsr_flags(bal_x86_assembler_t *BAL_RESTRICT assembler)
     bal_x86_emit_store_r64_rbp_offset(assembler, invalid, offsetof(bal_cpu_t, fpsr));
 }
 
-/// Switches MXCSR to GUEST_MXCSR the first time a block runs floating point inline, saving the
-/// host's value for emit_block_exit().
+/// Notes that the block runs floating point inline. MXCSR already is GUEST_MXCSR: the engine
+/// loads it before running translated code and folds the flags into FPSR afterwards, so blocks
+/// chained to each other never switch it.
 static void
 emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        return;
-    }
-
-    emit_stmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    emit_load_guest_mxcsr(&compiler->assembler);
     compiler->is_guest_mxcsr_active = true;
 }
 
@@ -5602,18 +5608,11 @@ emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 /// A linkable exit first checks bal_cpu_t::jit_exit_requested, then has a jump the engine can
 /// point at the block for `next_pc`, skipping its prologue. Until then the jump falls through
 /// to the ordinary exit, which records the jump's address in bal_cpu_t::jit_link_site, stores
-/// the PC and returns to the engine. Either way the host MXCSR is back in place first, as a
-/// block expects on entry.
+/// the PC and returns to the engine.
 static void
 emit_exit_to(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_guest_address_t next_pc)
 {
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(assembler);
-        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
 
     if (true == compiler->is_linkable)
     {
@@ -5644,12 +5643,6 @@ static void
 emit_indirect_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(assembler);
-        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
 
     if (true == compiler->is_linkable)
     {
@@ -5689,12 +5682,6 @@ emit_indirect_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 static void
 emit_block_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(&compiler->assembler);
-        emit_ldmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
-
     emit_epilogue(&compiler->assembler);
 }
 

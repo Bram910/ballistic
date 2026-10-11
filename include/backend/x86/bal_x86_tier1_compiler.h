@@ -87,6 +87,15 @@ extern "C"
 #define BAL_TIER1_TLB_EMPTY_PAGE  0xFFFFFFFFFFFFFFFFULL
 #define BAL_TIER1_GUEST_PAGE_SIZE 4096U
 
+    /// The MXCSR translated code runs under: round to nearest, every exception masked, no
+    /// flush-to-zero, and no flags raised. It is the guest floating-point environment when FPCR is
+    /// zero, the only one inline floating point implements.
+#define BAL_TIER1_GUEST_MXCSR 0x1F80U
+
+    /// The FPSR cumulative flags the MXCSR exception flags in `mxcsr` stand for: IE, ZE, OE, UE
+    /// and PE (bits 0 and 2 to 5) become IOC, DZC, OFC, UFC and IXC (bits 0 to 4).
+    uint64_t bal_tier1_fpsr_flags_from_mxcsr(uint32_t mxcsr);
+
     /// Empties a software TLB of BAL_TIER1_TLB_ENTRIES entries.
     void bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb);
 

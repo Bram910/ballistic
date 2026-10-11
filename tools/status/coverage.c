@@ -586,11 +586,14 @@ main(void)
             // Unicorn compares the zero-extended memory value in LDSMAX and LDSMIN narrower than
             // 64 bits, which the architecture compares signed, so it cannot verify them.
             // Unicorn also writes the 16-bit result of FCVTZS and FCVTZU (scalar, fixed-point) on
-            // half precision sign-extended to 32 bits instead of clearing the register above it.
+            // half precision sign-extended to 32 bits instead of clearing the register above it,
+            // and computes FCMLA (by element) on four halfwords over eight, raising the flags of
+            // the lanes above the register.
             const bool is_known_unicorn_bug
                 = (0x38204000U == (instruction & 0x3F20EC00U) && (instruction >> 30U) != 3U)
                   || (0x5F00FC00U == (instruction & 0xDF80FC00U)
                       && 1U == ((instruction >> 20U) & 0x7U))
+                  || 0x2F401000U == (instruction & 0xFFC09400U)
                   || (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode
                       && true == is_unverifiable_pac(instruction, &initial))
                   || true == is_dit_or_ssbs(instruction);

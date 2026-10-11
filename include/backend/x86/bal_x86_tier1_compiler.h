@@ -21,9 +21,8 @@ extern "C"
         int8_t               x86_to_arm[16];
         uint32_t             is_dirty;
         uint8_t              eviction_cursor;
-        /// Whether the block being translated has switched MXCSR to the guest floating-point
-        /// environment, which every later exit must undo.
-        bool is_guest_mxcsr_active;
+        /// Whether the host has AES-NI and PCLMULQDQ, for AESE, AESD, AESMC, AESIMC and PMULL.
+        bool has_aes;
         /// Bitmask of the x86 registers allocated for the guest instruction being translated.
         /// They are never chosen for eviction, so an instruction cannot evict its own operands.
         uint16_t                 pinned_registers;

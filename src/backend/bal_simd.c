@@ -1032,8 +1032,198 @@ three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     return true;
 }
 
-/// Advanced SIMD three same extra, vector and scalar: SQRDMLAH, SQRDMLSH and the vector SDOT and
-/// UDOT.
+/// FCADD (`is_add`) and FCMLA on the complex pairs of `n` and `m`, the real parts in the even
+/// elements. `index` selects one pair of `m` for FCMLA (by element), or is negative.
+static vector_t
+complex_operation(simd_t         *simd,
+                  const vector_t *n,
+                  const vector_t *m,
+                  const vector_t *d,
+                  const uint32_t  esize,
+                  const uint32_t  elements,
+                  const bool      is_add,
+                  const uint32_t  rotation,
+                  const int32_t   index)
+{
+    const uint64_t fpcr   = simd->cpu->fpcr;
+    const uint64_t sign   = 1ULL << (esize - 1U);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements; e += 2U)
+    {
+        const uint32_t pair      = index >= 0 ? 2U * (uint32_t)index : e;
+        const uint64_t m0        = get_element(m, pair, esize);
+        const uint64_t m1        = get_element(m, pair + 1U, esize);
+        uint64_t       real      = 0U;
+        uint64_t       imaginary = 0U;
+
+        if (true == is_add)
+        {
+            // Rotation 90 adds i * m, rotation 270 subtracts it.
+            const uint64_t add_real      = 0U == rotation ? m1 ^ sign : m1;
+            const uint64_t add_imaginary = 0U == rotation ? m0 : m0 ^ sign;
+            real                         = bal_float_element(
+                fpcr, &simd->flags, esize, BAL_FLOAT_ADD, get_element(n, e, esize), add_real, 0U);
+            imaginary = bal_float_element(fpcr,
+                                          &simd->flags,
+                                          esize,
+                                          BAL_FLOAT_ADD,
+                                          get_element(n, e + 1U, esize),
+                                          add_imaginary,
+                                          0U);
+        }
+        else
+        {
+            // Rotations 0 and 180 multiply by the real part of n, 90 and 270 by the imaginary
+            // part; 90 and 180 negate the product added to the real part, 180 and 270 the one added
+            // to the imaginary part.
+            const uint64_t factor         = get_element(n, e + (rotation & 1U), esize);
+            const uint64_t real_m         = 0U == (rotation & 1U) ? m0 : m1;
+            const uint64_t imaginary_m    = 0U == (rotation & 1U) ? m1 : m0;
+            const uint64_t real_sign      = 1U == rotation || 2U == rotation ? sign : 0U;
+            const uint64_t imaginary_sign = rotation >= 2U ? sign : 0U;
+            real                          = bal_float_element(fpcr,
+                                     &simd->flags,
+                                     esize,
+                                     BAL_FLOAT_MULTIPLY_ADD,
+                                     factor,
+                                     real_m ^ real_sign,
+                                     get_element(d, e, esize));
+            imaginary                     = bal_float_element(fpcr,
+                                          &simd->flags,
+                                          esize,
+                                          BAL_FLOAT_MULTIPLY_ADD,
+                                          factor,
+                                          imaginary_m ^ imaginary_sign,
+                                          get_element(d, e + 1U, esize));
+        }
+
+        set_element(&result, e, esize, real);
+        set_element(&result, e + 1U, esize, imaginary);
+    }
+
+    return result;
+}
+
+/// FCMLA (by element): the complex pair `index` of Vm, M:Rm, for every pair of Vn.
+static bool
+complex_by_element(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t h        = (instruction >> 11U) & 1U;
+    const uint32_t l        = (instruction >> 21U) & 1U;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    uint32_t       index    = 0U;
+
+    if (1U == size && (0U == h || 1U == q))
+    {
+        index = (h << 1U) | l;
+    }
+    else if (2U == size && 0U == l && 1U == q)
+    {
+        index = h;
+    }
+    else
+    {
+        return false;
+    }
+
+    const uint32_t esize  = 8U << size;
+    const vector_t n      = read_vector(simd, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_vector(simd, (instruction >> 16U) & 0x1FU);
+    const vector_t d      = read_vector(simd, instruction & 0x1FU);
+    const vector_t result = complex_operation(simd,
+                                              &n,
+                                              &m,
+                                              &d,
+                                              esize,
+                                              datasize / esize,
+                                              false,
+                                              (instruction >> 13U) & 0x3U,
+                                              (int32_t)index);
+    write_vector(simd, instruction & 0x1FU, result, datasize);
+    return true;
+}
+
+/// A half precision value as the single precision one it equals, NaNs keeping their payload and
+/// signalling bit, and denormals flushed to zero under FPCR.FZ16.
+static uint64_t
+half_to_single(const uint64_t fpcr, const uint64_t half)
+{
+    const uint64_t sign     = (half & 0x8000U) << 16U;
+    const uint64_t exponent = (half >> 10U) & 0x1FU;
+    const uint64_t fraction = half & 0x3FFU;
+
+    if (0x1FU == exponent)
+    {
+        return sign | 0x7F800000U | (fraction << 13U);
+    }
+
+    if (0U != exponent)
+    {
+        return sign | ((exponent + 112U) << 23U) | (fraction << 13U);
+    }
+
+    if (0U == fraction || 0U != (fpcr & (1ULL << 19U)))
+    {
+        return sign;
+    }
+
+    // A denormal: normalise the fraction.
+    uint32_t shift = 0U;
+
+    while (0U == ((fraction << shift) & 0x400U))
+    {
+        ++shift;
+    }
+
+    return sign | ((uint64_t)(113U - shift) << 23U) | (((fraction << shift) & 0x3FFU) << 13U);
+}
+
+/// FMLAL, FMLAL2, FMLSL and FMLSL2, vector and by element: the half precision products of the
+/// low or high halves widened to single precision and accumulated with one rounding.
+static bool
+widening_multiply_add(simd_t *simd, const uint32_t instruction, const bool is_element)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const uint32_t elements = datasize / 32U;
+    const bool     is_upper = 0U != (instruction & (1U << 29U));
+    const bool     is_subtract
+        = true == is_element ? 0U != (instruction & 0x4000U) : 0U != (instruction & 0x800000U);
+    const uint32_t rm     = (instruction >> 16U) & (true == is_element ? 0xFU : 0x1FU);
+    const uint32_t index  = ((instruction >> 9U) & 0x4U) | ((instruction >> 20U) & 0x3U);
+    const uint64_t fpcr   = simd->cpu->fpcr;
+    const vector_t n      = read_vector(simd, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_vector(simd, rm);
+    const vector_t d      = read_vector(simd, instruction & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint32_t half    = (true == is_upper ? elements : 0U) + e;
+        uint64_t       product = get_element(&n, half, 16U);
+        product                = true == is_subtract ? product ^ 0x8000U : product;
+        const uint64_t other   = get_element(&m, true == is_element ? index : half, 16U);
+        set_element(&result,
+                    e,
+                    32U,
+                    bal_float_element(fpcr,
+                                      &simd->flags,
+                                      32U,
+                                      BAL_FLOAT_MULTIPLY_ADD,
+                                      half_to_single(fpcr, product),
+                                      half_to_single(fpcr, other),
+                                      get_element(&d, e, 32U)));
+    }
+
+    write_vector(simd, instruction & 0x1FU, result, datasize);
+    return true;
+}
+
+/// Advanced SIMD three same extra, vector and scalar: SQRDMLAH, SQRDMLSH, the vector SDOT and
+/// UDOT, FCMLA and FCADD.
 static bool
 three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
 {
@@ -1087,6 +1277,18 @@ three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
                                     1U == u));
         }
 
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // FCMLA (10rr) and FCADD (11r0) on half, single and double precision complex pairs.
+    if (false == is_scalar && 1U == u && opcode >= 0x8U && 0U != size && (1U == q || size != 3U)
+        && (opcode < 0xCU || 0U == (opcode & 0x1U)))
+    {
+        const uint32_t esize    = 8U << size;
+        const bool     is_add   = opcode >= 0xCU;
+        const uint32_t rotation = true == is_add ? (opcode >> 1U) & 0x1U : opcode & 0x3U;
+        result = complex_operation(simd, &n, &m, &d, esize, datasize / esize, is_add, rotation, -1);
         write_vector(simd, rd, result, datasize);
         return true;
     }
@@ -1282,6 +1484,17 @@ float_two_register_misc(simd_t        *simd,
                                                 x,
                                                 misc_rounding_mode(u, a, opcode, simd->cpu),
                                                 0x59U == ((u << 6U) | (a << 5U) | opcode));
+                break;
+            case 0x1EU: // FRINT32Z
+            case 0x1FU: // FRINT64Z
+            case 0x5EU: // FRINT32X
+            case 0x5FU: // FRINT64X
+                if (true == is_scalar || 16U == esize)
+                {
+                    return false;
+                }
+                value = bal_float_round_bits_element(
+                    fpcr, &simd->flags, esize, x, 1U == u, 0x1EU == opcode ? 32U : 64U);
                 break;
             case 0x1AU: // FCVTNS
             case 0x1BU: // FCVTMS
@@ -3068,6 +3281,292 @@ sha_two_register(simd_t *simd, const uint32_t instruction)
     return true;
 }
 
+static uint64_t
+rotate_right64(const uint64_t value, const uint32_t amount)
+{
+    return (value >> amount) | (value << ((64U - amount) & 63U));
+}
+
+/// The SHA3 extension: EOR3, BCAX, RAX1 and XAR.
+static bool
+sha3(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t rm = (instruction >> 16U) & 0x1FU;
+    const uint32_t ra = (instruction >> 10U) & 0x1FU;
+    const uint32_t rn = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd = instruction & 0x1FU;
+    const vector_t n  = read_vector(simd, rn);
+    const vector_t m  = read_vector(simd, rm);
+    const vector_t a  = read_vector(simd, ra);
+    vector_t       result;
+
+    for (uint32_t e = 0U; e < 2U; ++e)
+    {
+        if (0xCE000000U == (instruction & 0xFFE08000U)) // EOR3
+        {
+            result.d[e] = n.d[e] ^ m.d[e] ^ a.d[e];
+        }
+        else if (0xCE200000U == (instruction & 0xFFE08000U)) // BCAX
+        {
+            result.d[e] = n.d[e] ^ (m.d[e] & ~a.d[e]);
+        }
+        else if (0xCE608C00U == (instruction & 0xFFE0FC00U)) // RAX1
+        {
+            result.d[e] = n.d[e] ^ rotate_right64(m.d[e], 63U);
+        }
+        else // XAR
+        {
+            result.d[e] = rotate_right64(n.d[e] ^ m.d[e], (instruction >> 10U) & 0x3FU);
+        }
+    }
+
+    write_vector(simd, rd, result, 128U);
+    return true;
+}
+
+static uint64_t
+sha512_sum1(const uint64_t x)
+{
+    return rotate_right64(x, 14U) ^ rotate_right64(x, 18U) ^ rotate_right64(x, 41U);
+}
+
+static uint64_t
+sha512_sum0(const uint64_t x)
+{
+    return rotate_right64(x, 28U) ^ rotate_right64(x, 34U) ^ rotate_right64(x, 39U);
+}
+
+/// SHA512H, SHA512H2, SHA512SU1 and SHA512SU0.
+static bool
+sha512(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t rm = (instruction >> 16U) & 0x1FU;
+    const uint32_t rn = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd = instruction & 0x1FU;
+    const vector_t x  = read_vector(simd, rn);
+    const vector_t y  = read_vector(simd, rm);
+    const vector_t w  = read_vector(simd, rd);
+    vector_t       result;
+
+    if (0xCEC08000U == (instruction & 0xFFFFFC00U)) // SHA512SU0
+    {
+        const uint64_t high = w.d[1];
+        const uint64_t low  = x.d[0];
+        result.d[0] = w.d[0] + (rotate_right64(high, 1U) ^ rotate_right64(high, 8U) ^ (high >> 7U));
+        result.d[1] = w.d[1] + (rotate_right64(low, 1U) ^ rotate_right64(low, 8U) ^ (low >> 7U));
+    }
+    else
+    {
+        switch ((instruction >> 10U) & 0x3U)
+        {
+            case 0x0U: // SHA512H
+            {
+                const uint64_t high
+                    = ((y.d[1] & x.d[0]) ^ (~y.d[1] & x.d[1])) + sha512_sum1(y.d[1]) + w.d[1];
+                const uint64_t t = high + y.d[0];
+                result.d[1]      = high;
+                result.d[0]      = ((t & y.d[1]) ^ (~t & x.d[0])) + sha512_sum1(t) + w.d[0];
+                break;
+            }
+            case 0x1U: // SHA512H2
+            {
+                const uint64_t high = ((x.d[0] & y.d[1]) ^ (x.d[0] & y.d[0]) ^ (y.d[1] & y.d[0]))
+                                      + sha512_sum0(y.d[0]) + w.d[1];
+                result.d[1] = high;
+                result.d[0] = ((high & y.d[0]) ^ (high & y.d[1]) ^ (y.d[1] & y.d[0]))
+                              + sha512_sum0(high) + w.d[0];
+                break;
+            }
+            default: // SHA512SU1
+            {
+                for (uint32_t e = 0U; e < 2U; ++e)
+                {
+                    const uint64_t sigma = rotate_right64(x.d[e], 19U) ^ rotate_right64(x.d[e], 61U)
+                                           ^ (x.d[e] >> 6U);
+                    result.d[e] = w.d[e] + sigma + y.d[e];
+                }
+
+                break;
+            }
+        }
+    }
+
+    write_vector(simd, rd, result, 128U);
+    return true;
+}
+
+/// The SM4 substitution box.
+static const uint8_t SM4_SBOX[256] = {
+    0xD6U, 0x90U, 0xE9U, 0xFEU, 0xCCU, 0xE1U, 0x3DU, 0xB7U, 0x16U, 0xB6U, 0x14U, 0xC2U, 0x28U,
+    0xFBU, 0x2CU, 0x05U, 0x2BU, 0x67U, 0x9AU, 0x76U, 0x2AU, 0xBEU, 0x04U, 0xC3U, 0xAAU, 0x44U,
+    0x13U, 0x26U, 0x49U, 0x86U, 0x06U, 0x99U, 0x9CU, 0x42U, 0x50U, 0xF4U, 0x91U, 0xEFU, 0x98U,
+    0x7AU, 0x33U, 0x54U, 0x0BU, 0x43U, 0xEDU, 0xCFU, 0xACU, 0x62U, 0xE4U, 0xB3U, 0x1CU, 0xA9U,
+    0xC9U, 0x08U, 0xE8U, 0x95U, 0x80U, 0xDFU, 0x94U, 0xFAU, 0x75U, 0x8FU, 0x3FU, 0xA6U, 0x47U,
+    0x07U, 0xA7U, 0xFCU, 0xF3U, 0x73U, 0x17U, 0xBAU, 0x83U, 0x59U, 0x3CU, 0x19U, 0xE6U, 0x85U,
+    0x4FU, 0xA8U, 0x68U, 0x6BU, 0x81U, 0xB2U, 0x71U, 0x64U, 0xDAU, 0x8BU, 0xF8U, 0xEBU, 0x0FU,
+    0x4BU, 0x70U, 0x56U, 0x9DU, 0x35U, 0x1EU, 0x24U, 0x0EU, 0x5EU, 0x63U, 0x58U, 0xD1U, 0xA2U,
+    0x25U, 0x22U, 0x7CU, 0x3BU, 0x01U, 0x21U, 0x78U, 0x87U, 0xD4U, 0x00U, 0x46U, 0x57U, 0x9FU,
+    0xD3U, 0x27U, 0x52U, 0x4CU, 0x36U, 0x02U, 0xE7U, 0xA0U, 0xC4U, 0xC8U, 0x9EU, 0xEAU, 0xBFU,
+    0x8AU, 0xD2U, 0x40U, 0xC7U, 0x38U, 0xB5U, 0xA3U, 0xF7U, 0xF2U, 0xCEU, 0xF9U, 0x61U, 0x15U,
+    0xA1U, 0xE0U, 0xAEU, 0x5DU, 0xA4U, 0x9BU, 0x34U, 0x1AU, 0x55U, 0xADU, 0x93U, 0x32U, 0x30U,
+    0xF5U, 0x8CU, 0xB1U, 0xE3U, 0x1DU, 0xF6U, 0xE2U, 0x2EU, 0x82U, 0x66U, 0xCAU, 0x60U, 0xC0U,
+    0x29U, 0x23U, 0xABU, 0x0DU, 0x53U, 0x4EU, 0x6FU, 0xD5U, 0xDBU, 0x37U, 0x45U, 0xDEU, 0xFDU,
+    0x8EU, 0x2FU, 0x03U, 0xFFU, 0x6AU, 0x72U, 0x6DU, 0x6CU, 0x5BU, 0x51U, 0x8DU, 0x1BU, 0xAFU,
+    0x92U, 0xBBU, 0xDDU, 0xBCU, 0x7FU, 0x11U, 0xD9U, 0x5CU, 0x41U, 0x1FU, 0x10U, 0x5AU, 0xD8U,
+    0x0AU, 0xC1U, 0x31U, 0x88U, 0xA5U, 0xCDU, 0x7BU, 0xBDU, 0x2DU, 0x74U, 0xD0U, 0x12U, 0xB8U,
+    0xE5U, 0xB4U, 0xB0U, 0x89U, 0x69U, 0x97U, 0x4AU, 0x0CU, 0x96U, 0x77U, 0x7EU, 0x65U, 0xB9U,
+    0xF1U, 0x09U, 0xC5U, 0x6EU, 0xC6U, 0x84U, 0x18U, 0xF0U, 0x7DU, 0xECU, 0x3AU, 0xDCU, 0x4DU,
+    0x20U, 0x79U, 0xEEU, 0x5FU, 0x3EU, 0xD7U, 0xCBU, 0x39U, 0x48U,
+};
+
+/// Four SM4 rounds on `state`, with the round keys (SM4E) or the key constants (SM4EKEY) `keys`.
+static vector_t
+sm4_rounds(const vector_t *state, const vector_t *keys, const bool is_key)
+{
+    uint32_t words[4];
+    uint32_t constants[4];
+
+    get_words(state, words);
+    get_words(keys, constants);
+
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        uint32_t value = words[3] ^ words[2] ^ words[1] ^ constants[e];
+        value          = (uint32_t)SM4_SBOX[value & 0xFFU]
+                | ((uint32_t)SM4_SBOX[(value >> 8U) & 0xFFU] << 8U)
+                | ((uint32_t)SM4_SBOX[(value >> 16U) & 0xFFU] << 16U)
+                | ((uint32_t)SM4_SBOX[value >> 24U] << 24U);
+
+        if (is_key)
+        {
+            value ^= rotate_left(value, 13U) ^ rotate_left(value, 23U);
+        }
+        else
+        {
+            value ^= rotate_left(value, 2U) ^ rotate_left(value, 10U) ^ rotate_left(value, 18U)
+                     ^ rotate_left(value, 24U);
+        }
+
+        // Shift the state down a word, the new word entering at the top.
+        value ^= words[0];
+        words[0] = words[1];
+        words[1] = words[2];
+        words[2] = words[3];
+        words[3] = value;
+    }
+
+    return from_words(words);
+}
+
+/// SM3SS1, SM3TT1A/B, SM3TT2A/B, SM3PARTW1/2, SM4E and SM4EKEY.
+static bool
+sm3_sm4(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t rm = (instruction >> 16U) & 0x1FU;
+    const uint32_t rn = (instruction >> 5U) & 0x1FU;
+    const uint32_t rd = instruction & 0x1FU;
+    const vector_t n  = read_vector(simd, rn);
+    const vector_t m  = read_vector(simd, rm);
+    const vector_t d  = read_vector(simd, rd);
+    uint32_t       nw[4];
+    uint32_t       mw[4];
+    uint32_t       dw[4];
+    uint32_t       words[4];
+
+    get_words(&n, nw);
+    get_words(&m, mw);
+    get_words(&d, dw);
+
+    if (0xCEC08400U == (instruction & 0xFFFFFC00U)) // SM4E
+    {
+        write_vector(simd, rd, sm4_rounds(&d, &n, false), 128U);
+        return true;
+    }
+
+    if (0xCE60C800U == (instruction & 0xFFE0FC00U)) // SM4EKEY
+    {
+        write_vector(simd, rd, sm4_rounds(&n, &m, true), 128U);
+        return true;
+    }
+
+    if (0xCE400000U == (instruction & 0xFFE08000U)) // SM3SS1
+    {
+        const vector_t a = read_vector(simd, (instruction >> 10U) & 0x1FU);
+        words[0]         = 0U;
+        words[1]         = 0U;
+        words[2]         = 0U;
+        words[3] = rotate_left(rotate_left(nw[3], 12U) + mw[3] + (uint32_t)(a.d[1] >> 32U), 7U);
+    }
+    else if (0xCE408000U == (instruction & 0xFFE0C000U)) // SM3TT1A/B and SM3TT2A/B
+    {
+        const uint32_t wj     = mw[(instruction >> 12U) & 0x3U];
+        const bool     is_tt2 = 0U != (instruction & 0x800U);
+        uint32_t       value;
+
+        switch ((instruction >> 10U) & 0x3U)
+        {
+            case 0x0U: // SM3TT1A
+                value = (dw[1] ^ dw[3] ^ dw[2]) + dw[0] + (nw[3] ^ rotate_left(dw[3], 12U)) + wj;
+                break;
+            case 0x1U: // SM3TT1B
+                value = ((dw[3] & dw[1]) | (dw[3] & dw[2]) | (dw[1] & dw[2])) + dw[0]
+                        + (nw[3] ^ rotate_left(dw[3], 12U)) + wj;
+                break;
+            case 0x2U: // SM3TT2A
+                value = (dw[1] ^ dw[3] ^ dw[2]) + dw[0] + nw[3] + wj;
+                break;
+            default: // SM3TT2B
+                value = ((dw[3] & dw[2]) | (~dw[3] & dw[1])) + dw[0] + nw[3] + wj;
+                break;
+        }
+
+        words[0] = dw[1];
+        words[1] = rotate_left(dw[2], is_tt2 ? 19U : 9U);
+        words[2] = dw[3];
+        words[3] = is_tt2 ? value ^ rotate_left(value, 9U) ^ rotate_left(value, 17U) : value;
+    }
+    else if (0xCE60C000U == (instruction & 0xFFE0FC00U)) // SM3PARTW1
+    {
+        for (uint32_t e = 0U; e < 3U; ++e)
+        {
+            words[e] = dw[e] ^ nw[e] ^ rotate_left(mw[e + 1U], 15U);
+        }
+
+        words[3] = dw[3] ^ nw[3];
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            if (3U == e)
+            {
+                words[3] ^= rotate_left(words[0], 15U);
+            }
+
+            words[e] ^= rotate_left(words[e], 15U) ^ rotate_left(words[e], 23U);
+        }
+    }
+    else if (0xCE60C400U == (instruction & 0xFFE0FC00U)) // SM3PARTW2
+    {
+        uint32_t t[4];
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            t[e]     = nw[e] ^ rotate_left(mw[e], 7U);
+            words[e] = dw[e] ^ t[e];
+        }
+
+        uint32_t value = rotate_left(t[0], 15U);
+        value ^= rotate_left(value, 15U) ^ rotate_left(value, 23U);
+        words[3] ^= value;
+    }
+    else
+    {
+        return false;
+    }
+
+    write_vector(simd, rd, from_words(words), 128U);
+    return true;
+}
+
 /// Decodes and executes one instruction. Returns false if it is not implemented.
 static bool
 execute(simd_t *simd, const uint32_t instruction)
@@ -3086,6 +3585,24 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x5E280800U == (instruction & 0xFF3E0C00U))
     {
         return sha_two_register(simd, instruction);
+    }
+
+    // SHA3, SHA512, SM3 and SM4.
+    if (0xCE000000U == (instruction & 0xFFC08000U) || 0xCE608C00U == (instruction & 0xFFE0FC00U)
+        || 0xCE800000U == (instruction & 0xFFE00000U))
+    {
+        return sha3(simd, instruction);
+    }
+
+    if (0xCE608000U == (instruction & 0xFFE0F000U) || 0xCEC08000U == (instruction & 0xFFFFFC00U))
+    {
+        return sha512(simd, instruction);
+    }
+
+    if (0xCE400000U == (instruction & 0xFFE08000U) || 0xCE408000U == (instruction & 0xFFE0C000U)
+        || 0xCE60C000U == (instruction & 0xFFE0F000U) || 0xCEC08400U == (instruction & 0xFFFFFC00U))
+    {
+        return sm3_sm4(simd, instruction);
     }
 
     // Advanced SIMD scalar: 01 U 1111x ...
@@ -3160,6 +3677,21 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x0E780800U == (instruction & 0x9F7E0C00U))
     {
         return float_two_register_misc(simd, instruction, false, 16U);
+    }
+
+    if (0x0E20EC00U == (instruction & 0xBF60FC00U) || 0x2E20CC00U == (instruction & 0xBF60FC00U))
+    {
+        return widening_multiply_add(simd, instruction, false);
+    }
+
+    if (0x0F800000U == (instruction & 0xBFC0B400U) || 0x2F808000U == (instruction & 0xBFC0B400U))
+    {
+        return widening_multiply_add(simd, instruction, true);
+    }
+
+    if (0x2F001000U == (instruction & 0xBF009400U))
+    {
+        return complex_by_element(simd, instruction);
     }
 
     if (0x0E200400U == (instruction & 0x9F200400U))

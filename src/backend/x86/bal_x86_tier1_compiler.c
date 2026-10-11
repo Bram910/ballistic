@@ -5496,8 +5496,9 @@ translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
     emit_register_helper_call(compiler, instruction, helper);
 }
 
-/// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8 and SETF16
-/// through bal_execute_integer_helper(). They are rare enough not to need inline code.
+/// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8, SETF16,
+/// AXFLAG and XAFLAG through bal_execute_integer_helper(). They are rare enough not to need
+/// inline code.
 static void
 translate_integer_helper(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {

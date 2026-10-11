@@ -1334,7 +1334,7 @@ const bal_decoder_instruction_metadata_t
         { "AXFLAG",
           0xFFFFFFFF,
           0xD500405F,
-          OPCODE_TRAP,
+          OPCODE_INTEGER_HELPER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45938,7 +45938,7 @@ const bal_decoder_instruction_metadata_t
         { "XAFLAG",
           0xFFFFFFFF,
           0xD500403F,
-          OPCODE_TRAP,
+          OPCODE_INTEGER_HELPER,
           {
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

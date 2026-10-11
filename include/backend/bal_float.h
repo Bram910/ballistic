@@ -79,6 +79,15 @@ extern "C"
     uint64_t bal_float_round_element(
         uint64_t fpcr, uint64_t *fpsr, uint32_t esize, uint64_t value, uint32_t rmode, bool exact);
 
+    /// FRINT32Z/FRINT64Z (`is_exact` false, towards zero) and FRINT32X/FRINT64X (the FPCR
+    /// rounding mode) on one element, into the range of an `intsize`-bit integer.
+    uint64_t bal_float_round_bits_element(uint64_t  fpcr,
+                                          uint64_t *fpsr,
+                                          uint32_t  esize,
+                                          uint64_t  value,
+                                          bool      is_exact,
+                                          uint32_t  intsize);
+
     /// FCVT[NPMZA][SU] on one element, to a `bits`-bit integer scaled by 2^`fraction_bits`.
     uint64_t bal_float_to_integer_element(uint64_t  fpcr,
                                           uint64_t *fpsr,

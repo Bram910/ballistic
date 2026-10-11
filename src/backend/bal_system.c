@@ -45,11 +45,19 @@ is_setf(const uint32_t instruction)
     return 0x3A00080DU == (instruction & 0xFFFFBC1FU);
 }
 
+static bool
+is_flag_format(const uint32_t instruction)
+{
+    // AXFLAG (0xD500405F) and XAFLAG (0xD500403F).
+    return 0xD500401FU == (instruction & 0xFFFFFF9FU)
+           && (0x20U == (instruction & 0x60U) || 0x40U == (instruction & 0x60U));
+}
+
 bool
 bal_is_integer_helper_supported(const uint32_t instruction)
 {
     return is_crc32(instruction) || is_cfinv(instruction) || is_rmif(instruction)
-           || is_setf(instruction);
+           || is_setf(instruction) || is_flag_format(instruction);
 }
 
 static uint64_t
@@ -101,6 +109,31 @@ bal_execute_integer_helper(bal_cpu_t *cpu, const uint32_t instruction)
     if (true == is_cfinv(instruction))
     {
         cpu->flag_c ^= 1U;
+        return 1U;
+    }
+
+    if (true == is_flag_format(instruction))
+    {
+        const uint8_t z = cpu->flag_z;
+        const uint8_t c = cpu->flag_c;
+
+        if (0x40U == (instruction & 0x60U))
+        {
+            // AXFLAG: from the Arm floating-point condition flags to the external format.
+            cpu->flag_z = (uint8_t)(z | cpu->flag_v);
+            cpu->flag_c = (uint8_t)(c & (cpu->flag_v ^ 1U));
+            cpu->flag_n = 0U;
+            cpu->flag_v = 0U;
+        }
+        else
+        {
+            // XAFLAG: back from the external format.
+            cpu->flag_n = (uint8_t)((c | z) ^ 1U);
+            cpu->flag_z = (uint8_t)(z & c);
+            cpu->flag_c = (uint8_t)(c | z);
+            cpu->flag_v = (uint8_t)((c ^ 1U) & z);
+        }
+
         return 1U;
     }
 

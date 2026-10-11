@@ -14533,6 +14533,389 @@ emit_fast_half_estimate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint3
     return true;
 }
 
+/// The URSQRTE estimates (RecipSqrtEstimate() & 0xFF) by the operand's top nine bits, from 128.
+static const uint8_t UNSIGNED_SQUARE_ROOT_ESTIMATES[512] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF, 0xFD, 0xFB, 0xF9, 0xF7, 0xF5, 0xF3, 0xF2, 0xF0, 0xEE, 0xEC, 0xEA, 0xE9, 0xE7, 0xE5, 0xE4,
+    0xE2, 0xE0, 0xDF, 0xDD, 0xDB, 0xDA, 0xD8, 0xD7, 0xD5, 0xD4, 0xD2, 0xD1, 0xCF, 0xCE, 0xCC, 0xCB,
+    0xC9, 0xC8, 0xC6, 0xC5, 0xC4, 0xC2, 0xC1, 0xC0, 0xBE, 0xBD, 0xBC, 0xBA, 0xB9, 0xB8, 0xB7, 0xB5,
+    0xB4, 0xB3, 0xB2, 0xB0, 0xAF, 0xAE, 0xAD, 0xAC, 0xAA, 0xA9, 0xA8, 0xA7, 0xA6, 0xA5, 0xA4, 0xA3,
+    0xA2, 0xA0, 0x9F, 0x9E, 0x9D, 0x9C, 0x9B, 0x9A, 0x99, 0x98, 0x97, 0x96, 0x95, 0x94, 0x93, 0x92,
+    0x91, 0x90, 0x8F, 0x8E, 0x8D, 0x8C, 0x8C, 0x8B, 0x8A, 0x89, 0x88, 0x87, 0x86, 0x85, 0x84, 0x83,
+    0x83, 0x82, 0x81, 0x80, 0x7F, 0x7E, 0x7E, 0x7D, 0x7C, 0x7B, 0x7A, 0x79, 0x79, 0x78, 0x77, 0x76,
+    0x76, 0x75, 0x74, 0x73, 0x72, 0x72, 0x71, 0x70, 0x6F, 0x6F, 0x6E, 0x6D, 0x6D, 0x6C, 0x6B, 0x6A,
+    0x69, 0x69, 0x68, 0x68, 0x67, 0x67, 0x65, 0x65, 0x64, 0x64, 0x63, 0x63, 0x61, 0x61, 0x60, 0x60,
+    0x5F, 0x5F, 0x5D, 0x5D, 0x5C, 0x5C, 0x5B, 0x5B, 0x5A, 0x5A, 0x58, 0x58, 0x57, 0x57, 0x56, 0x56,
+    0x55, 0x55, 0x54, 0x54, 0x52, 0x52, 0x51, 0x51, 0x50, 0x50, 0x4F, 0x4F, 0x4E, 0x4E, 0x4D, 0x4D,
+    0x4C, 0x4C, 0x4B, 0x4B, 0x4A, 0x4A, 0x48, 0x48, 0x47, 0x47, 0x46, 0x46, 0x45, 0x45, 0x44, 0x44,
+    0x43, 0x43, 0x42, 0x42, 0x41, 0x41, 0x40, 0x40, 0x3F, 0x3F, 0x3E, 0x3E, 0x3D, 0x3D, 0x3C, 0x3C,
+    0x3C, 0x3C, 0x3B, 0x3B, 0x3A, 0x3A, 0x39, 0x39, 0x38, 0x38, 0x37, 0x37, 0x36, 0x36, 0x35, 0x35,
+    0x34, 0x34, 0x33, 0x33, 0x33, 0x33, 0x32, 0x32, 0x31, 0x31, 0x30, 0x30, 0x2F, 0x2F, 0x2E, 0x2E,
+    0x2E, 0x2E, 0x2D, 0x2D, 0x2C, 0x2C, 0x2B, 0x2B, 0x2A, 0x2A, 0x2A, 0x2A, 0x29, 0x29, 0x28, 0x28,
+    0x27, 0x27, 0x26, 0x26, 0x26, 0x26, 0x25, 0x25, 0x24, 0x24, 0x23, 0x23, 0x23, 0x23, 0x22, 0x22,
+    0x21, 0x21, 0x21, 0x21, 0x20, 0x20, 0x1F, 0x1F, 0x1E, 0x1E, 0x1E, 0x1E, 0x1D, 0x1D, 0x1C, 0x1C,
+    0x1C, 0x1C, 0x1B, 0x1B, 0x1A, 0x1A, 0x1A, 0x1A, 0x19, 0x19, 0x18, 0x18, 0x18, 0x18, 0x17, 0x17,
+    0x16, 0x16, 0x16, 0x16, 0x15, 0x15, 0x14, 0x14, 0x14, 0x14, 0x13, 0x13, 0x13, 0x13, 0x12, 0x12,
+    0x11, 0x11, 0x11, 0x11, 0x10, 0x10, 0x10, 0x10, 0x0F, 0x0F, 0x0E, 0x0E, 0x0E, 0x0E, 0x0D, 0x0D,
+    0x0D, 0x0D, 0x0C, 0x0C, 0x0B, 0x0B, 0x0B, 0x0B, 0x0A, 0x0A, 0x0A, 0x0A, 0x09, 0x09, 0x09, 0x09,
+    0x08, 0x08, 0x08, 0x08, 0x07, 0x07, 0x06, 0x06, 0x06, 0x06, 0x05, 0x05, 0x05, 0x05, 0x04, 0x04,
+    0x04, 0x04, 0x03, 0x03, 0x03, 0x03, 0x02, 0x02, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00,
+};
+
+/// FABD (vector and scalar) in single and double precision: the difference, checked as FSUB's,
+/// with its sign cleared.
+static bool
+emit_fast_float_difference(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 1 01110 1 sz 1 Rm 11010 1 Rn Rd, or the scalar 01 1 11110 1 sz 1 Rm 11010 1 Rn Rd.
+    const bool is_scalar = 0x7EA0D400U == (instruction & 0xFFA0FC00U);
+    const bool is_double = 1U == ((instruction >> 22U) & 1U);
+    const bool is_quad   = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+
+    if ((0x2EA0D400U != (instruction & 0xBFA0FC00U) && false == is_scalar)
+        || (true == is_double && false == is_quad && false == is_scalar))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[3];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    if (true == is_scalar)
+    {
+        emit_load_scalar(assembler, XMM0, rn, is_double);
+        emit_load_scalar(assembler, XMM1, rm, is_double);
+    }
+    else
+    {
+        emit_load_vector(assembler, XMM0, rn, is_quad);
+        emit_load_vector(assembler, XMM1, rm, is_quad);
+    }
+
+    emit_sse(assembler, true == is_double ? 0x66 : 0U, false, 0x5C, XMM0, XMM1, "subp");
+    const uint32_t count = 1U + emit_vector_checks(assembler, is_double, &slow_jumps[1]);
+    emit_all_ones(assembler, XMM1);
+    emit_sse_immediate(assembler, 0x66, true == is_double ? 0x73 : 0x72, 2U, XMM1, 1U, "psrl");
+    emit_sse(assembler, 0U, false, 0x54, XMM0, XMM1, "andps");
+
+    if (true == is_scalar)
+    {
+        emit_sse(assembler, 0x66, is_double, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movd/movq");
+        emit_store_scalar_result(assembler, rd);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM0, rd, is_quad);
+    }
+
+    emit_slow_path(compiler, instruction, float_helper(instruction), slow_jumps, count);
+    return true;
+}
+
+/// FRECPX in half, single and double precision: the sign with the exponent inverted, or the
+/// largest normal exponent for zeros and denormals, and a zero fraction. Infinities and NaNs
+/// take the slow path.
+static bool
+emit_fast_reciprocal_exponent(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                              const uint32_t                     instruction)
+{
+    // 01 0 11110 1 sz 10000 11111 10 Rn Rd, or with bits 22-17 111100 for half precision.
+    const uint32_t form = instruction & 0xFFFFFC00U;
+
+    if ((0x5EA1F800U != form && 0x5EE1F800U != form && 0x5EF9F800U != form)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    // The precision's exponent mask, its lowest exponent bit, and its size.
+    const uint32_t size = 0x5EF9F800U == form ? 1U : (0x5EE1F800U == form ? 3U : 2U);
+    const uint32_t bits = 8U << size;
+    const uint64_t exponent
+        = 1U == size ? 0x7C00U : (3U == size ? 0x7FF0000000000000ULL : 0x7F800000U);
+    const uint64_t lowest
+        = 1U == size ? 0x0400U : (3U == size ? 0x0010000000000000ULL : 0x00800000U);
+    const uint32_t                    lane = 3U == size ? 3U : 2U; // The comparison's lane size.
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_element(assembler, XMM0, (instruction >> 5U) & 0x1FU, size);
+
+    // An exponent of all ones: shifted to the top without the sign, at least the mask there.
+    emit_sse(assembler, 0x66, true, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movq");
+    bal_x86_emit_shl_r64_imm8(assembler, SCRATCH_A, (uint8_t)(65U - bits));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, exponent << (65U - bits));
+    bal_x86_emit_sub_r64_r64(assembler, SCRATCH_A, BAL_X86_RAX);
+    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+
+    // XMM1 = the inverted exponent, less the lowest exponent bit where it was zero; XMM0 = the
+    // sign.
+    emit_load_constant(assembler, XMM3, exponent);
+    emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+    emit_sse(assembler, 0x66, false, 0xDB, XMM1, XMM3, "pand");
+    emit_zero_vector(assembler, XMM2);
+    emit_lanes_equal(assembler, lane, XMM2, XMM1);
+    emit_load_constant(assembler, XMM4, lowest);
+    emit_sse(assembler, 0x66, false, 0xDB, XMM2, XMM4, "pand");
+    emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM3, "pxor");
+    emit_sse(assembler, 0x66, false, 3U == size ? 0xFB : 0xFA, XMM1, XMM2, "psub");
+    emit_load_constant(assembler, XMM3, 1ULL << (bits - 1U));
+    emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM3, "pand");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM1, "por");
+    emit_store_element(assembler, XMM0, instruction & 0x1FU, size);
+    emit_slow_path(compiler, instruction, float_helper(instruction), slow_jumps, 2U);
+    return true;
+}
+
+/// FCVTXN (vector, with the "2" form, and scalar): double to single precision rounded to odd,
+/// that is towards zero with the last bit set when inexact, from CVTPD2PS's nearest value as
+/// emit_fast_double_to_half() does. Only magnitudes in the normal single precision range run
+/// inline; zeros, tiny and huge values, infinities and NaNs take the slow path.
+static bool
+emit_fast_convert_odd(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 1 01110 0 1 10000 10110 10 Rn Rd, or the scalar 01 1 11110 0 1 10000 10110 10 Rn Rd.
+    const bool is_scalar = 0x7E616800U == (instruction & 0xFFFFFC00U);
+
+    if ((0x2E616800U != (instruction & 0xBFFFFC00U) && false == is_scalar)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM1, rn, false == is_scalar);
+
+    // Exponents from 897 (2^-126) to 1150 (below 2^128): (e - 897) unsigned below 254.
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM1, "movaps");
+    emit_sse_immediate(assembler, 0x66, 0x73, 6U, XMM2, 1U, "psllq");
+    emit_sse_immediate(assembler, 0x66, 0x73, 2U, XMM2, 53U, "psrlq");
+    emit_broadcast_pattern(assembler, XMM3, 897U);
+    emit_sse(assembler, 0x66, false, 0xFB, XMM2, XMM3, "psubq");
+    emit_zero_vector(assembler, XMM3);
+    emit_lanes_greater(assembler, 3U, XMM3, XMM2);
+    emit_broadcast_pattern(assembler, XMM4, 253U);
+    emit_lanes_greater(assembler, 3U, XMM2, XMM4);
+    emit_sse(assembler, 0x66, false, 0xEB, XMM2, XMM3, "por");
+    emit_sse(assembler, 0x66, false, 0x50, (uint8_t)SCRATCH_A, XMM2, "movmskpd");
+
+    if (true == is_scalar)
+    {
+        bal_x86_emit_shl_r32_imm8(assembler, SCRATCH_A, 31U);
+    }
+
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    // XMM0 = the nearest singles; XMM2 = back - n; XMM3 = the roundings away from zero.
+    emit_sse(assembler, 0x66, false, 0x5A, XMM0, XMM1, "cvtpd2ps");
+    emit_sse(assembler, 0U, false, 0x5A, XMM2, XMM0, "cvtps2pd");
+    emit_sse(assembler, 0x66, false, 0x5C, XMM2, XMM1, "subpd");
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM2, "movaps");
+    emit_sse(assembler, 0x66, false, 0x59, XMM3, XMM1, "mulpd");
+    emit_zero_vector(assembler, XMM4);
+    emit_sse_immediate(assembler, 0x66, 0xC2, XMM3, XMM4, 6U, "cmpnlepd");
+    emit_sse_immediate(assembler, 0x66, 0xC2, XMM2, XMM4, 4U, "cmpneqpd");
+    emit_sse_immediate(assembler, 0x66, 0x70, XMM3, XMM3, 0x08, "pshufd");
+    emit_sse_immediate(assembler, 0x66, 0x70, XMM2, XMM2, 0x08, "pshufd");
+    emit_sse(assembler, 0x66, false, 0xFE, XMM0, XMM3, "paddd");
+    emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 31U, "psrld");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM2, "por");
+
+    if (true == is_scalar)
+    {
+        emit_sse(assembler, 0x66, false, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movd");
+        emit_store_scalar_result(assembler, rd);
+    }
+    else
+    {
+        emit_store_narrow(assembler, rd, 1U == ((instruction >> 30U) & 1U));
+    }
+
+    emit_slow_path(compiler, instruction, float_helper(instruction), slow_jumps, 2U);
+    return true;
+}
+
+/// URECPE and URSQRTE (vector) on words: the 9-bit estimate of the top bits, from
+/// RECIPROCAL_ESTIMATES or UNSIGNED_SQUARE_ROOT_ESTIMATES lane by lane, above 23 zero bits; all
+/// ones for operands below 2^31 (URECPE) or 2^30 (URSQRTE). They touch no flags.
+static bool
+emit_fast_unsigned_estimate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 1 0 10000 11100 10 Rn Rd.
+    if (0x0EA1C800U != (instruction & 0x9FFFFC00U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    static const uint8_t              PEXTRD[3] = { 0x0F, 0x3A, 0x16 };
+    static const uint8_t              PINSRD[3] = { 0x0F, 0x3A, 0x22 };
+    const bool                        is_root   = 1U == ((instruction >> 29U) & 1U);
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, is_quad);
+    emit_zero_vector(assembler, XMM1);
+
+    for (uint32_t lane = 0U; lane < (true == is_quad ? 4U : 2U); ++lane)
+    {
+        bal_x86_emit_sse_register(assembler,
+                                  0x66,
+                                  false,
+                                  PEXTRD,
+                                  3U,
+                                  XMM0,
+                                  (uint8_t)SCRATCH_A,
+                                  true,
+                                  (uint8_t)lane,
+                                  "pextrd");
+        bal_x86_emit_shr_r32_imm8(assembler, SCRATCH_A, 23U);
+
+        if (false == is_root)
+        {
+            bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_B, 0xFFU);
+            bal_x86_emit_and_r32_r32(assembler, SCRATCH_A, SCRATCH_B);
+        }
+
+        bal_x86_emit_mov_r64_imm64(assembler,
+                                   SCRATCH_B,
+                                   true == is_root
+                                       ? (uint64_t)(uintptr_t)UNSIGNED_SQUARE_ROOT_ESTIMATES
+                                       : (uint64_t)(uintptr_t)RECIPROCAL_ESTIMATES);
+        bal_x86_emit_add_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        bal_x86_emit_load_r32_mem8(assembler, SCRATCH_A, SCRATCH_A);
+        bal_x86_emit_sse_register(assembler,
+                                  0x66,
+                                  false,
+                                  PINSRD,
+                                  3U,
+                                  XMM1,
+                                  (uint8_t)SCRATCH_A,
+                                  true,
+                                  (uint8_t)lane,
+                                  "pinsrd");
+    }
+
+    // XMM1 = 1:estimate:zeros; XMM2 = the operands too small, which give all ones.
+    emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM1, 23U, "pslld");
+    emit_broadcast_pattern(assembler, XMM2, 0x8000000080000000ULL);
+    emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM2, "por");
+
+    if (true == is_root)
+    {
+        // Operands in [0, 2^30): below 2^30 signed and not negative.
+        emit_broadcast_pattern(assembler, XMM2, 0x4000000040000000ULL);
+        emit_sse(assembler, 0x66, false, 0x66, XMM2, XMM0, "pcmpgtd");
+        emit_zero_vector(assembler, XMM3);
+        emit_sse(assembler, 0x66, false, 0x66, XMM3, XMM0, "pcmpgtd");
+        emit_sse(assembler, 0x66, false, 0xDF, XMM3, XMM2, "pandn");
+        emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM3, "por");
+    }
+    else
+    {
+        // Operands with the top bit clear: not below zero signed.
+        emit_zero_vector(assembler, XMM2);
+        emit_sse(assembler, 0x66, false, 0x66, XMM2, XMM0, "pcmpgtd");
+        emit_not_vector(assembler, XMM2, XMM3);
+        emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM2, "por");
+    }
+
+    emit_store_vector(assembler, XMM1, instruction & 0x1FU, is_quad);
+    return true;
+}
+
+/// PMUL (vector) on bytes and PMULL and PMULL2 from bytes to halfwords: carry-less products,
+/// the XOR of the first operand shifted by each set bit of the second.
+static bool
+emit_fast_polynomial_multiply(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                              const uint32_t                     instruction)
+{
+    // PMUL: 0 Q 1 01110 00 1 Rm 10011 1 Rn Rd. PMULL: 0 Q 0 01110 00 1 Rm 1110 00 Rn Rd.
+    const bool is_pmul  = 0x2E209C00U == (instruction & 0xBFE0FC00U);
+    const bool is_pmull = 0x0E20E000U == (instruction & 0xBFE0FC00U);
+
+    if ((false == is_pmul && false == is_pmull)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, true == is_quad || is_pmull);
+    emit_load_vector(assembler, XMM1, (instruction >> 16U) & 0x1FU, true == is_quad || is_pmull);
+
+    if (true == is_pmull)
+    {
+        emit_widen(assembler, XMM0, 0U, true, is_quad);
+        emit_widen(assembler, XMM1, 0U, true, is_quad);
+    }
+
+    emit_zero_vector(assembler, XMM2);
+
+    for (uint8_t bit = 0U; bit < 8U; ++bit)
+    {
+        // XMM3 = all ones where the bit of m is set; XMM4 = n shifted by the bit.
+        emit_sse(assembler, 0U, false, 0x28, XMM3, XMM1, "movaps");
+
+        if (true == is_pmull)
+        {
+            emit_sse_immediate(assembler, 0x66, 0x71, 6U, XMM3, (uint8_t)(15U - bit), "psllw");
+            emit_sse_immediate(assembler, 0x66, 0x71, 4U, XMM3, 15U, "psraw");
+        }
+        else
+        {
+            if (bit != 7U)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x71, 6U, XMM3, (uint8_t)(7U - bit), "psllw");
+            }
+
+            emit_zero_vector(assembler, XMM4);
+            emit_sse(assembler, 0x66, false, 0x64, XMM4, XMM3, "pcmpgtb");
+            emit_sse(assembler, 0U, false, 0x28, XMM3, XMM4, "movaps");
+        }
+
+        emit_sse(assembler, 0U, false, 0x28, XMM4, XMM0, "movaps");
+
+        if (true == is_pmull)
+        {
+            emit_lanes_shift_left(assembler, XMM4, 1U, bit, XMM5);
+        }
+        else
+        {
+            emit_lanes_shift_left(assembler, XMM4, 0U, bit, XMM5);
+        }
+
+        emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+        emit_sse(assembler, 0x66, false, 0xEF, XMM2, XMM4, "pxor");
+    }
+
+    emit_store_vector(assembler, XMM2, instruction & 0x1FU, true == is_quad || true == is_pmull);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -14596,5 +14979,10 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_half_extreme(compiler, instruction)
            || emit_fast_half_arithmetic_more(compiler, instruction)
            || emit_fast_double_to_half(compiler, instruction)
-           || emit_fast_half_estimate(compiler, instruction);
+           || emit_fast_half_estimate(compiler, instruction)
+           || emit_fast_float_difference(compiler, instruction)
+           || emit_fast_reciprocal_exponent(compiler, instruction)
+           || emit_fast_convert_odd(compiler, instruction)
+           || emit_fast_unsigned_estimate(compiler, instruction)
+           || emit_fast_polynomial_multiply(compiler, instruction);
 }

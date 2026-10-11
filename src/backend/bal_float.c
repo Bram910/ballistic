@@ -216,6 +216,12 @@ bal_is_float_supported(const uint32_t instruction)
             const uint32_t rmode  = (instruction >> 19U) & 0x3U;
             const uint32_t opcode = (instruction >> 16U) & 0x7U;
 
+            // FJCVTZS.
+            if (6U == opcode && 3U == rmode)
+            {
+                return 0U == sf && PRECISION_DOUBLE == precision;
+            }
+
             // FMOV: W with S or H, X with D or H, and X with the top half of a Q register.
             if (opcode >= 6U)
             {
@@ -271,6 +277,12 @@ bal_is_float_supported(const uint32_t instruction)
             {
                 const uint32_t target = opcode & 0x3U;
                 return target != (uint32_t)precision && target != PRECISION_INVALID;
+            }
+
+            // FRINT32Z, FRINT32X, FRINT64Z and FRINT64X, in single and double precision.
+            if (0x10U == (opcode & 0x3CU))
+            {
+                return false == is_half;
             }
 
             return opcode <= 3U || (opcode >= 8U && opcode <= 15U && opcode != 13U);
@@ -1073,6 +1085,43 @@ round_to_integral(context_t *context, uint64_t value, const uint32_t rmode, cons
     return result;
 }
 
+/// FRINT32Z, FRINT32X, FRINT64Z and FRINT64X: round_to_integral() into the range of an
+/// `intsize`-bit signed integer. NaNs, infinities and out of range values give the most negative
+/// integer instead and raise Invalid Operation without Inexact.
+static uint64_t
+round_to_integral_bits(context_t     *context,
+                       uint64_t       value,
+                       const uint32_t rmode,
+                       const uint32_t intsize)
+{
+    const layout_t *layout = &context->layout;
+    const uint64_t  overflow
+        = layout->sign_mask
+          | ((uint64_t)((layout->exponent_mask >> layout->fraction_bits) / 2U + intsize - 1U)
+             << layout->fraction_bits);
+    const uint64_t previous = context->flags;
+
+    value = flush_input(context, value);
+
+    if (true == is_nan(layout, value) || true == is_infinity(layout, value))
+    {
+        context->flags |= FPSR_IOC;
+        return overflow;
+    }
+
+    const uint64_t result = round_to_integral(context, value, rmode, true);
+    const double   limit  = ldexp(1.0, (int)intsize - 1);
+    const double   number = operand_to_double(context, result);
+
+    if (number >= limit || number < -limit)
+    {
+        context->flags = previous | FPSR_IOC | (context->flags & FPSR_IDC);
+        return overflow;
+    }
+
+    return result;
+}
+
 /// Converts to a signed or unsigned integer of `bits` bits, scaling by 2^`fraction_bits` first,
 /// with rounding mode `rmode` as in round_to_integral(). Out of range values and NaNs saturate and
 /// raise Invalid Operation.
@@ -1312,6 +1361,61 @@ expand_immediate(const layout_t *layout, const uint32_t imm8)
     return sign | (exponent << layout->fraction_bits) | fraction;
 }
 
+/// FJCVTZS: converts a double to a 32-bit integer the JavaScript way, towards zero and modulo
+/// 2^32. Sets `is_exact` when the value converts exactly, in range and is not negative zero.
+static uint32_t
+convert_javascript(context_t *context, uint64_t value, bool *is_exact)
+{
+    value                   = flush_input(context, value);
+    const bool     negative = 0U != (value >> 63U);
+    const uint32_t exponent = (uint32_t)((value >> 52U) & 0x7FFU);
+    *is_exact               = false;
+
+    // NaNs and infinities convert to zero.
+    if (0x7FFU == exponent)
+    {
+        context->flags |= FPSR_IOC;
+        return 0U;
+    }
+
+    // The value is mantissa * 2^shift; keep the low 32 bits of its integer part.
+    const uint64_t mantissa = (value & 0xFFFFFFFFFFFFFULL) | (0U != exponent ? 1ULL << 52U : 0U);
+    const int32_t  shift    = (int32_t)(0U != exponent ? exponent : 1U) - 1075;
+    uint32_t       low      = 0U;
+    bool           fraction = false;
+
+    if (shift >= 0)
+    {
+        low = shift >= 32 ? 0U : (uint32_t)(mantissa << (uint32_t)shift);
+    }
+    else if (shift > -64)
+    {
+        low      = (uint32_t)(mantissa >> (uint32_t)-shift);
+        fraction = 0U != (mantissa & ((1ULL << (uint32_t)-shift) - 1U));
+    }
+    else
+    {
+        fraction = 0U != mantissa;
+    }
+
+    const double truncated = trunc(to_double(value));
+
+    if (truncated < -2147483648.0 || truncated > 2147483647.0)
+    {
+        context->flags |= FPSR_IOC;
+    }
+    else if (true == fraction)
+    {
+        context->flags |= FPSR_IXC;
+    }
+    else
+    {
+        *is_exact = false == negative || 0U != mantissa;
+    }
+
+    return true == negative ? 0U - low : low;
+}
+
 static void
 execute_integer_conversion(bal_cpu_t *cpu, context_t *context, const uint32_t instruction)
 {
@@ -1321,6 +1425,15 @@ execute_integer_conversion(bal_cpu_t *cpu, context_t *context, const uint32_t in
     const uint32_t rn     = (instruction >> 5U) & 0x1FU;
     const uint32_t rd     = instruction & 0x1FU;
     const uint32_t bits   = 1U == sf ? 64U : 32U;
+
+    if (6U == opcode && 3U == rmode)
+    {
+        bool           is_exact = false;
+        const uint32_t result   = convert_javascript(context, read_vector(cpu, rn, 64U), &is_exact);
+        write_general(cpu, rd, result);
+        set_nzcv(cpu, true == is_exact ? 0x4U : 0U);
+        return;
+    }
 
     if (opcode >= 6U)
     {
@@ -1438,6 +1551,16 @@ execute_one_source(bal_cpu_t *cpu, context_t *context, const uint32_t instructio
     if (4U == (opcode & 0x3CU))
     {
         write_vector(cpu, rd, convert_precision(context, value, (precision_t)(opcode & 0x3U)));
+        return;
+    }
+
+    if (0x10U == (opcode & 0x3CU))
+    {
+        const uint32_t rmode = 0U == (opcode & 1U) ? 3U : FPCR_RMODE(context->fpcr);
+        write_vector(
+            cpu,
+            rd,
+            round_to_integral_bits(context, value, rmode, 0U == (opcode & 2U) ? 32U : 64U));
         return;
     }
 
@@ -2147,6 +2270,22 @@ bal_float_round_element(const uint64_t fpcr,
     load_control();
     context_t      context = element_context(fpcr, esize);
     const uint64_t result  = round_to_integral(&context, value, rmode, exact);
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_round_bits_element(const uint64_t fpcr,
+                             uint64_t      *fpsr,
+                             const uint32_t esize,
+                             const uint64_t value,
+                             const bool     is_exact,
+                             const uint32_t intsize)
+{
+    load_control();
+    context_t      context = element_context(fpcr, esize);
+    const uint32_t rmode   = true == is_exact ? FPCR_RMODE(fpcr) : 3U;
+    const uint64_t result  = round_to_integral_bits(&context, value, rmode, intsize);
     *fpsr |= context.flags;
     return result;
 }

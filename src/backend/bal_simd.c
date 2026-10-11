@@ -1032,8 +1032,198 @@ three_same(simd_t *simd, const uint32_t instruction, const bool is_scalar)
     return true;
 }
 
-/// Advanced SIMD three same extra, vector and scalar: SQRDMLAH, SQRDMLSH and the vector SDOT and
-/// UDOT.
+/// FCADD (`is_add`) and FCMLA on the complex pairs of `n` and `m`, the real parts in the even
+/// elements. `index` selects one pair of `m` for FCMLA (by element), or is negative.
+static vector_t
+complex_operation(simd_t         *simd,
+                  const vector_t *n,
+                  const vector_t *m,
+                  const vector_t *d,
+                  const uint32_t  esize,
+                  const uint32_t  elements,
+                  const bool      is_add,
+                  const uint32_t  rotation,
+                  const int32_t   index)
+{
+    const uint64_t fpcr   = simd->cpu->fpcr;
+    const uint64_t sign   = 1ULL << (esize - 1U);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements; e += 2U)
+    {
+        const uint32_t pair      = index >= 0 ? 2U * (uint32_t)index : e;
+        const uint64_t m0        = get_element(m, pair, esize);
+        const uint64_t m1        = get_element(m, pair + 1U, esize);
+        uint64_t       real      = 0U;
+        uint64_t       imaginary = 0U;
+
+        if (true == is_add)
+        {
+            // Rotation 90 adds i * m, rotation 270 subtracts it.
+            const uint64_t add_real      = 0U == rotation ? m1 ^ sign : m1;
+            const uint64_t add_imaginary = 0U == rotation ? m0 : m0 ^ sign;
+            real                         = bal_float_element(
+                fpcr, &simd->flags, esize, BAL_FLOAT_ADD, get_element(n, e, esize), add_real, 0U);
+            imaginary = bal_float_element(fpcr,
+                                          &simd->flags,
+                                          esize,
+                                          BAL_FLOAT_ADD,
+                                          get_element(n, e + 1U, esize),
+                                          add_imaginary,
+                                          0U);
+        }
+        else
+        {
+            // Rotations 0 and 180 multiply by the real part of n, 90 and 270 by the imaginary
+            // part; 90 and 180 negate the product added to the real part, 180 and 270 the one added
+            // to the imaginary part.
+            const uint64_t factor         = get_element(n, e + (rotation & 1U), esize);
+            const uint64_t real_m         = 0U == (rotation & 1U) ? m0 : m1;
+            const uint64_t imaginary_m    = 0U == (rotation & 1U) ? m1 : m0;
+            const uint64_t real_sign      = 1U == rotation || 2U == rotation ? sign : 0U;
+            const uint64_t imaginary_sign = rotation >= 2U ? sign : 0U;
+            real                          = bal_float_element(fpcr,
+                                     &simd->flags,
+                                     esize,
+                                     BAL_FLOAT_MULTIPLY_ADD,
+                                     factor,
+                                     real_m ^ real_sign,
+                                     get_element(d, e, esize));
+            imaginary                     = bal_float_element(fpcr,
+                                          &simd->flags,
+                                          esize,
+                                          BAL_FLOAT_MULTIPLY_ADD,
+                                          factor,
+                                          imaginary_m ^ imaginary_sign,
+                                          get_element(d, e + 1U, esize));
+        }
+
+        set_element(&result, e, esize, real);
+        set_element(&result, e + 1U, esize, imaginary);
+    }
+
+    return result;
+}
+
+/// FCMLA (by element): the complex pair `index` of Vm, M:Rm, for every pair of Vn.
+static bool
+complex_by_element(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t size     = (instruction >> 22U) & 0x3U;
+    const uint32_t h        = (instruction >> 11U) & 1U;
+    const uint32_t l        = (instruction >> 21U) & 1U;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    uint32_t       index    = 0U;
+
+    if (1U == size && (0U == h || 1U == q))
+    {
+        index = (h << 1U) | l;
+    }
+    else if (2U == size && 0U == l && 1U == q)
+    {
+        index = h;
+    }
+    else
+    {
+        return false;
+    }
+
+    const uint32_t esize  = 8U << size;
+    const vector_t n      = read_vector(simd, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_vector(simd, (instruction >> 16U) & 0x1FU);
+    const vector_t d      = read_vector(simd, instruction & 0x1FU);
+    const vector_t result = complex_operation(simd,
+                                              &n,
+                                              &m,
+                                              &d,
+                                              esize,
+                                              datasize / esize,
+                                              false,
+                                              (instruction >> 13U) & 0x3U,
+                                              (int32_t)index);
+    write_vector(simd, instruction & 0x1FU, result, datasize);
+    return true;
+}
+
+/// A half precision value as the single precision one it equals, NaNs keeping their payload and
+/// signalling bit, and denormals flushed to zero under FPCR.FZ16.
+static uint64_t
+half_to_single(const uint64_t fpcr, const uint64_t half)
+{
+    const uint64_t sign     = (half & 0x8000U) << 16U;
+    const uint64_t exponent = (half >> 10U) & 0x1FU;
+    const uint64_t fraction = half & 0x3FFU;
+
+    if (0x1FU == exponent)
+    {
+        return sign | 0x7F800000U | (fraction << 13U);
+    }
+
+    if (0U != exponent)
+    {
+        return sign | ((exponent + 112U) << 23U) | (fraction << 13U);
+    }
+
+    if (0U == fraction || 0U != (fpcr & (1ULL << 19U)))
+    {
+        return sign;
+    }
+
+    // A denormal: normalise the fraction.
+    uint32_t shift = 0U;
+
+    while (0U == ((fraction << shift) & 0x400U))
+    {
+        ++shift;
+    }
+
+    return sign | ((uint64_t)(113U - shift) << 23U) | (((fraction << shift) & 0x3FFU) << 13U);
+}
+
+/// FMLAL, FMLAL2, FMLSL and FMLSL2, vector and by element: the half precision products of the
+/// low or high halves widened to single precision and accumulated with one rounding.
+static bool
+widening_multiply_add(simd_t *simd, const uint32_t instruction, const bool is_element)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const uint32_t elements = datasize / 32U;
+    const bool     is_upper = 0U != (instruction & (1U << 29U));
+    const bool     is_subtract
+        = true == is_element ? 0U != (instruction & 0x4000U) : 0U != (instruction & 0x800000U);
+    const uint32_t rm     = (instruction >> 16U) & (true == is_element ? 0xFU : 0x1FU);
+    const uint32_t index  = ((instruction >> 9U) & 0x4U) | ((instruction >> 20U) & 0x3U);
+    const uint64_t fpcr   = simd->cpu->fpcr;
+    const vector_t n      = read_vector(simd, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_vector(simd, rm);
+    const vector_t d      = read_vector(simd, instruction & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint32_t half    = (true == is_upper ? elements : 0U) + e;
+        uint64_t       product = get_element(&n, half, 16U);
+        product                = true == is_subtract ? product ^ 0x8000U : product;
+        const uint64_t other   = get_element(&m, true == is_element ? index : half, 16U);
+        set_element(&result,
+                    e,
+                    32U,
+                    bal_float_element(fpcr,
+                                      &simd->flags,
+                                      32U,
+                                      BAL_FLOAT_MULTIPLY_ADD,
+                                      half_to_single(fpcr, product),
+                                      half_to_single(fpcr, other),
+                                      get_element(&d, e, 32U)));
+    }
+
+    write_vector(simd, instruction & 0x1FU, result, datasize);
+    return true;
+}
+
+/// Advanced SIMD three same extra, vector and scalar: SQRDMLAH, SQRDMLSH, the vector SDOT and
+/// UDOT, FCMLA and FCADD.
 static bool
 three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
 {
@@ -1087,6 +1277,18 @@ three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
                                     1U == u));
         }
 
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    // FCMLA (10rr) and FCADD (11r0) on half, single and double precision complex pairs.
+    if (false == is_scalar && 1U == u && opcode >= 0x8U && 0U != size && (1U == q || size != 3U)
+        && (opcode < 0xCU || 0U == (opcode & 0x1U)))
+    {
+        const uint32_t esize    = 8U << size;
+        const bool     is_add   = opcode >= 0xCU;
+        const uint32_t rotation = true == is_add ? (opcode >> 1U) & 0x1U : opcode & 0x3U;
+        result = complex_operation(simd, &n, &m, &d, esize, datasize / esize, is_add, rotation, -1);
         write_vector(simd, rd, result, datasize);
         return true;
     }
@@ -1282,6 +1484,17 @@ float_two_register_misc(simd_t        *simd,
                                                 x,
                                                 misc_rounding_mode(u, a, opcode, simd->cpu),
                                                 0x59U == ((u << 6U) | (a << 5U) | opcode));
+                break;
+            case 0x1EU: // FRINT32Z
+            case 0x1FU: // FRINT64Z
+            case 0x5EU: // FRINT32X
+            case 0x5FU: // FRINT64X
+                if (true == is_scalar || 16U == esize)
+                {
+                    return false;
+                }
+                value = bal_float_round_bits_element(
+                    fpcr, &simd->flags, esize, x, 1U == u, 0x1EU == opcode ? 32U : 64U);
                 break;
             case 0x1AU: // FCVTNS
             case 0x1BU: // FCVTMS
@@ -3464,6 +3677,21 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x0E780800U == (instruction & 0x9F7E0C00U))
     {
         return float_two_register_misc(simd, instruction, false, 16U);
+    }
+
+    if (0x0E20EC00U == (instruction & 0xBF60FC00U) || 0x2E20CC00U == (instruction & 0xBF60FC00U))
+    {
+        return widening_multiply_add(simd, instruction, false);
+    }
+
+    if (0x0F800000U == (instruction & 0xBFC0B400U) || 0x2F808000U == (instruction & 0xBFC0B400U))
+    {
+        return widening_multiply_add(simd, instruction, true);
+    }
+
+    if (0x2F001000U == (instruction & 0xBF009400U))
+    {
+        return complex_by_element(simd, instruction);
     }
 
     if (0x0E200400U == (instruction & 0x9F200400U))

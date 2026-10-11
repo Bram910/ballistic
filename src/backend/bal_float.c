@@ -1784,14 +1784,21 @@ reciprocal_square_root_estimate_table(uint64_t a)
         a = (a + 1U) * 2U;
     }
 
-    uint64_t b = 512U;
+    // b is the smallest integer from 512 with a * (b + 1)^2 >= 2^28, so b + 1 is the ceiling of
+    // sqrt(2^28 / a), at least 725 for these a. The square root is within one of it.
+    uint64_t c = (uint64_t)sqrt((double)(1ULL << 28U) / (double)a);
 
-    while (a * (b + 1U) * (b + 1U) < (1ULL << 28U))
+    while (c > 0U && a * c * c >= (1ULL << 28U))
     {
-        ++b;
+        --c;
     }
 
-    return (b + 1U) / 2U;
+    while (a * c * c < (1ULL << 28U))
+    {
+        ++c;
+    }
+
+    return c / 2U;
 }
 
 /// FRECPE and FRSQRTE, following FPRecipEstimate() and FPRSqrtEstimate() without FEAT_RPRES.

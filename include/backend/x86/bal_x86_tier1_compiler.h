@@ -13,6 +13,24 @@ extern "C"
 {
 #endif /* __cplusplus */
 
+    /// The host instruction set extensions tier 1 uses, as bits of
+    /// bal_tier1_compiler_t::features.
+    enum
+    {
+        /// FMA3 and F16C, which every CPU with FMA3 also has.
+        BAL_TIER1_FEATURE_FMA = 1U << 0U,
+        /// SSE4.1, and so SSSE3.
+        BAL_TIER1_FEATURE_SSE41 = 1U << 1U,
+        /// SSE4.2, whose PCMPGTQ the doubleword comparisons need.
+        BAL_TIER1_FEATURE_SSE42 = 1U << 2U,
+        /// AES-NI and PCLMULQDQ, for AESE, AESD, AESMC, AESIMC and PMULL.
+        BAL_TIER1_FEATURE_AES = 1U << 3U,
+        /// AVX2, whose variable shifts the register shifts need.
+        BAL_TIER1_FEATURE_AVX2 = 1U << 4U,
+        /// The SHA extensions, for SHA1C, SHA1P, SHA1M and the SHA256 instructions.
+        BAL_TIER1_FEATURE_SHA = 1U << 5U,
+    };
+
     BAL_ALIGNED(64) typedef struct
     {
         bal_x86_assembler_t  assembler;
@@ -21,23 +39,17 @@ extern "C"
         int8_t               x86_to_arm[16];
         uint32_t             is_dirty;
         uint8_t              eviction_cursor;
-        /// Whether the host has AES-NI and PCLMULQDQ, for AESE, AESD, AESMC, AESIMC and PMULL.
-        bool has_aes;
+        /// The BAL_TIER1_FEATURE_* bits of the host.
+        uint8_t features;
         /// Bitmask of the x86 registers allocated for the guest instruction being translated.
         /// They are never chosen for eviction, so an instruction cannot evict its own operands.
         uint16_t                 pinned_registers;
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
-        /// Whether the host has FMA3 and F16C, which every CPU with FMA3 also has: the fused
-        /// multiply-add and the half precision fast paths need them.
-        bool has_fma;
         /// Whether the exits of the block being translated may be chained to the next block.
         /// Blocks that raise a guest exception or end on ISB always return to the engine.
-        bool is_linkable;
-        /// Whether the host has SSE4.1 (and so SSSE3), which some vector fast paths need.
-        bool has_sse41;
-        /// Whether the host has SSE4.2, whose PCMPGTQ the doubleword comparisons need.
-        bool has_sse42;
+        bool    is_linkable;
+        uint8_t pad1[3];
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");

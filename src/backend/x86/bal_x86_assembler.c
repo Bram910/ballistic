@@ -3530,4 +3530,59 @@ bal_x86_emit_vex_0f3a_register_immediate(bal_x86_assembler_t *BAL_RESTRICT assem
     emit8(assembler->buffer, &assembler->offset, immediate);
 }
 
+void
+bal_x86_emit_vex(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                 const uint8_t                     map,
+                 const uint8_t                     prefix,
+                 const bool                        is_256,
+                 const bool                        is_64bit,
+                 const uint8_t                     opcode,
+                 const uint8_t                     reg,
+                 const uint8_t                     vvvv,
+                 const uint8_t                     rm,
+                 const bool                        has_immediate,
+                 const uint8_t                     immediate,
+                 const char *BAL_RESTRICT          mnemonic)
+{
+    const uint8_t largest = reg > rm ? (reg > vvvv ? reg : vvvv) : (rm > vvvv ? rm : vvvv);
+
+    if (false == can_emit_vector(assembler, true == has_immediate ? 6U : 5U, largest))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(
+        &bal_thread_logger, "[+0x%04zx] %s %u, %u, %u", assembler->offset, mnemonic, reg, vvvv, rm);
+
+    // C4 [R X B mmmmm] [W vvvv L pp]: R, X, B and vvvv are stored inverted.
+    const uint32_t byte1 = ((~(uint32_t)reg >> 3U & 1U) << 7U) | (1U << 6U)
+                           | ((~(uint32_t)rm >> 3U & 1U) << 5U) | (map & 0x1FU);
+    const uint32_t byte2 = ((true == is_64bit ? 1U : 0U) << 7U) | ((~(uint32_t)vvvv & 0xFU) << 3U)
+                           | ((true == is_256 ? 1U : 0U) << 2U) | (prefix & 3U);
+    emit8(assembler->buffer, &assembler->offset, 0xC4);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)byte1);
+    emit8(assembler->buffer, &assembler->offset, (uint8_t)byte2);
+    emit8(assembler->buffer, &assembler->offset, opcode);
+    emit_modrm_register(assembler->buffer, &assembler->offset, reg & 7U, rm & 7U);
+
+    if (true == has_immediate)
+    {
+        emit8(assembler->buffer, &assembler->offset, immediate);
+    }
+}
+
+void
+bal_x86_emit_vzeroupper(bal_x86_assembler_t *BAL_RESTRICT assembler)
+{
+    if (false == can_emit_vector(assembler, 3U, 0U))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger, "[+0x%04zx] vzeroupper", assembler->offset);
+    emit8(assembler->buffer, &assembler->offset, 0xC5);
+    emit8(assembler->buffer, &assembler->offset, 0xF8);
+    emit8(assembler->buffer, &assembler->offset, 0x77);
+}
+
 /*** end of file ***/

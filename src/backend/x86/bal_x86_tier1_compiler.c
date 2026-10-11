@@ -11320,12 +11320,19 @@ emit_fast_float_step(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t
     // Vector 0 Q 0 01110 a sz 1 Rm opcode 1 Rn Rd, scalar 01 0 11110 a sz 1 Rm opcode 1 Rn Rd:
     // FMULX is a = 0 and opcode 11011, FRECPS a = 0 and FRSQRTS a = 1 with opcode 11111. The
     // scalar forms are the vector ones with bit 28 set and Q = 1.
-    const bool     is_scalar = 0x5E000000U == (instruction & 0xFF000000U);
-    const uint32_t vector    = (instruction & 0xBFA0FC00U) & ~0x50000000U;
-    const bool     is_double = 1U == ((instruction >> 22U) & 1U);
-    const bool     is_quad   = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+    // FMULX by element: 0 Q 1 01111 1 sz L M Rm 1001 H 0 Rn Rd, or the scalar 01 1 11111 ...
+    const bool is_element_vector = 0x2F809000U == (instruction & 0xBF80F400U);
+    const bool is_element_scalar = 0x7F809000U == (instruction & 0xFF80F400U);
+    const bool is_element        = true == is_element_vector || true == is_element_scalar;
+    const bool is_scalar = 0x5E000000U == (instruction & 0xFF000000U) || true == is_element_scalar;
+    const uint32_t vector
+        = true == is_element ? 0x0E20DC00U : (instruction & 0xBFA0FC00U) & ~0x50000000U;
+    const bool is_double = 1U == ((instruction >> 22U) & 1U);
+    const bool is_quad   = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
 
-    if ((false == is_scalar && 0x0E000000U != (instruction & 0xBF000000U))
+    // A double precision element has the index H alone.
+    if ((false == is_scalar && false == is_element && 0x0E000000U != (instruction & 0xBF000000U))
+        || (true == is_element && true == is_double && 1U == ((instruction >> 21U) & 1U))
         || (vector != 0x0E20DC00U && vector != 0x0E20FC00U && vector != 0x0EA0FC00U)
         || (true == is_double && false == is_quad && false == is_scalar)
         || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)
@@ -11352,11 +11359,38 @@ emit_fast_float_step(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t
     if (true == is_scalar)
     {
         emit_load_scalar(assembler, XMM0, rn, is_double);
-        emit_load_scalar(assembler, XMM1, rm, is_double);
     }
     else
     {
         emit_load_vector(assembler, XMM0, rn, is_quad);
+    }
+
+    if (true == is_element)
+    {
+        // The element, broadcast to the lanes in use only, so that zero times infinity cannot
+        // arise in the others.
+        const uint32_t h     = (instruction >> 11U) & 1U;
+        const uint32_t index = true == is_double ? h : (h << 1U) | ((instruction >> 21U) & 1U);
+        emit_load_vector(assembler, XMM1, rm, true);
+        emit_broadcast_lane(assembler, XMM1, is_double, index);
+
+        if (true == is_scalar)
+        {
+            emit_load_vector_constant(
+                assembler, XMM2, true == is_double ? ~0ULL : 0xFFFFFFFFULL, 0U);
+            emit_sse(assembler, 0x66, false, 0xDB, XMM1, XMM2, "pand");
+        }
+        else if (false == is_quad)
+        {
+            emit_sse(assembler, 0xF3, false, 0x7E, XMM1, XMM1, "movq");
+        }
+    }
+    else if (true == is_scalar)
+    {
+        emit_load_scalar(assembler, XMM1, rm, is_double);
+    }
+    else
+    {
         emit_load_vector(assembler, XMM1, rm, is_quad);
     }
 
@@ -15680,6 +15714,234 @@ emit_fast_rounding_doubling_accumulate(bal_tier1_compiler_t *BAL_RESTRICT compil
     return true;
 }
 
+/// FMOV (scalar, immediate) in half, single and double precision: the interpreter expands the
+/// immediate at translation time, and the code writes the constant.
+static bool
+emit_fast_move_immediate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // M 0 S 11110 ftype 1 imm8 100 00000 Rd.
+    const uint32_t ftype = (instruction >> 22U) & 0x3U;
+
+    if (0x1E201000U != (instruction & 0xFF201FE0U) || 2U == ftype)
+    {
+        return false;
+    }
+
+    bal_cpu_t scratch;
+    (void)memset(&scratch, 0, sizeof(scratch));
+    (void)bal_execute_float(&scratch, instruction);
+    const uint32_t        rd          = instruction & 0x1FU;
+    const bal_x86_macro_t value_macro = {
+        .opcode              = BAL_X86_MACRO_MOV_REGISTER_IMMEDIATE,
+        .destination         = SCRATCH_A,
+        .immediate_or_offset = scratch.v[rd][0],
+    };
+    bal_sliding_window_push(&compiler->window, value_macro);
+    push_scalar_write(compiler, rd);
+    return true;
+}
+
+/// FRECPE and FRSQRTE (vector and scalar) in double precision, lane by lane through general
+/// purpose registers: the estimate from RECIPROCAL_ESTIMATES or
+/// RECIPROCAL_SQUARE_ROOT_ESTIMATES by the top eight fraction bits (and the low exponent bit),
+/// with the exponent 2045 - e or (3068 - e) / 2. Exponents the tables do not cover (zeros and
+/// denormals, results that would be denormal, infinities and NaNs, and negative FRSQRTE
+/// operands) take the slow path.
+static bool
+emit_fast_double_estimate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 1 1 10000 11101 10 Rn Rd, or the scalar 01 U 11110 ...
+    const bool is_scalar = 0x5EE1D800U == (instruction & 0xDFFFFC00U);
+
+    if (0x4EE1D800U != (instruction & 0xDFFFFC00U) && false == is_scalar)
+    {
+        return false;
+    }
+
+    const bool                        is_root   = 1U == ((instruction >> 29U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[3];
+    uint32_t                          count = 1U;
+
+    // After begin_float_sequence() every general purpose register but RBP is free.
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    for (uint32_t lane = 0U; lane < (true == is_scalar ? 1U : 2U); ++lane)
+    {
+        const bal_x86_register_t result = 0U == lane ? BAL_X86_RCX : BAL_X86_RDX;
+
+        // R8 = x; RAX = its exponent field with the sign (for FRSQRTE) or without it.
+        bal_x86_emit_load_r64_rbp_offset(
+            assembler, BAL_X86_R8, (int32_t)offsetof(bal_cpu_t, v[rn][lane]));
+        bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RAX, BAL_X86_R8);
+
+        if (false == is_root)
+        {
+            bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_RAX, 1U);
+            bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RAX, 53U);
+        }
+        else
+        {
+            bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RAX, 52U);
+        }
+
+        // In range when the exponent less one is below 2044 (FRSQRTE: 2046, unsigned with the
+        // sign above).
+        bal_x86_emit_mov_r64_r64(assembler, SCRATCH_A, BAL_X86_RAX);
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_B, 1U);
+        bal_x86_emit_sub_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_B, true == is_root ? 2046U : 2044U);
+        bal_x86_emit_sub_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+
+        // SCRATCH_A = the estimate.
+        bal_x86_emit_mov_r64_r64(assembler, SCRATCH_A, BAL_X86_R8);
+        bal_x86_emit_shr_r64_imm8(assembler, SCRATCH_A, 44U);
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_B, true == is_root ? 0x1FFU : 0xFFU);
+        bal_x86_emit_and_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        bal_x86_emit_mov_r64_imm64(assembler,
+                                   SCRATCH_B,
+                                   true == is_root
+                                       ? (uint64_t)(uintptr_t)RECIPROCAL_SQUARE_ROOT_ESTIMATES
+                                       : (uint64_t)(uintptr_t)RECIPROCAL_ESTIMATES);
+        bal_x86_emit_add_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        bal_x86_emit_load_r32_mem8(assembler, SCRATCH_A, SCRATCH_A);
+        bal_x86_emit_shl_r64_imm8(assembler, SCRATCH_A, 44U);
+
+        // result = sign | (2045 - e) << 52 | estimate << 44, or ((3068 - e) / 2) << 52 | ...
+        bal_x86_emit_mov_r64_imm64(assembler, result, true == is_root ? 3068U : 2045U);
+        bal_x86_emit_sub_r64_r64(assembler, result, BAL_X86_RAX);
+
+        if (true == is_root)
+        {
+            bal_x86_emit_shr_r64_imm8(assembler, result, 1U);
+        }
+
+        bal_x86_emit_shl_r64_imm8(assembler, result, 52U);
+        bal_x86_emit_or_r64_r64(assembler, result, SCRATCH_A);
+
+        if (false == is_root)
+        {
+            bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_R8, 63U);
+            bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_R8, 63U);
+            bal_x86_emit_or_r64_r64(assembler, result, BAL_X86_R8);
+        }
+    }
+
+    bal_x86_emit_store_r64_rbp_offset(
+        assembler, BAL_X86_RCX, (int32_t)offsetof(bal_cpu_t, v[rd][0]));
+
+    if (true == is_scalar)
+    {
+        bal_x86_emit_xor_r32_r32(assembler, BAL_X86_RDX, BAL_X86_RDX);
+    }
+
+    bal_x86_emit_store_r64_rbp_offset(
+        assembler, BAL_X86_RDX, (int32_t)offsetof(bal_cpu_t, v[rd][1]));
+    emit_slow_path(compiler, instruction, float_helper(instruction), slow_jumps, count);
+    return true;
+}
+
+/// SCVTF, UCVTF, FCVTZS and FCVTZU (fixed-point, vector and scalar) on halfwords: halves and
+/// halfwords convert to single precision exactly, where scaling by a power of two is exact; the
+/// conversion to half precision then rounds once, and the conversion to halfwords truncates
+/// exactly and narrows, a lane out of range taking the slow path as in emit_fast_half_vector().
+static bool
+emit_fast_half_fixed(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 011110 001x immb 111 oo 1 Rn Rd (oo = 00 SCVTF and UCVTF, 11 FCVTZS and FCVTZU), or
+    // the scalar 01 U 111110 ...
+    const uint32_t opcode    = (instruction >> 11U) & 0x3U;
+    const bool     is_scalar = 0x5F10E400U == (instruction & 0xDFF0E400U);
+
+    if ((0x0F10E400U != (instruction & 0x9FF0E400U) && false == is_scalar)
+        || (opcode != 0U && opcode != 3U) || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool     is_to_int   = 3U == opcode;
+    const bool     is_unsigned = 1U == ((instruction >> 29U) & 1U);
+    const bool     is_quad     = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+    const uint32_t fbits       = 32U - ((instruction >> 16U) & 0x7FU);
+    const uint32_t rd          = instruction & 0x1FU;
+    const uint32_t rn          = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[4];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    for (uint32_t group = 0U; group < (true == is_quad ? 2U : 1U); ++group)
+    {
+        // XMM0 = the four lanes as singles.
+        if (true == is_scalar)
+        {
+            emit_load_half(assembler, XMM4, rn);
+        }
+        else
+        {
+            emit_load_vector(assembler, XMM4, rn, is_quad);
+        }
+
+        if (1U == group)
+        {
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM4, 8U, "psrldq");
+        }
+
+        if (true == is_to_int)
+        {
+            emit_halves_to_singles(assembler, XMM0, XMM4);
+            emit_broadcast_pattern(
+                assembler, XMM1, 0x0000000100000001ULL * ((127U + fbits) << 23U));
+            emit_sse(assembler, 0U, false, 0x59, XMM0, XMM1, "mulps");
+
+            // Truncate exactly, narrow with saturation and widen back: a lane out of range (or
+            // a NaN or an infinity, the indefinite value) differs. Inexact comes only then.
+            emit_sse3a(assembler, 0x08, XMM2, XMM0, 0x0B, "roundps");
+            emit_sse(assembler, 0xF3, false, 0x5B, XMM2, XMM2, "cvttps2dq");
+            emit_sse(assembler, 0U, false, 0x28, XMM3, XMM2, "movaps");
+
+            if (true == is_unsigned)
+            {
+                emit_sse38(assembler, 0x2B, XMM3, XMM3, "packusdw");
+            }
+            else
+            {
+                emit_sse(assembler, 0x66, false, 0x6B, XMM3, XMM3, "packssdw");
+            }
+
+            emit_sse(assembler, 0U, false, 0x28, XMM5, XMM3, "movaps");
+            emit_widen(assembler, XMM3, 1U, is_unsigned, false);
+            emit_lanes_equal(assembler, 2U, XMM3, XMM2);
+            emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM3, "movmskps");
+            bal_x86_emit_sub_r32_imm32(assembler, SCRATCH_A, 0xF);
+            slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+            emit_sse3a(assembler, 0x08, XMM3, XMM0, 0x03, "roundps");
+            emit_sse(assembler, 0U, false, 0x28, XMM0, XMM5, "movaps");
+        }
+        else
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM0, XMM4, "movaps");
+            emit_widen(assembler, XMM0, 1U, is_unsigned, false);
+            emit_sse(assembler, 0U, false, 0x5B, XMM0, XMM0, "cvtdq2ps");
+            emit_broadcast_pattern(
+                assembler, XMM1, 0x0000000100000001ULL * ((127U - fbits) << 23U));
+            emit_sse(assembler, 0U, false, 0x59, XMM0, XMM1, "mulps");
+            emit_singles_to_halves(assembler, XMM0, XMM0);
+        }
+
+        emit_half_result(assembler, group);
+    }
+
+    emit_half_store(
+        compiler, instruction, rd, is_quad, is_scalar, false == is_to_int, slow_jumps, count);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -15752,5 +16014,8 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_convert_lanes(compiler, instruction)
            || emit_fast_doubling_long(compiler, instruction)
            || emit_fast_rounding_doubling_accumulate(compiler, instruction)
-           || emit_fast_mixed_saturating_add_more(compiler, instruction);
+           || emit_fast_mixed_saturating_add_more(compiler, instruction)
+           || emit_fast_move_immediate(compiler, instruction)
+           || emit_fast_double_estimate(compiler, instruction)
+           || emit_fast_half_fixed(compiler, instruction);
 }

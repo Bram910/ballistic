@@ -1172,14 +1172,14 @@ convert_from_integer(context_t     *context,
     if (PRECISION_DOUBLE == context->precision)
     {
         const double converted = true == is_unsigned ? (double)value : (double)(int64_t)value;
-        result                 = from_double(
-            0U == fraction_bits ? converted : ldexp(converted, -(int)fraction_bits));
+        result
+            = from_double(0U == fraction_bits ? converted : ldexp(converted, -(int)fraction_bits));
     }
     else
     {
         const float converted = true == is_unsigned ? (float)value : (float)(int64_t)value;
-        result                = from_float(
-            0U == fraction_bits ? converted : ldexpf(converted, -(int)fraction_bits));
+        result
+            = from_float(0U == fraction_bits ? converted : ldexpf(converted, -(int)fraction_bits));
     }
 
     const uint64_t flags = host_flags() & FPSR_IXC;

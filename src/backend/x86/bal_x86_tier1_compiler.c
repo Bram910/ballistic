@@ -7996,8 +7996,7 @@ emit_magnitude_check(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     // Shifting out the sign (and, for single precision, the 32 bits above the value) leaves the
     // exponent at the top.
     bal_x86_emit_shl_r64_imm8(assembler, SCRATCH_A, true == is_double ? 1U : 33U);
-    bal_x86_emit_mov_r64_imm64(
-        assembler, BAL_X86_RAX, exponent << (true == is_double ? 53U : 56U));
+    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, exponent << (true == is_double ? 53U : 56U));
     bal_x86_emit_sub_r64_r64(assembler, SCRATCH_A, BAL_X86_RAX);
     return emit_forward_jump(assembler, true, BAL_X86_COND_AE);
 }
@@ -8042,11 +8041,9 @@ emit_round_ties_away(bal_x86_assembler_t *BAL_RESTRICT assembler, const bool is_
     emit_all_ones(assembler, XMM3);
     emit_sse_immediate(assembler, 0x66, shift_op, 2U, XMM3, 1U, "psrl");
     emit_sse(assembler, 0U, false, 0x54, XMM2, XMM3, "andps");
-    emit_load_constant(
-        assembler, XMM3, true == is_double ? 0x3FE0000000000000ULL : 0x3F000000ULL);
+    emit_load_constant(assembler, XMM3, true == is_double ? 0x3FE0000000000000ULL : 0x3F000000ULL);
     emit_sse_immediate(assembler, scalar, 0xC2, XMM2, XMM3, 5U, "cmpnlts");
-    emit_load_constant(
-        assembler, XMM3, true == is_double ? 0x3FF0000000000000ULL : 0x3F800000ULL);
+    emit_load_constant(assembler, XMM3, true == is_double ? 0x3FF0000000000000ULL : 0x3F800000ULL);
     emit_sse(assembler, 0U, false, 0x54, XMM2, XMM3, "andps");
     emit_all_ones(assembler, XMM3);
     emit_sse_immediate(assembler, 0x66, shift_op, 6U, XMM3, true == is_double ? 63U : 31U, "psll");
@@ -8325,9 +8322,10 @@ emit_fast_round(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
     // FRINTN, FRINTP, FRINTM, FRINTZ, FRINTA, -, FRINTX (the current mode, raising Inexact) and
     // FRINTI (the current mode).
     static const uint8_t IMMEDIATES[8] = { 0x08, 0x0A, 0x09, 0x0B, 0U, 0U, 0x04, 0x0C };
-    const bool           is_double     = 1U == ftype;
-    const uint32_t       rd            = instruction & 0x1FU;
-    const uint32_t       rn            = (instruction >> 5U) & 0x1FU;
+
+    const bool                        is_double = 1U == ftype;
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
     size_t                            slow_jumps[2];
     uint32_t                          count = 1U;
@@ -8486,9 +8484,8 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_compare(compiler, instruction)
            || emit_fast_integer_to_float(compiler, instruction)
            || emit_fast_float_to_integer(compiler, instruction)
-           || emit_fast_round(compiler, instruction)
-           || emit_fast_move(compiler, instruction) || emit_fast_select(compiler, instruction)
-           || emit_fast_duplicate(compiler, instruction)
+           || emit_fast_round(compiler, instruction) || emit_fast_move(compiler, instruction)
+           || emit_fast_select(compiler, instruction) || emit_fast_duplicate(compiler, instruction)
            || emit_fast_vector_integer(compiler, instruction)
            || emit_fast_shift_immediate(compiler, instruction)
            || emit_fast_vector_misc(compiler, instruction)

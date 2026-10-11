@@ -1604,6 +1604,44 @@ extern "C"
                                                   uint8_t              immediate,
                                                   const char          *mnemonic);
 
+    /// Emits a VEX instruction `opcode reg, vvvv, rm` on registers 0-15, with an 8-bit immediate
+    /// when `has_immediate` is set. `map` selects the opcode map (1 for 0F, 2 for 0F38, 3 for
+    /// 0F3A), `prefix` the implied prefix (0 none, 1 66, 2 F3, 3 F2), `is_256` the 256-bit (YMM)
+    /// form and `is_64bit` VEX.W. General purpose registers are given by number.
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - a register is above 15.
+    void bal_x86_emit_vex(bal_x86_assembler_t *assembler,
+                          uint8_t              map,
+                          uint8_t              prefix,
+                          bool                 is_256,
+                          bool                 is_64bit,
+                          uint8_t              opcode,
+                          uint8_t              reg,
+                          uint8_t              vvvv,
+                          uint8_t              rm,
+                          bool                 has_immediate,
+                          uint8_t              immediate,
+                          const char          *mnemonic);
+
+    /// Emits VZEROUPPER, which clears the upper halves of the YMM registers so that SSE code
+    /// after AVX code runs without transition penalties.
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    void bal_x86_emit_vzeroupper(bal_x86_assembler_t *assembler);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

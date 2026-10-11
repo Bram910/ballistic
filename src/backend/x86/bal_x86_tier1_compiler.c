@@ -13436,6 +13436,318 @@ emit_fast_sha(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instru
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// Inline fused half precision arithmetic (AVX)
+// -----------------------------------------------------------------------------
+
+/// Emits a VEX instruction from the 0F map: `opcode reg, vvvv, rm` with the implied prefix
+/// `prefix` (0 none, 1 66), on YMM registers with `is_256`.
+static void
+emit_vex(bal_x86_assembler_t *BAL_RESTRICT assembler,
+         const uint8_t                     prefix,
+         const bool                        is_256,
+         const uint8_t                     opcode,
+         const uint8_t                     reg,
+         const uint8_t                     vvvv,
+         const uint8_t                     rm,
+         const char                       *mnemonic)
+{
+    bal_x86_emit_vex(
+        assembler, 1U, prefix, is_256, false, opcode, reg, vvvv, rm, false, 0U, mnemonic);
+}
+
+/// Emits VCMPPD `reg`, `vvvv`, `rm`, `predicate` on YMM registers.
+static void
+emit_vex_compare(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                 const uint8_t                     reg,
+                 const uint8_t                     vvvv,
+                 const uint8_t                     rm,
+                 const uint8_t                     predicate)
+{
+    bal_x86_emit_vex(
+        assembler, 1U, 1U, true, false, 0xC2, reg, vvvv, rm, true, predicate, "vcmppd");
+}
+
+/// Puts the all-ones masks of the four 64-bit lanes of YMM `source` into the 32-bit lanes of
+/// `destination` (an XMM register), using xmm4.
+static void
+emit_narrow_masks(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const uint8_t                     destination,
+                  const uint8_t                     source)
+{
+    bal_x86_emit_vex(
+        assembler, 3U, 1U, true, false, 0x19, source, 0U, XMM4, true, 1U, "vextractf128");
+    bal_x86_emit_vex(
+        assembler, 1U, 0U, false, false, 0xC6, destination, source, XMM4, true, 0xDD, "vshufps");
+}
+
+/// Rounds c + a * b once to half precision for the four single precision lanes a, b and c in
+/// xmm0, xmm1 and xmm2 (exact conversions of halves, or constants), into the four halves in the
+/// low 64 bits of xmm0. Uses xmm0 to xmm5 as YMM registers and SCRATCH_A, and adds two jumps to
+/// the slow path to `jumps`: for an infinite or NaN operand, whose rules (and Invalid from
+/// infinity minus infinity in TwoSum) differ, and for a sum that is not exact in double precision.
+///
+/// The product of two halves is exact in double precision, and so is the sum unless its terms'
+/// exponents are far apart: TwoSum gives the sum's error, and a nonzero one (or a NaN) takes the
+/// slow path. The exact sum is then rounded to single precision to odd (towards zero, with the
+/// last bit set if that was inexact), which keeps VCVTPS2PH's rounding to half precision the
+/// correct one. The sum's sign of rounding is that of (back - sum) * sum, back being the nearest
+/// single precision value converted back.
+static void
+emit_half_fused(bal_x86_assembler_t *BAL_RESTRICT assembler, size_t *jumps)
+{
+    // An exponent of all ones in any operand.
+    emit_broadcast_pattern(assembler, XMM4, 0x7F8000007F800000ULL);
+    emit_zero_vector(assembler, XMM5);
+
+    for (uint8_t operand = XMM0; operand <= XMM2; ++operand)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM3, operand, "movaps");
+        emit_sse(assembler, 0x66, false, 0xDB, XMM3, XMM4, "pand");
+        emit_sse(assembler, 0x66, false, 0x76, XMM3, XMM4, "pcmpeqd");
+        emit_sse(assembler, 0x66, false, 0xEB, XMM5, XMM3, "por");
+    }
+
+    emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM5, "movmskps");
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    jumps[0] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    // YMM3 = a * b, YMM4 = c, YMM5 = s = a * b + c.
+    emit_vex(assembler, 0U, true, 0x5A, XMM3, 0U, XMM0, "vcvtps2pd");
+    emit_vex(assembler, 0U, true, 0x5A, XMM4, 0U, XMM1, "vcvtps2pd");
+    emit_vex(assembler, 1U, true, 0x59, XMM3, XMM3, XMM4, "vmulpd");
+    emit_vex(assembler, 0U, true, 0x5A, XMM4, 0U, XMM2, "vcvtps2pd");
+    emit_vex(assembler, 1U, true, 0x58, XMM5, XMM3, XMM4, "vaddpd");
+
+    // TwoSum: bb = s - p, error = (p - (s - bb)) + (c - bb).
+    emit_vex(assembler, 1U, true, 0x5C, XMM0, XMM5, XMM3, "vsubpd");
+    emit_vex(assembler, 1U, true, 0x5C, XMM1, XMM5, XMM0, "vsubpd");
+    emit_vex(assembler, 1U, true, 0x5C, XMM1, XMM3, XMM1, "vsubpd");
+    emit_vex(assembler, 1U, true, 0x5C, XMM0, XMM4, XMM0, "vsubpd");
+    emit_vex(assembler, 1U, true, 0x58, XMM0, XMM1, XMM0, "vaddpd");
+    emit_vex(assembler, 1U, true, 0x57, XMM1, XMM1, XMM1, "vxorpd");
+    emit_vex_compare(assembler, XMM0, XMM0, XMM1, 4U); // NEQ_UQ
+    emit_vex(assembler, 1U, true, 0x50, (uint8_t)SCRATCH_A, 0U, XMM0, "vmovmskpd");
+
+    // XMM0 = s to nearest single precision; YMM2 = its distance back to s; YMM3 = the lanes
+    // rounded away from zero.
+    emit_vex(assembler, 1U, true, 0x5A, XMM0, 0U, XMM5, "vcvtpd2ps");
+    emit_vex(assembler, 0U, true, 0x5A, XMM1, 0U, XMM0, "vcvtps2pd");
+    emit_vex(assembler, 1U, true, 0x5C, XMM2, XMM1, XMM5, "vsubpd");
+    emit_vex(assembler, 1U, true, 0x59, XMM3, XMM2, XMM5, "vmulpd");
+    emit_vex(assembler, 1U, true, 0x57, XMM4, XMM4, XMM4, "vxorpd");
+    emit_vex_compare(assembler, XMM3, XMM3, XMM4, 0x1E); // GT_OQ
+    emit_vex_compare(assembler, XMM2, XMM2, XMM4, 0x0C); // NEQ_OQ
+    emit_narrow_masks(assembler, XMM3, XMM3);
+    emit_narrow_masks(assembler, XMM2, XMM2);
+    bal_x86_emit_vzeroupper(assembler);
+
+    // The decision waits for VZEROUPPER, so that the slow path runs without upper halves set.
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    // Towards zero is one less in magnitude where rounding went away from it; then the last bit
+    // is set where it was inexact.
+    emit_sse(assembler, 0x66, false, 0xFE, XMM0, XMM3, "paddd");
+    emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 31U, "psrld");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM2, "por");
+    emit_singles_to_halves(assembler, XMM0, XMM0);
+}
+
+/// Converts four halves of the raw lanes in `source` (from half lane `first`) to single
+/// precision in `destination`, flipping their signs first with `is_negated`. Uses xmm4.
+static void
+emit_half_operand(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const uint8_t                     destination,
+                  const uint8_t                     source,
+                  const uint32_t                    first,
+                  const bool                        is_negated)
+{
+    if (first != 0U)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, source, (uint8_t)(2U * first), "psrldq");
+    }
+
+    if (true == is_negated)
+    {
+        emit_broadcast_pattern(assembler, XMM4, 0x8000800080008000ULL);
+        emit_sse(assembler, 0x66, false, 0xEF, source, XMM4, "pxor");
+    }
+
+    emit_halves_to_singles(assembler, destination, source);
+}
+
+/// FMLA and FMLS (vector, by element and scalar by element), FMADD, FMSUB, FNMADD and FNMSUB,
+/// and FRECPS and FRSQRTS (vector and scalar), in half precision, through emit_half_fused().
+/// FMLS and the subtracting forms negate an operand, which the fused rounding allows. FRECPS is
+/// 2 - n * m and FRSQRTS 1.5 - (n / 2) * m (halving is exact); their zero times infinity, which
+/// gives 2 or 1.5, takes the slow path with the other infinities.
+static bool
+emit_fast_half_fused(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // Vector: 0 Q 0 01110 a 10 Rm 00 001 1 Rn Rd (FMLA a = 0, FMLS a = 1) or 00 111 1 (FRECPS,
+    // FRSQRTS). By element: 0 Q 0 01111 00 L M Rm 0 S 01 H 0 Rn Rd, scalar 01 0 11111 ... Scalar
+    // steps: 01 0 11110 a 10 Rm 00 111 1. Multiply-add: 0 0 0 11111 11 o1 Rm o0 Ra Rn Rd.
+    const uint32_t three   = instruction & 0xBF60FC00U;
+    const uint32_t element = instruction & 0xBFC0B400U;
+    const bool     is_add  = 0x0E400C00U == three;
+    const bool     is_step = 0x0E403C00U == three || 0x5E403C00U == (instruction & 0xFF60FC00U);
+    const bool     is_lane = 0x0F001000U == element || 0x5F001000U == (instruction & 0xFFC0B400U);
+    const bool     is_madd = 0x1FC00000U == (instruction & 0xFFC00000U);
+
+    if ((false == is_add && false == is_step && false == is_lane && false == is_madd)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool is_scalar = true == is_madd || 0x5F001000U == (instruction & 0xFFC0B400U)
+                           || 0x5E403C00U == (instruction & 0xFF60FC00U);
+    const bool     is_quad = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+    const uint32_t rd      = instruction & 0x1FU;
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+    const uint32_t rm      = (instruction >> 16U) & 0x1FU;
+    const bool     is_root = true == is_step && 1U == ((instruction >> 23U) & 1U);
+
+    // Whether n and the addend are negated, and the addend: Rd, Ra or a constant.
+    bool     negate_n      = false;
+    bool     negate_addend = false;
+    uint32_t addend        = rd;
+
+    if (true == is_add)
+    {
+        negate_n = 1U == ((instruction >> 23U) & 1U);
+    }
+    else if (true == is_lane)
+    {
+        negate_n = 1U == ((instruction >> 14U) & 1U);
+    }
+    else if (true == is_madd)
+    {
+        const uint32_t o1 = (instruction >> 21U) & 1U;
+        const uint32_t o0 = (instruction >> 15U) & 1U;
+        addend            = (instruction >> 10U) & 0x1FU;
+        negate_n          = o0 != o1;
+        negate_addend     = 1U == o1;
+    }
+    else
+    {
+        negate_n = true;
+    }
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[6];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+
+    // The register cache is empty now: RCX holds the element of a by element form, RAX and RDX
+    // the two halves of the result.
+    if (true == is_lane)
+    {
+        const uint32_t index = (((instruction >> 11U) & 1U) << 2U)
+                               | (((instruction >> 21U) & 1U) << 1U) | ((instruction >> 20U) & 1U);
+        bal_x86_emit_load_r64_rbp_offset(
+            assembler, BAL_X86_RCX, (int32_t)offsetof(bal_cpu_t, v[rm & 0xFU][index / 4U]));
+        bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RCX, (uint8_t)(16U * (index % 4U)));
+    }
+
+    const uint32_t groups = true == is_quad ? 2U : 1U;
+
+    for (uint32_t group = 0U; group < groups; ++group)
+    {
+        // XMM0 = n, XMM1 = m, XMM2 = the addend, in single precision.
+        if (true == is_scalar)
+        {
+            emit_load_element(assembler, XMM3, rn, 1U);
+        }
+        else
+        {
+            emit_load_vector(assembler, XMM3, rn, is_quad);
+        }
+
+        emit_half_operand(assembler, XMM0, XMM3, 4U * group, negate_n);
+
+        if (true == is_root)
+        {
+            emit_broadcast_pattern(assembler, XMM3, 0x3F0000003F000000ULL);
+            emit_sse(assembler, 0U, false, 0x59, XMM0, XMM3, "mulps");
+        }
+
+        if (true == is_lane)
+        {
+            emit_sse(assembler, 0x66, false, 0x6E, XMM3, (uint8_t)BAL_X86_RCX, "movd");
+            emit_sse_immediate(assembler, 0xF2, 0x70, XMM3, XMM3, 0U, "pshuflw");
+            emit_halves_to_singles(assembler, XMM1, XMM3);
+        }
+        else
+        {
+            if (true == is_scalar)
+            {
+                emit_load_element(assembler, XMM3, rm, 1U);
+            }
+            else
+            {
+                emit_load_vector(assembler, XMM3, rm, is_quad);
+            }
+
+            emit_half_operand(assembler, XMM1, XMM3, 4U * group, false);
+        }
+
+        if (true == is_step)
+        {
+            emit_broadcast_pattern(
+                assembler, XMM2, true == is_root ? 0x3FC000003FC00000ULL : 0x4000000040000000ULL);
+        }
+        else
+        {
+            if (true == is_scalar)
+            {
+                emit_load_element(assembler, XMM3, addend, 1U);
+            }
+            else
+            {
+                emit_load_vector(assembler, XMM3, addend, is_quad);
+            }
+
+            emit_half_operand(assembler, XMM2, XMM3, 4U * group, negate_addend);
+        }
+
+        emit_half_fused(assembler, &slow_jumps[count]);
+        count += 2U;
+        emit_sse(assembler,
+                 0x66,
+                 true,
+                 0x7E,
+                 XMM0,
+                 (uint8_t)(0U == group ? BAL_X86_RAX : BAL_X86_RDX),
+                 "movq");
+    }
+
+    emit_sse(assembler, 0x66, true, 0x6E, XMM0, (uint8_t)BAL_X86_RAX, "movq");
+
+    if (true == is_quad)
+    {
+        emit_sse(assembler, 0x66, true, 0x6E, XMM1, (uint8_t)BAL_X86_RDX, "movq");
+        emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM1, "punpcklqdq");
+    }
+
+    slow_jumps[count++] = emit_half_checks(assembler);
+
+    if (true == is_scalar)
+    {
+        emit_store_element(assembler, XMM0, rd, 1U);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM0, rd, is_quad);
+    }
+
+    emit_slow_path(compiler, instruction, float_helper(instruction), slow_jumps, count);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -13494,5 +13806,5 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_saturating_arithmetic(compiler, instruction)
            || emit_fast_mixed_saturating_add(compiler, instruction)
            || emit_fast_saturating_scalar(compiler, instruction)
-           || emit_fast_sha(compiler, instruction);
+           || emit_fast_sha(compiler, instruction) || emit_fast_half_fused(compiler, instruction);
 }

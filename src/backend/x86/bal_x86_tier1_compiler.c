@@ -251,15 +251,58 @@ static void translate_mov_immediate(bal_tier1_compiler_t                     *co
                                     const bal_decoder_instruction_metadata_t *metadata,
                                     uint32_t                                  instruction);
 
-/// Whether the host has F16C (CPUID.1:ECX bit 29), which __builtin_cpu_supports() cannot test.
+/// Whether the host has the BAL_TIER1_FEATURE_* bit `feature`.
 static bool
-host_has_f16c(void)
+has_feature(const bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t feature)
 {
-    unsigned int eax = 0U;
-    unsigned int ebx = 0U;
-    unsigned int ecx = 0U;
-    unsigned int edx = 0U;
-    return 0 != __get_cpuid(1U, &eax, &ebx, &ecx, &edx) && 0U != (ecx & bit_F16C);
+    return 0U != (compiler->features & feature);
+}
+
+/// The BAL_TIER1_FEATURE_* bits of the host. __builtin_cpu_supports() cannot test F16C (CPUID.1:ECX
+/// bit 29) or the SHA extensions (CPUID.7.0:EBX bit 29), so CPUID does.
+static uint8_t
+host_features(void)
+{
+    unsigned int eax      = 0U;
+    unsigned int ebx      = 0U;
+    unsigned int ecx      = 0U;
+    unsigned int edx      = 0U;
+    const bool   has_f16c = 0 != __get_cpuid(1U, &eax, &ebx, &ecx, &edx) && 0U != (ecx & bit_F16C);
+    const bool   has_sha
+        = 0 != __get_cpuid_count(7U, 0U, &eax, &ebx, &ecx, &edx) && 0U != (ebx & bit_SHA);
+    uint32_t features = 0U;
+
+    if (0 != __builtin_cpu_supports("fma") && true == has_f16c)
+    {
+        features |= BAL_TIER1_FEATURE_FMA;
+    }
+
+    if (0 != __builtin_cpu_supports("sse4.1"))
+    {
+        features |= BAL_TIER1_FEATURE_SSE41;
+    }
+
+    if (0 != __builtin_cpu_supports("sse4.2"))
+    {
+        features |= BAL_TIER1_FEATURE_SSE42;
+    }
+
+    if (0 != __builtin_cpu_supports("aes") && 0 != __builtin_cpu_supports("pclmul"))
+    {
+        features |= BAL_TIER1_FEATURE_AES;
+    }
+
+    if (0 != __builtin_cpu_supports("avx2"))
+    {
+        features |= BAL_TIER1_FEATURE_AVX2;
+    }
+
+    if (true == has_sha && 0U != (features & BAL_TIER1_FEATURE_SSE41))
+    {
+        features |= BAL_TIER1_FEATURE_SHA;
+    }
+
+    return (uint8_t)features;
 }
 
 bal_error_t
@@ -290,10 +333,7 @@ bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
     }
 
     compiler->debug_context = debug_context;
-    compiler->has_fma       = 0 != __builtin_cpu_supports("fma") && true == host_has_f16c();
-    compiler->has_sse41     = 0 != __builtin_cpu_supports("sse4.1");
-    compiler->has_sse42     = 0 != __builtin_cpu_supports("sse4.2");
-    compiler->has_aes = 0 != __builtin_cpu_supports("aes") && 0 != __builtin_cpu_supports("pclmul");
+    compiler->features      = host_features();
     bal_error_t error
         = bal_x86_assembler_init(&compiler->assembler, executable_buffer, buffer_size);
 
@@ -6079,7 +6119,8 @@ emit_fast_scalar_fused(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     // M 0 S 11111 ftype o1 Rm o0 Ra Rn Rd.
     const uint32_t ftype = (instruction >> 22U) & 0x3U;
 
-    if (0x1F000000U != (instruction & 0xFF000000U) || ftype > 1U || false == compiler->has_fma)
+    if (0x1F000000U != (instruction & 0xFF000000U) || ftype > 1U
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA))
     {
         return false;
     }
@@ -6156,7 +6197,8 @@ emit_fast_vector_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
             return false;
     }
 
-    if ((true == is_double && false == is_quad) || (true == is_fused && false == compiler->has_fma))
+    if ((true == is_double && false == is_quad)
+        || (true == is_fused && false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)))
     {
         return false;
     }
@@ -6232,7 +6274,7 @@ emit_fast_by_element(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t
     const uint32_t lane      = true == is_double ? h : (h << 1U) | l;
 
     if ((true == is_double && (1U == l || (true == is_vector && false == is_quad)))
-        || (true == is_fused && false == compiler->has_fma))
+        || (true == is_fused && false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)))
     {
         return false;
     }
@@ -6855,7 +6897,7 @@ emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
     const uint32_t u       = (instruction >> 29U) & 1U;
     const uint32_t size    = (instruction >> 22U) & 0x3U;
     const uint32_t opcode  = (instruction >> 11U) & 0x1FU;
-    const bool     sse41   = compiler->has_sse41;
+    const bool     sse41   = has_feature(compiler, BAL_TIER1_FEATURE_SSE41);
 
     if (true == is_scalar
         && (size != 3U
@@ -6887,7 +6929,8 @@ emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
         case 0x06U: // CMGT, CMHI
         case 0x07U: // CMGE, CMHS
             if (3U == size
-                && ((false == is_quad && false == is_scalar) || false == compiler->has_sse42))
+                && ((false == is_quad && false == is_scalar)
+                    || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42)))
             {
                 return false;
             }
@@ -7062,7 +7105,7 @@ emit_fast_vector_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
     const uint32_t size    = (instruction >> 22U) & 0x3U;
     const uint32_t opcode  = (instruction >> 12U) & 0x1FU;
     const uint32_t key     = (u << 5U) | opcode;
-    const bool     sse41   = compiler->has_sse41;
+    const bool     sse41   = has_feature(compiler, BAL_TIER1_FEATURE_SSE41);
     const bool     is_wide = 3U == size;
 
     // Doubleword lanes exist in full vectors and scalars.
@@ -7092,7 +7135,9 @@ emit_fast_vector_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
             break;
         case 0x0BU: // ABS
             if (false == sse41
-                || (true == is_wide && (false == has_wide_lanes || false == compiler->has_sse42)))
+                || (true == is_wide
+                    && (false == has_wide_lanes
+                        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))))
             {
                 return false;
             }
@@ -7107,7 +7152,9 @@ emit_fast_vector_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
         case 0x28U: // CMGE #0
         case 0x0AU: // CMLT #0
         case 0x29U: // CMLE #0
-            if (true == is_wide && (false == has_wide_lanes || false == compiler->has_sse42))
+            if (true == is_wide
+                && (false == has_wide_lanes
+                    || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42)))
             {
                 return false;
             }
@@ -7319,7 +7366,7 @@ emit_fast_float_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t
     }
 
     if ((true == is_double && false == is_quad)
-        || (rounding != 0xFFU && false == compiler->has_sse41))
+        || (rounding != 0xFFU && false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41)))
     {
         return false;
     }
@@ -7526,7 +7573,8 @@ emit_fast_extract(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t in
     const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
     const uint32_t imm4    = (instruction >> 11U) & 0xFU;
 
-    if ((false == is_quad && imm4 >= 8U) || (true == is_quad && false == compiler->has_sse41))
+    if ((false == is_quad && imm4 >= 8U)
+        || (true == is_quad && false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41)))
     {
         return false;
     }
@@ -7562,7 +7610,8 @@ static bool
 emit_fast_table(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
     // 0 Q 001110 000 Rm 0 00 0 00 Rn Rd.
-    if (0x0E000000U != (instruction & 0xBFE0FC00U) || false == compiler->has_sse41)
+    if (0x0E000000U != (instruction & 0xBFE0FC00U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -8460,7 +8509,7 @@ emit_fast_vector_convert(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
     const bool is_scalar = 0x5E200800U == (instruction & 0xDF7E0C00U);
 
     if ((0x0E200800U != (instruction & 0x9F7E0C00U) && false == is_scalar)
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -8775,7 +8824,8 @@ emit_fast_vector_integer_more(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                               const uint32_t                     instruction)
 {
     // 0 Q U 01110 size 1 Rm opcode 1 Rn Rd.
-    if (0x0E200400U != (instruction & 0x9F200400U) || false == compiler->has_sse41)
+    if (0x0E200400U != (instruction & 0x9F200400U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -8995,7 +9045,8 @@ emit_fast_widening(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t i
     const uint32_t size   = (instruction >> 22U) & 0x3U;
     const uint32_t opcode = (instruction >> 12U) & 0xFU;
 
-    if (0x0E200000U != (instruction & 0x9F200C00U) || 3U == size || false == compiler->has_sse41)
+    if (0x0E200000U != (instruction & 0x9F200C00U) || 3U == size
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -9147,7 +9198,7 @@ emit_fast_integer_by_element(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     const uint32_t u      = (instruction >> 29U) & 1U;
 
     if (0x0F000000U != (instruction & 0x9F000400U) || 0U == size || 3U == size
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -9457,7 +9508,7 @@ emit_fast_shift_immediate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
     const bool     is_scalar = 0x5F000400U == (instruction & 0xDF800400U);
 
     if ((0x0F000400U != (instruction & 0x9F800400U) && false == is_scalar) || 0U == immh
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -9619,7 +9670,8 @@ static bool
 emit_fast_vector_misc_more(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
     // 0 Q U 01110 size 10000 opcode 10 Rn Rd.
-    if (0x0E200800U != (instruction & 0x9F3E0C00U) || false == compiler->has_sse41)
+    if (0x0E200800U != (instruction & 0x9F3E0C00U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -9798,7 +9850,8 @@ static bool
 emit_fast_across_lanes(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
     // 0 Q U 01110 size 11000 opcode 10 Rn Rd.
-    if (0x0E300800U != (instruction & 0x9F3E0C00U) || false == compiler->has_sse41)
+    if (0x0E300800U != (instruction & 0x9F3E0C00U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -10210,7 +10263,8 @@ emit_fast_vector_interleaved(bal_tier1_compiler_t *BAL_RESTRICT         compiler
             return false;
     }
 
-    if ((false == is_plain && false == is_post) || false == compiler->has_sse41
+    if ((false == is_plain && false == is_post)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41)
         || (3U == size && false == is_quad))
     {
         return false;
@@ -10348,7 +10402,7 @@ emit_fast_vector_single(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     const bool     is_load  = 1U == ((instruction >> 22U) & 1U);
 
     if ((false == is_plain && false == is_post) || 1U == ((instruction >> 21U) & 1U)
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -10529,7 +10583,7 @@ emit_fast_byte_permute(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
                               || 0x6E000400U == (instruction & 0xFFE08400U)  // INS (element)
                               || 0x2E000000U == (instruction & 0xBFE08400U); // EXT
 
-    if (false == is_candidate || false == compiler->has_sse41
+    if (false == is_candidate || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41)
         || false == bal_is_simd_supported(instruction))
     {
         return false;
@@ -10625,7 +10679,8 @@ emit_fast_table_lookup(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     const uint32_t length = ((instruction >> 13U) & 0x3U) + 1U;
     const bool     is_tbx = 1U == ((instruction >> 12U) & 1U);
 
-    if (0x0E000000U != (instruction & 0xBFE08C00U) || false == compiler->has_sse41
+    if (0x0E000000U != (instruction & 0xBFE08C00U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41)
         || (false == is_tbx && 1U == length))
     {
         return false;
@@ -10738,7 +10793,8 @@ static bool
 emit_fast_half_arithmetic(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
     // 0 Q U 01110 a 10 Rm 00 opcode 1 Rn Rd.
-    if (0x0E400400U != (instruction & 0x9F60C400U) || false == compiler->has_fma)
+    if (0x0E400400U != (instruction & 0x9F60C400U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA))
     {
         return false;
     }
@@ -10826,7 +10882,8 @@ emit_fast_vector_precision(bal_tier1_compiler_t *BAL_RESTRICT compiler, const ui
     const bool     is_long   = 0x0E217800U == form;
     const bool     is_double = 1U == ((instruction >> 22U) & 1U);
 
-    if ((false == is_long && form != 0x0E216800U) || false == compiler->has_fma)
+    if ((false == is_long && form != 0x0E216800U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA))
     {
         return false;
     }
@@ -10893,7 +10950,7 @@ emit_fast_half_convert(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     const uint32_t form = instruction & 0xFFFFFC00U;
 
     if ((form != 0x1EE24000U && form != 0x1EE2C000U && form != 0x1E23C000U)
-        || false == compiler->has_fma)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA))
     {
         return false;
     }
@@ -11053,7 +11110,8 @@ emit_fast_float_step(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t
     if ((false == is_scalar && 0x0E000000U != (instruction & 0xBF000000U))
         || (vector != 0x0E20DC00U && vector != 0x0E20FC00U && vector != 0x0EA0FC00U)
         || (true == is_double && false == is_quad && false == is_scalar)
-        || false == compiler->has_fma || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -11318,7 +11376,8 @@ emit_fast_estimate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t i
     const uint32_t vector    = instruction & 0x9FFFFC00U;
     const bool     is_scalar = 0x5EA1D800U == (instruction & 0xDFFFFC00U);
 
-    if ((0x0EA1D800U != vector && false == is_scalar) || false == compiler->has_sse41)
+    if ((0x0EA1D800U != vector && false == is_scalar)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -11516,7 +11575,7 @@ emit_fast_doubling_multiply(bal_tier1_compiler_t *BAL_RESTRICT compiler, const u
     const bool     is_element = 0x0F00C000U == (instruction & 0xBF00E400U);
 
     if ((false == is_vector && false == is_element) || 0U == size || 3U == size
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -11561,7 +11620,8 @@ emit_fast_dot_product(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
     const bool is_vector  = 0x0E809400U == (instruction & 0x9FE0FC00U);
     const bool is_element = 0x0F80E000U == (instruction & 0x9FC0F400U);
 
-    if ((false == is_vector && false == is_element) || false == compiler->has_sse41)
+    if ((false == is_vector && false == is_element)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -11613,7 +11673,7 @@ emit_fast_saturating_shift_narrow(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     const uint32_t opcode = (instruction >> 11U) & 0x1FU;
 
     if (0x0F000400U != (instruction & 0x9F800400U) || 0U == immh || immh > 3U
-        || false == compiler->has_sse41)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }
@@ -11712,7 +11772,7 @@ emit_fast_crypto(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
 
     if ((false == is_pmull && form != 0x4E284800U && form != 0x4E285800U && form != 0x4E286800U
          && form != 0x4E287800U)
-        || false == compiler->has_aes)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_AES))
     {
         return false;
     }
@@ -11784,7 +11844,7 @@ emit_fast_scalar_more(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
         = 0x1E200800U == (instruction & 0xFF200C00U) && opcode <= 3U && is_half;
 
     if ((false == is_root && false == is_negated && false == is_arithmetic) || 2U == ftype
-        || (true == is_half && false == compiler->has_fma))
+        || (true == is_half && false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)))
     {
         return false;
     }
@@ -11859,7 +11919,8 @@ static bool
 emit_fast_half_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
     // 0 0 0 11110 11 1 Rm 00 1000 Rn opcode2.
-    if (0x1EE02000U != (instruction & 0xFFE0FC07U) || false == compiler->has_fma)
+    if (0x1EE02000U != (instruction & 0xFFE0FC07U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_FMA))
     {
         return false;
     }
@@ -11905,7 +11966,8 @@ emit_fast_half_vector(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_
     uint32_t relation = 0xFFU; // 0 EQ, 1 GE, 2 GT, 3 LE, 4 LT, with 8 for absolute values.
     bool     is_zero  = false;
 
-    if (false == compiler->has_fma || false == compiler->has_sse41)
+    if (false == has_feature(compiler, BAL_TIER1_FEATURE_FMA)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
     {
         return false;
     }

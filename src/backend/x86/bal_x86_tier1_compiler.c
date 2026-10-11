@@ -15221,6 +15221,315 @@ emit_fast_convert_lanes(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint3
     return true;
 }
 
+/// Sets xmm0 to xmm0 + xmm1, or xmm0 - xmm1 with `is_subtract`, with signed saturation on words
+/// (`size` 2) or doublewords, setting FPSR.QC when a lane saturates. Uses xmm2 to xmm5.
+static void
+emit_signed_saturating_add(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                           const uint32_t                    size,
+                           const bool                        is_subtract)
+{
+    // XMM2 = the wrapping result; XMM3 = the lanes that overflowed (from the signs, as
+    // emit_fast_saturating_arithmetic() finds them); XMM4 = the bound each crossed.
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler,
+             0x66,
+             false,
+             true == is_subtract ? LANE_SUB[size] : LANE_ADD[size],
+             XMM2,
+             XMM1,
+             "padd/psub");
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+    emit_sse(assembler, 0x66, false, 0xEF, XMM3, XMM2, "pxor");
+    emit_sse(assembler, 0U, false, 0x28, XMM4, true == is_subtract ? XMM0 : XMM1, "movaps");
+    emit_sse(assembler, 0x66, false, 0xEF, XMM4, true == is_subtract ? XMM1 : XMM2, "pxor");
+    emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+    emit_zero_vector(assembler, XMM3);
+    emit_lanes_greater(assembler, size, XMM3, XMM4);
+    emit_saturation_if_any(assembler, XMM3);
+    emit_zero_vector(assembler, XMM4);
+    emit_lanes_greater(assembler, size, XMM4, XMM0);
+    emit_broadcast_pattern(
+        assembler, XMM5, 3U == size ? 0x7FFFFFFFFFFFFFFFULL : 0x7FFFFFFF7FFFFFFFULL);
+    emit_sse(assembler, 0x66, false, 0xEF, XMM4, XMM5, "pxor");
+    emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+    emit_sse(assembler, 0x66, false, 0xDF, XMM3, XMM2, "pandn");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM4, XMM3, "por");
+    emit_sse(assembler, 0U, false, 0x28, XMM0, XMM4, "movaps");
+}
+
+/// Loads the second operand of a by element (`is_element`) or register form into xmm1: element
+/// `index` of `rm` broadcast, or `rm` itself (its element 0 with `is_scalar`).
+static void
+emit_load_second_operand(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                         const uint32_t                    instruction,
+                         const uint32_t                    size,
+                         const bool                        is_element,
+                         const bool                        is_scalar)
+{
+    if (true == is_element)
+    {
+        const uint32_t h     = (instruction >> 11U) & 1U;
+        const uint32_t l     = (instruction >> 21U) & 1U;
+        const uint32_t m     = (instruction >> 20U) & 1U;
+        const uint32_t index = 1U == size ? (h << 2U) | (l << 1U) | m : (h << 1U) | l;
+        const uint32_t rm = 1U == size ? (instruction >> 16U) & 0xFU : (instruction >> 16U) & 0x1FU;
+        emit_load_vector(assembler, XMM1, rm, true);
+        emit_broadcast_element(assembler, XMM1, size, index);
+        return;
+    }
+
+    if (true == is_scalar)
+    {
+        emit_load_element(assembler, XMM1, (instruction >> 16U) & 0x1FU, size);
+        return;
+    }
+
+    emit_load_vector(assembler, XMM1, (instruction >> 16U) & 0x1FU, true);
+}
+
+/// SQDMULL, SQDMLAL and SQDMLSL (vector with the "2" forms, scalar, and by element) on halfwords
+/// and words: the products, widened and doubled, overflow only for the minimum times itself,
+/// which saturates; the accumulating forms then add to or subtract from Rd with saturation.
+/// FPSR.QC is set when a lane saturates.
+static bool
+emit_fast_doubling_long(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // Three different: 0 Q 0 01110 size 1 Rm opcode 00 Rn Rd with opcode 1101 (SQDMULL), 1001
+    // (SQDMLAL) or 1011 (SQDMLSL), or the scalar 01 0 11110 ... By element: 0 Q 0 01111 size L M
+    // Rm opcode H 0 Rn Rd with 1011, 0011 or 0111, or the scalar 01 0 11111 ...
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const uint32_t three      = (instruction >> 12U) & 0xFU;
+    const bool     is_vector  = 0x0E200000U == (instruction & 0xBF200C00U);
+    const bool     is_scalar3 = 0x5E200000U == (instruction & 0xFF200C00U);
+    const bool     is_element = 0x0F000000U == (instruction & 0xBF000400U);
+    const bool     is_scalarE = 0x5F000000U == (instruction & 0xFF000400U);
+    uint32_t       operation  = 0xFFU; // 0 multiply, 1 add, 2 subtract.
+
+    if (true == is_vector || true == is_scalar3)
+    {
+        operation = 0xDU == three ? 0U : (0x9U == three ? 1U : (0xBU == three ? 2U : 0xFFU));
+    }
+    else if (true == is_element || true == is_scalarE)
+    {
+        operation = 0xBU == three ? 0U : (0x3U == three ? 1U : (0x7U == three ? 2U : 0xFFU));
+    }
+
+    if (0xFFU == operation || (size != 1U && size != 2U)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))
+    {
+        return false;
+    }
+
+    const bool     is_scalar = true == is_scalar3 || true == is_scalarE;
+    const bool     is_upper  = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+    const uint32_t rd        = instruction & 0x1FU;
+    const uint32_t rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (true == is_scalar)
+    {
+        emit_load_element(assembler, XMM0, rn, size);
+    }
+    else
+    {
+        emit_load_vector(assembler, XMM0, rn, true);
+    }
+
+    emit_load_second_operand(
+        assembler, instruction, size, true == is_element || true == is_scalarE, is_scalar);
+
+    if (true == is_upper)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 8U, "psrldq");
+
+        if (false == is_element)
+        {
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM1, 8U, "psrldq");
+        }
+    }
+
+    // XMM0 = 2 * n * m in the wide lanes.
+    emit_widen(assembler, XMM0, size, false, false);
+    emit_widen(assembler, XMM1, size, false, false);
+
+    if (1U == size)
+    {
+        emit_sse38(assembler, 0x40, XMM0, XMM1, "pmulld");
+    }
+    else
+    {
+        emit_sse38(assembler, 0x28, XMM0, XMM1, "pmuldq");
+    }
+
+    emit_sse(assembler, 0x66, false, LANE_ADD[size + 1U], XMM0, XMM0, "padd");
+    emit_broadcast_pattern(assembler, XMM2, lane_sign_pattern(size + 1U));
+    emit_lanes_equal(assembler, size + 1U, XMM2, XMM0);
+    emit_saturation_if_any(assembler, XMM2);
+    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+
+    if (operation != 0U)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+
+        if (true == is_scalar)
+        {
+            emit_load_element(assembler, XMM0, rd, size + 1U);
+        }
+        else
+        {
+            emit_load_vector(assembler, XMM0, rd, true);
+        }
+
+        emit_signed_saturating_add(assembler, size + 1U, 2U == operation);
+    }
+
+    if (true == is_scalar)
+    {
+        emit_store_element(assembler, XMM0, rd, size + 1U);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM0, rd, true);
+    }
+
+    return true;
+}
+
+/// SQRDMLAH and SQRDMLSH (vector, scalar and by element) on halfwords and words: Rd plus (or
+/// minus) the rounded doubled high half of n * m, saturated once. In lanes of twice the size,
+/// (2nm + 2^(e-1)) >> e is (nm + 2^(e-2)) >> (e-1) exactly, and adding Rd cannot overflow; the
+/// sum then narrows with saturation, setting FPSR.QC when a lane saturates. Each group of 64
+/// result bits goes to RAX or RDX until the end.
+static bool
+emit_fast_rounding_doubling_accumulate(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                                       const uint32_t                     instruction)
+{
+    // Vector: 0 Q 1 01110 size 0 Rm 1000 S 1 Rn Rd, or the scalar 01 1 11110 ... By element:
+    // 0 Q 1 01111 size L M Rm 11 S 1 H 0 Rn Rd, or the scalar 01 1 11111 ...
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const bool     is_vector  = 0x2E008400U == (instruction & 0xBF20F400U);
+    const bool     is_scalar3 = 0x7E008400U == (instruction & 0xFF20F400U);
+    const bool     is_element = 0x2F00D000U == (instruction & 0xBF00D400U);
+    const bool     is_scalarE = 0x7F00D000U == (instruction & 0xFF00D400U);
+
+    if ((false == is_vector && false == is_scalar3 && false == is_element && false == is_scalarE)
+        || (size != 1U && size != 2U) || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))
+    {
+        return false;
+    }
+
+    const bool     is_subtract = true == is_vector || true == is_scalar3
+                                     ? 1U == ((instruction >> 11U) & 1U)
+                                     : 1U == ((instruction >> 13U) & 1U);
+    const bool     is_scalar   = true == is_scalar3 || true == is_scalarE;
+    const bool     is_quad     = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+    const bool     is_lane     = true == is_element || true == is_scalarE;
+    const uint32_t rd          = instruction & 0x1FU;
+    const uint32_t rn          = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    // The register cache is emptied, so that RAX and RDX are free.
+    begin_inline_sequence(compiler);
+
+    for (uint32_t group = 0U; group < (true == is_quad ? 2U : 1U); ++group)
+    {
+        // XMM0 = n, XMM1 = m and XMM2 = Rd, widened.
+        if (true == is_scalar)
+        {
+            emit_load_element(assembler, XMM0, rn, size);
+            emit_load_element(assembler, XMM2, rd, size);
+        }
+        else
+        {
+            emit_load_vector(assembler, XMM0, rn, true);
+            emit_load_vector(assembler, XMM2, rd, true);
+        }
+
+        emit_load_second_operand(assembler, instruction, size, is_lane, is_scalar);
+
+        if (1U == group)
+        {
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 8U, "psrldq");
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM1, 8U, "psrldq");
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM2, 8U, "psrldq");
+        }
+
+        emit_widen(assembler, XMM0, size, false, false);
+        emit_widen(assembler, XMM1, size, false, false);
+        emit_widen(assembler, XMM2, size, false, false);
+        emit_sse38(assembler, 1U == size ? 0x40 : 0x28, XMM0, XMM1, "pmulld/pmuldq");
+
+        if (true == is_subtract)
+        {
+            emit_zero_vector(assembler, XMM3);
+            emit_sse(assembler, 0x66, false, LANE_SUB[size + 1U], XMM3, XMM0, "psub");
+            emit_sse(assembler, 0U, false, 0x28, XMM0, XMM3, "movaps");
+        }
+
+        emit_broadcast_pattern(
+            assembler, XMM3, 1U == size ? 0x0000400000004000ULL : 0x0000000040000000ULL);
+        emit_sse(assembler, 0x66, false, LANE_ADD[size + 1U], XMM0, XMM3, "padd");
+        emit_lanes_shift_arithmetic(assembler, XMM0, size + 1U, 1U == size ? 15U : 31U, XMM3);
+        emit_sse(assembler, 0x66, false, LANE_ADD[size + 1U], XMM0, XMM2, "padd");
+
+        if (1U == size)
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+            emit_sse(assembler, 0x66, false, 0x6B, XMM0, XMM0, "packssdw");
+            emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+            emit_widen(assembler, XMM3, 1U, false, false);
+            emit_saturation_unless_equal(assembler, XMM3, XMM1);
+        }
+        else
+        {
+            // Clamp the doublewords to the word range, then keep their low halves.
+            emit_broadcast_pattern(assembler, XMM4, 0x000000007FFFFFFFULL);
+            emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+            emit_lanes_greater(assembler, 3U, XMM3, XMM4);
+            emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+            emit_sse(assembler, 0U, false, 0x28, XMM5, XMM3, "movaps");
+            emit_sse(assembler, 0x66, false, 0xDF, XMM3, XMM0, "pandn");
+            emit_sse(assembler, 0x66, false, 0xEB, XMM3, XMM4, "por");
+            emit_broadcast_pattern(assembler, XMM4, 0xFFFFFFFF80000000ULL);
+            emit_sse(assembler, 0U, false, 0x28, XMM0, XMM4, "movaps");
+            emit_lanes_greater(assembler, 3U, XMM0, XMM3);
+            emit_sse(assembler, 0x66, false, 0xEB, XMM5, XMM0, "por");
+            emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM0, "pand");
+            emit_sse(assembler, 0x66, false, 0xDF, XMM0, XMM3, "pandn");
+            emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM4, "por");
+            emit_saturation_if_any(assembler, XMM5);
+            emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0x08, "pshufd");
+        }
+
+        emit_sse(assembler,
+                 0x66,
+                 true,
+                 0x7E,
+                 XMM0,
+                 (uint8_t)(0U == group ? BAL_X86_RAX : BAL_X86_RDX),
+                 "movq");
+    }
+
+    emit_sse(assembler, 0x66, true, 0x6E, XMM0, (uint8_t)BAL_X86_RAX, "movq");
+
+    if (true == is_scalar)
+    {
+        emit_store_element(assembler, XMM0, rd, size);
+        return true;
+    }
+
+    if (true == is_quad)
+    {
+        emit_sse(assembler, 0x66, true, 0x6E, XMM1, (uint8_t)BAL_X86_RDX, "movq");
+        emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM1, "punpcklqdq");
+    }
+
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -15290,5 +15599,7 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_convert_odd(compiler, instruction)
            || emit_fast_unsigned_estimate(compiler, instruction)
            || emit_fast_polynomial_multiply(compiler, instruction)
-           || emit_fast_convert_lanes(compiler, instruction);
+           || emit_fast_convert_lanes(compiler, instruction)
+           || emit_fast_doubling_long(compiler, instruction)
+           || emit_fast_rounding_doubling_accumulate(compiler, instruction);
 }

@@ -1,4 +1,5 @@
 #include "backend/bal_float.h"
+#include "bal_attributes.h"
 
 #include <fenv.h>
 #include <math.h>
@@ -9,15 +10,28 @@
 
 // Everything here computes with SSE, whose rounding mode and exception flags live in MXCSR.
 // fesetround(), feclearexcept() and fetestexcept() also keep the x87 unit in step, which makes them
-// many times slower than the MXCSR access they need; these replace them.
+// many times slower than the MXCSR access they need; these replace them. Each MXCSR access is
+// still slow, so the control bits (everything but the flags) are kept in g_control: each public
+// entry point reloads them, and only changing the rounding mode, clearing the flags and testing
+// them touch MXCSR.
+
+static BAL_THREAD_LOCAL uint32_t g_control;
+
+/// Reloads g_control from MXCSR, which code outside this file may have changed.
+static void
+load_control(void)
+{
+    g_control = _mm_getcsr() & ~0x3FU;
+}
 
 static int
 sse_fegetround(void)
 {
     static const int MODES[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-    return MODES[(_mm_getcsr() >> 13U) & 3U];
+    return MODES[(g_control >> 13U) & 3U];
 }
 
+/// Changing the mode also clears the flags, which every caller has read or is about to clear.
 static int
 sse_fesetround(const int mode)
 {
@@ -25,12 +39,11 @@ sse_fesetround(const int mode)
                              : FE_UPWARD == mode     ? 2U
                              : FE_TOWARDZERO == mode ? 3U
                                                      : 0U;
-    const uint32_t current = _mm_getcsr();
-    const uint32_t wanted  = (current & ~0x6000U) | (control << 13U);
+    const uint32_t wanted  = (g_control & ~0x6000U) | (control << 13U);
 
-    // Writing MXCSR is the slow part, and the mode is usually the one already set.
-    if (wanted != current)
+    if (wanted != g_control)
     {
+        g_control = wanted;
         _mm_setcsr(wanted);
     }
 
@@ -41,13 +54,7 @@ static int
 sse_feclearexcept(const int excepts)
 {
     (void)excepts;
-    const uint32_t current = _mm_getcsr();
-
-    if (0U != (current & 0x3FU))
-    {
-        _mm_setcsr(current & ~0x3FU);
-    }
-
+    _mm_setcsr(g_control);
     return 0;
 }
 
@@ -68,6 +75,12 @@ sse_fetestexcept(const int excepts)
 #define fesetround    sse_fesetround
 #define feclearexcept sse_feclearexcept
 #define fetestexcept  sse_fetestexcept
+#else
+/// The standard functions keep nothing to reload.
+static void
+load_control(void)
+{
+}
 #endif
 
 // The helper reads and changes the host floating-point environment, so the compiler must not
@@ -1539,6 +1552,7 @@ execute_three_source(bal_cpu_t *cpu, context_t *context, const uint32_t instruct
 uint64_t
 bal_execute_float(bal_cpu_t *cpu, const uint32_t instruction)
 {
+    load_control();
     const float_class_t instruction_class = classify(instruction);
     precision_t         precision         = (precision_t)((instruction >> 22U) & 0x3U);
 
@@ -2057,6 +2071,7 @@ bal_float_element(const uint64_t              fpcr,
                   const uint64_t              b,
                   const uint64_t              c)
 {
+    load_control();
     context_t context = element_context(fpcr, esize);
     uint64_t  result  = 0U;
 
@@ -2129,6 +2144,7 @@ bal_float_round_element(const uint64_t fpcr,
                         const uint32_t rmode,
                         const bool     exact)
 {
+    load_control();
     context_t      context = element_context(fpcr, esize);
     const uint64_t result  = round_to_integral(&context, value, rmode, exact);
     *fpsr |= context.flags;
@@ -2145,6 +2161,7 @@ bal_float_to_integer_element(const uint64_t fpcr,
                              const bool     is_unsigned,
                              const uint32_t bits)
 {
+    load_control();
     context_t      context = element_context(fpcr, esize);
     const uint64_t result
         = convert_to_integer(&context, value, fraction_bits, rmode, is_unsigned, bits);
@@ -2161,6 +2178,7 @@ bal_float_from_integer_element(const uint64_t fpcr,
                                const bool     is_unsigned,
                                const uint32_t bits)
 {
+    load_control();
     context_t      context = element_context(fpcr, esize);
     const uint64_t result = convert_from_integer(&context, value, fraction_bits, is_unsigned, bits);
     *fpsr |= context.flags;
@@ -2174,6 +2192,7 @@ bal_float_convert_element(const uint64_t fpcr,
                           const uint32_t target_esize,
                           const uint64_t value)
 {
+    load_control();
     context_t      context = element_context(fpcr, source_esize);
     const uint64_t result  = convert_precision(&context, value, precision_of(target_esize));
     *fpsr |= context.flags;
@@ -2199,6 +2218,7 @@ bal_unsigned_estimate_element(const uint32_t value, const bool is_square_root)
 uint64_t
 bal_float_narrow_odd_element(const uint64_t fpcr, uint64_t *fpsr, const uint64_t value)
 {
+    load_control();
     // Rounding to odd truncates and then sets the lowest bit of an inexact result. Overflow
     // gives the largest normal as truncation does, and a flushed result is exact zero.
     context_t      context = element_context((fpcr & ~(3ULL << 22U)) | (3ULL << 22U), 64U);

@@ -12611,6 +12611,660 @@ emit_fast_register_shift(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// Inline counts, narrow-high arithmetic and saturating forms
+// -----------------------------------------------------------------------------
+
+/// Loads element 0 of SIMD&FP register `index`, `8 << size` bits, into `xmm`, clearing the rest.
+/// Uses SCRATCH_A.
+static void
+emit_load_element(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                  const uint8_t                     xmm,
+                  const uint32_t                    index,
+                  const uint32_t                    size)
+{
+    emit_load_vector(assembler, xmm, index, false);
+
+    if (size < 3U)
+    {
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_A, (1ULL << (8U << size)) - 1U);
+        emit_sse(assembler, 0x66, true, 0x6E, XMM5, (uint8_t)SCRATCH_A, "movq");
+        emit_sse(assembler, 0x66, false, 0xDB, xmm, XMM5, "pand");
+    }
+}
+
+/// Stores element 0 of `xmm`, `8 << size` bits, to SIMD&FP register `index`, clearing the rest.
+static void
+emit_store_element(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const uint8_t                     xmm,
+                   const uint32_t                    index,
+                   const uint32_t                    size)
+{
+    emit_sse(assembler, 0x66, 3U == size, 0x7E, xmm, (uint8_t)SCRATCH_A, "movd/movq");
+
+    if (size < 2U)
+    {
+        const uint8_t shift = (uint8_t)(32U - (8U << size));
+        bal_x86_emit_shl_r32_imm8(assembler, SCRATCH_A, shift);
+        bal_x86_emit_shr_r32_imm8(assembler, SCRATCH_A, shift);
+    }
+
+    emit_store_scalar_result(assembler, index);
+}
+
+/// Counts the leading zero bits of the `8 << size`-bit lanes (bytes, halfwords or words) of xmm0
+/// into xmm0, using xmm1 to xmm4. Bytes look the count of each nibble up with PSHUFB. Words keep
+/// only their top set bit, whose exponent as a float is its position; halfwords count as the top
+/// halves of words, at most 16.
+static void
+emit_count_leading_zeros(bal_x86_assembler_t *BAL_RESTRICT assembler, const uint32_t size)
+{
+    if (0U == size)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+        emit_sse_immediate(assembler, 0x66, 0x71, 2U, XMM1, 4U, "psrlw");
+        emit_broadcast_pattern(assembler, XMM2, 0x0F0F0F0F0F0F0F0FULL);
+        emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM2, "pand");
+        emit_sse(assembler, 0x66, false, 0xDB, XMM1, XMM2, "pand");
+        emit_load_vector_constant(assembler, XMM3, 0x0101010102020304ULL, 0U);
+        emit_sse(assembler, 0U, false, 0x28, XMM2, XMM3, "movaps");
+        emit_sse38(assembler, 0x00, XMM2, XMM1, "pshufb");
+        emit_sse38(assembler, 0x00, XMM3, XMM0, "pshufb");
+
+        // The low nibble's count adds where the high nibble is zero.
+        emit_zero_vector(assembler, XMM4);
+        emit_sse(assembler, 0x66, false, 0x74, XMM1, XMM4, "pcmpeqb");
+        emit_sse(assembler, 0x66, false, 0xDB, XMM3, XMM1, "pand");
+        emit_sse(assembler, 0x66, false, 0xFC, XMM2, XMM3, "paddb");
+        emit_sse(assembler, 0U, false, 0x28, XMM0, XMM2, "movaps");
+        return;
+    }
+
+    const uint32_t parts = 2U == size ? 1U : 2U;
+
+    for (uint32_t part = 0U; part < parts; ++part)
+    {
+        // XMM1 = the word to count: the word, or for halfwords the odd ones in place and the even
+        // ones shifted up.
+        const uint8_t result = 0U == part ? XMM3 : XMM4;
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+
+        if (1U == size)
+        {
+            if (0U == part)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM1, 16U, "psrld");
+                emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM1, 16U, "pslld");
+            }
+            else
+            {
+                emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM1, 16U, "pslld");
+            }
+        }
+
+        for (uint8_t shift = 1U; shift <= 16U; shift = (uint8_t)(shift * 2U))
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM1, "movaps");
+            emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, shift, "psrld");
+            emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM2, "por");
+        }
+
+        emit_sse(assembler, 0U, false, 0x28, XMM2, XMM1, "movaps");
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 1U, "psrld");
+        emit_sse(assembler, 0x66, false, 0xDF, XMM2, XMM1, "pandn");
+        emit_sse(assembler, 0U, false, 0x5B, XMM2, XMM2, "cvtdq2ps");
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM2, 1U, "pslld");
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 24U, "psrld");
+        emit_broadcast_pattern(assembler, result, 0x0000009E0000009EULL);
+        emit_sse(assembler, 0x66, false, 0xFA, result, XMM2, "psubd");
+        emit_broadcast_pattern(
+            assembler, XMM2, 2U == size ? 0x0000002000000020ULL : 0x0000001000000010ULL);
+        emit_sse38(assembler, 0x3B, result, XMM2, "pminud");
+    }
+
+    if (1U == size)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM3, 16U, "pslld");
+        emit_sse(assembler, 0x66, false, 0xEB, XMM3, XMM4, "por");
+    }
+
+    emit_sse(assembler, 0U, false, 0x28, XMM0, XMM3, "movaps");
+}
+
+/// CLZ and CLS (vector) on bytes, halfwords and words. CLS counts the leading zeros of
+/// x ^ (x >> 1), shifted arithmetically, less one.
+static bool
+emit_fast_count_leading(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 10000 00100 10 Rn Rd: CLS with U = 0, CLZ with U = 1.
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0x0E204800U != (instruction & 0x9F3FFC00U) || 3U == size
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const bool                        is_cls    = 0U == ((instruction >> 29U) & 1U);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, is_quad);
+
+    if (true == is_cls)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+        emit_lanes_shift_arithmetic(assembler, XMM1, size, 1U, XMM2);
+        emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+    }
+
+    emit_count_leading_zeros(assembler, size);
+
+    if (true == is_cls)
+    {
+        emit_all_ones(assembler, XMM1);
+        emit_sse(assembler, 0x66, false, LANE_ADD[size], XMM0, XMM1, "padd");
+    }
+
+    emit_store_vector(assembler, XMM0, instruction & 0x1FU, is_quad);
+    return true;
+}
+
+/// ADDHN, RADDHN, SUBHN and RSUBHN with their "2" forms: the high halves of the wide sums or
+/// differences, rounded by adding half their weight first for the R forms.
+static bool
+emit_fast_narrow_high(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 1 Rm 01 o1 0 00 Rn Rd.
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0x0E204000U != (instruction & 0x9F20DC00U) || 3U == size
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool                        is_quad     = 1U == ((instruction >> 30U) & 1U);
+    const bool                        is_rounding = 1U == ((instruction >> 29U) & 1U);
+    const bool                        is_subtract = 1U == ((instruction >> 13U) & 1U);
+    const uint32_t                    esize       = 8U << size;
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, true);
+    emit_load_vector(assembler, XMM1, (instruction >> 16U) & 0x1FU, true);
+    emit_sse(assembler,
+             0x66,
+             false,
+             true == is_subtract ? LANE_SUB[size + 1U] : LANE_ADD[size + 1U],
+             XMM0,
+             XMM1,
+             "padd/psub");
+
+    if (true == is_rounding)
+    {
+        emit_broadcast_pattern(assembler, XMM1, replicate_lane(1ULL << (esize - 1U), size + 1U));
+        emit_sse(assembler, 0x66, false, LANE_ADD[size + 1U], XMM0, XMM1, "padd");
+    }
+
+    emit_lanes_shift_right(assembler, XMM0, size + 1U, esize, XMM1);
+    emit_narrow(assembler, XMM0, size, XMM1);
+    emit_store_narrow(assembler, instruction & 0x1FU, is_quad);
+    return true;
+}
+
+/// SHSUB and UHSUB: (n - m) >> 1 in one more bit, which is ((n ^ m) >> 1) - (~n & m); signed
+/// lanes are biased to unsigned ones, which keeps their differences.
+static bool
+emit_fast_halving_subtract(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 1 Rm 00100 1 Rn Rd.
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0x0E202400U != (instruction & 0x9F20FC00U) || 3U == size)
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, is_quad);
+    emit_load_vector(assembler, XMM1, (instruction >> 16U) & 0x1FU, is_quad);
+
+    if (0U == ((instruction >> 29U) & 1U))
+    {
+        emit_broadcast_pattern(assembler, XMM2, lane_sign_pattern(size));
+        emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+        emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM2, "pxor");
+    }
+
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler, 0x66, false, 0xEF, XMM2, XMM1, "pxor");
+    emit_lanes_shift_right(assembler, XMM2, size, 1U, XMM3);
+    emit_sse(assembler, 0x66, false, 0xDF, XMM0, XMM1, "pandn");
+    emit_sse(assembler, 0x66, false, LANE_SUB[size], XMM2, XMM0, "psub");
+    emit_store_vector(assembler, XMM2, instruction & 0x1FU, is_quad);
+    return true;
+}
+
+/// MUL, MLA and MLS (vector) on bytes: PMULLW multiplies the even bytes in the low bytes of
+/// words, and the odd ones as the high bytes of words whose low bytes are zero.
+static bool
+emit_fast_byte_multiply(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 00 1 Rm 1001 o 1 Rn Rd: MUL is U = 0, o = 1; MLA U = 0, o = 0; MLS U = 1, o = 0.
+    const uint32_t u      = (instruction >> 29U) & 1U;
+    const uint32_t opcode = (instruction >> 11U) & 1U;
+
+    if (0x0E209400U != (instruction & 0x9FE0F400U) || (1U == u && 1U == opcode))
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, (instruction >> 5U) & 0x1FU, is_quad);
+    emit_load_vector(assembler, XMM1, (instruction >> 16U) & 0x1FU, is_quad);
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler, 0x66, false, 0xD5, XMM2, XMM1, "pmullw");
+    emit_sse_immediate(assembler, 0x66, 0x71, 2U, XMM0, 8U, "psrlw");
+    emit_broadcast_pattern(assembler, XMM3, 0xFF00FF00FF00FF00ULL);
+    emit_sse(assembler, 0x66, false, 0xDB, XMM1, XMM3, "pand");
+    emit_sse(assembler, 0x66, false, 0xD5, XMM0, XMM1, "pmullw");
+    emit_sse(assembler, 0x66, false, 0xDF, XMM3, XMM2, "pandn");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM3, "por");
+
+    if (0U == opcode)
+    {
+        emit_load_vector(assembler, XMM1, rd, is_quad);
+        emit_sse(assembler, 0x66, false, 1U == u ? 0xF8 : 0xFC, XMM1, XMM0, "psubb/paddb");
+        emit_store_vector(assembler, XMM1, rd, is_quad);
+        return true;
+    }
+
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
+/// Sets FPSR.QC when a lane of the mask in `xmm` is set (all ones), using SCRATCH_A.
+static void
+emit_saturation_if_any(bal_x86_assembler_t *BAL_RESTRICT assembler, const uint8_t xmm)
+{
+    emit_sse(assembler, 0x66, false, 0xD7, (uint8_t)SCRATCH_A, xmm, "pmovmskb");
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    const size_t none = emit_forward_jump(assembler, true, BAL_X86_COND_E);
+    emit_set_saturation(assembler);
+    patch_forward_jump(assembler, none, true);
+}
+
+/// SQABS and SQNEG (vector and scalar): the wrapping absolute value or negation, where the
+/// minimum, which wraps to itself, becomes the maximum and sets FPSR.QC.
+static bool
+emit_fast_saturating_unary(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 10000 00111 10 Rn Rd, or the scalar 01 U 11110 size 10000 00111 10 Rn Rd.
+    const bool     is_scalar = 0x5E207800U == (instruction & 0xDF3FFC00U);
+    const uint32_t size      = (instruction >> 22U) & 0x3U;
+    const bool     is_quad   = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+
+    if ((0x0E207800U != (instruction & 0x9F3FFC00U) && false == is_scalar)
+        || (3U == size && false == is_quad && false == is_scalar)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))
+    {
+        return false;
+    }
+
+    const bool                        is_negate = 1U == ((instruction >> 29U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (true == is_scalar)
+    {
+        emit_load_element(assembler, XMM0, rn, size);
+    }
+    else
+    {
+        emit_load_vector(assembler, XMM0, rn, is_quad);
+    }
+
+    if (true == is_negate)
+    {
+        emit_zero_vector(assembler, XMM1);
+        emit_sse(assembler, 0x66, false, LANE_SUB[size], XMM1, XMM0, "psub");
+    }
+    else if (3U == size)
+    {
+        emit_zero_vector(assembler, XMM2);
+        emit_lanes_greater(assembler, 3U, XMM2, XMM0);
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+        emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM2, "pxor");
+        emit_sse(assembler, 0x66, false, 0xFB, XMM1, XMM2, "psubq");
+    }
+    else
+    {
+        emit_sse38(assembler, (uint8_t)(0x1CU + size), XMM1, XMM0, "pabs");
+    }
+
+    emit_broadcast_pattern(assembler, XMM2, lane_sign_pattern(size));
+    emit_lanes_equal(assembler, size, XMM2, XMM0);
+    emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM2, "pxor");
+    emit_saturation_if_any(assembler, XMM2);
+
+    if (true == is_scalar)
+    {
+        emit_store_element(assembler, XMM1, rd, size);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM1, rd, is_quad);
+    }
+
+    return true;
+}
+
+/// SQADD, UQADD, SQSUB and UQSUB on words and doublewords (vector) and on every size (scalar).
+/// Bytes and halfwords use the saturating SSE forms; the wider lanes find the overflow from the
+/// signs ((n ^ r) & (m ^ r) for a signed sum r, (n ^ m) & (n ^ r) for a difference) or an
+/// unsigned comparison, and saturate to the bound it crossed, setting FPSR.QC.
+static bool
+emit_fast_saturating_arithmetic(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                                const uint32_t                     instruction)
+{
+    // 0 Q U 01110 size 1 Rm 00 s 01 1 Rn Rd (SQADD and UQADD s = 0, SQSUB and UQSUB s = 1), or
+    // the scalar 01 U 11110 size ...
+    const bool     is_scalar = 0x5E200C00U == (instruction & 0xDF20DC00U);
+    const uint32_t size      = (instruction >> 22U) & 0x3U;
+    const bool     is_quad   = false == is_scalar && 1U == ((instruction >> 30U) & 1U);
+
+    if ((0x0E200C00U != (instruction & 0x9F20DC00U) && false == is_scalar)
+        || (false == is_scalar && size < 2U)
+        || (3U == size && false == is_quad && false == is_scalar)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE42))
+    {
+        return false;
+    }
+
+    const bool                        is_unsigned = 1U == ((instruction >> 29U) & 1U);
+    const bool                        is_subtract = 1U == ((instruction >> 13U) & 1U);
+    const uint32_t                    rd          = instruction & 0x1FU;
+    const uint32_t                    rn          = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm          = (instruction >> 16U) & 0x1FU;
+    const uint32_t                    compare     = 3U == size ? 3U : 2U;
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (true == is_scalar)
+    {
+        emit_load_element(assembler, XMM0, rn, size);
+        emit_load_element(assembler, XMM1, rm, size);
+    }
+    else
+    {
+        emit_load_vector(assembler, XMM0, rn, is_quad);
+        emit_load_vector(assembler, XMM1, rm, is_quad);
+    }
+
+    if (size < 2U)
+    {
+        // As emit_fast_vector_integer_more() does for vectors.
+        static const uint8_t SATURATING[2][2][2]
+            = { { { 0xEC, 0xED }, { 0xDC, 0xDD } }, { { 0xE8, 0xE9 }, { 0xD8, 0xD9 } } };
+        emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+        emit_sse(assembler,
+                 0x66,
+                 false,
+                 SATURATING[true == is_subtract ? 1 : 0][true == is_unsigned ? 1 : 0][size],
+                 XMM0,
+                 XMM1,
+                 "padds");
+        emit_sse(assembler,
+                 0x66,
+                 false,
+                 true == is_subtract ? LANE_SUB[size] : LANE_ADD[size],
+                 XMM2,
+                 XMM1,
+                 "padd/psub");
+        emit_store_element(assembler, XMM0, rd, size);
+        emit_saturation_unless_equal(assembler, XMM2, XMM0);
+        return true;
+    }
+
+    // XMM2 = the wrapping result; XMM3 = the lanes that overflowed; XMM4 = their bound.
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler,
+             0x66,
+             false,
+             true == is_subtract ? LANE_SUB[size] : LANE_ADD[size],
+             XMM2,
+             XMM1,
+             "padd/psub");
+
+    if (false == is_unsigned)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+        emit_sse(assembler, 0x66, false, 0xEF, XMM3, XMM2, "pxor");
+
+        if (true == is_subtract)
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM4, XMM0, "movaps");
+            emit_sse(assembler, 0x66, false, 0xEF, XMM4, XMM1, "pxor");
+        }
+        else
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM4, XMM1, "movaps");
+            emit_sse(assembler, 0x66, false, 0xEF, XMM4, XMM2, "pxor");
+        }
+
+        emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+        emit_zero_vector(assembler, XMM3);
+        emit_lanes_greater(assembler, compare, XMM3, XMM4);
+
+        // The bound is the maximum for n >= 0 and its complement, the minimum, for n < 0.
+        emit_zero_vector(assembler, XMM4);
+        emit_lanes_greater(assembler, compare, XMM4, XMM0);
+        emit_broadcast_pattern(
+            assembler, XMM5, 3U == size ? 0x7FFFFFFFFFFFFFFFULL : 0x7FFFFFFF7FFFFFFFULL);
+        emit_sse(assembler, 0x66, false, 0xEF, XMM4, XMM5, "pxor");
+    }
+    else
+    {
+        // Biased by the sign bit, the unsigned comparisons become signed ones: a sum below n
+        // wrapped (to all ones), as does n below m in a difference (to zero).
+        emit_broadcast_pattern(assembler, XMM5, lane_sign_pattern(size));
+        emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+        emit_sse(assembler, 0x66, false, 0xEF, XMM3, XMM5, "pxor");
+
+        if (true == is_subtract)
+        {
+            emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM5, "pxor");
+            emit_lanes_greater(assembler, compare, XMM1, XMM3);
+            emit_sse(assembler, 0U, false, 0x28, XMM3, XMM1, "movaps");
+            emit_zero_vector(assembler, XMM4);
+        }
+        else
+        {
+            emit_sse(assembler, 0U, false, 0x28, XMM4, XMM2, "movaps");
+            emit_sse(assembler, 0x66, false, 0xEF, XMM4, XMM5, "pxor");
+            emit_lanes_greater(assembler, compare, XMM3, XMM4);
+            emit_all_ones(assembler, XMM4);
+        }
+    }
+
+    emit_sse(assembler, 0x66, false, 0xDB, XMM4, XMM3, "pand");
+    emit_sse(assembler, 0x66, false, 0xDF, XMM3, XMM2, "pandn");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM4, XMM3, "por");
+
+    if (true == is_scalar)
+    {
+        emit_store_element(assembler, XMM4, rd, size);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM4, rd, is_quad);
+    }
+
+    // A lane saturated where the result differs from the wrapping one.
+    emit_sse(assembler, 0x66, false, 0x74, XMM2, XMM4, "pcmpeqb");
+    emit_all_ones(assembler, XMM3);
+    emit_sse(assembler, 0x66, false, 0xEF, XMM2, XMM3, "pxor");
+    emit_saturation_if_any(assembler, XMM2);
+    return true;
+}
+
+/// SUQADD and USQADD (vector) on bytes and halfwords: Rd plus Rn, one signed and one unsigned,
+/// added in lanes of twice the size and narrowed with the signed (SUQADD) or unsigned (USQADD)
+/// saturation of the packs; a lane saturated where widening the result back differs.
+static bool
+emit_fast_mixed_saturating_add(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                               const uint32_t                     instruction)
+{
+    // 0 Q U 01110 size 10000 00011 10 Rn Rd.
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0x0E203800U != (instruction & 0x9F3FFC00U) || size > 1U
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const bool                        is_quad     = 1U == ((instruction >> 30U) & 1U);
+    const bool                        is_unsigned = 1U == ((instruction >> 29U) & 1U);
+    const uint32_t                    rd          = instruction & 0x1FU;
+    const uint32_t                    rn          = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler   = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+
+    // XMM0 and XMM1 = the low and high halves' sums; the accumulator Rd is signed for SUQADD.
+    for (uint32_t half = 0U; half < 2U; ++half)
+    {
+        const uint8_t sum = 0U == half ? XMM0 : XMM1;
+        emit_load_vector(assembler, sum, rd, true);
+        emit_load_vector(assembler, XMM2, rn, true);
+        emit_widen(assembler, sum, size, is_unsigned, 1U == half);
+        emit_widen(assembler, XMM2, size, false == is_unsigned, 1U == half);
+        emit_sse(assembler, 0x66, false, LANE_ADD[size + 1U], sum, XMM2, "padd");
+    }
+
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+
+    if (true == is_unsigned)
+    {
+        if (0U == size)
+        {
+            emit_sse(assembler, 0x66, false, 0x67, XMM2, XMM1, "packuswb");
+        }
+        else
+        {
+            emit_sse38(assembler, 0x2B, XMM2, XMM1, "packusdw");
+        }
+    }
+    else
+    {
+        emit_sse(assembler, 0x66, false, 0U == size ? 0x63 : 0x6B, XMM2, XMM1, "packss");
+    }
+
+    // Widened back, the result equals the sums unless a lane saturated (only the vector's lanes
+    // count).
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM2, "movaps");
+    emit_sse(assembler, 0U, false, 0x28, XMM4, XMM2, "movaps");
+    emit_widen(assembler, XMM3, size, is_unsigned, false);
+    emit_widen(assembler, XMM4, size, is_unsigned, true);
+    emit_lanes_equal(assembler, size + 1U, XMM3, XMM0);
+    emit_lanes_equal(assembler, size + 1U, XMM4, XMM1);
+
+    if (false == is_quad)
+    {
+        emit_all_ones(assembler, XMM4);
+    }
+
+    emit_sse(assembler, 0x66, false, 0xDB, XMM3, XMM4, "pand");
+    emit_all_ones(assembler, XMM4);
+    emit_sse(assembler, 0x66, false, 0xEF, XMM3, XMM4, "pxor");
+    emit_store_vector(assembler, XMM2, rd, is_quad);
+    emit_saturation_if_any(assembler, XMM3);
+    return true;
+}
+
+/// SQXTN, UQXTN and SQXTUN (scalar) narrowing to bytes and halfwords, and SQDMULH and SQRDMULH
+/// (scalar, register and by element) on halfwords and words: the vector forms on element 0.
+static bool
+emit_fast_saturating_scalar(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // Narrowing: 01 U 11110 size 10000 1 o 100 10 Rn Rd (SQXTN o = 1 U = 0, UQXTN o = 1 U = 1,
+    // SQXTUN o = 0 U = 1). Doubling: 01 U 11110 size 1 Rm 10110 1 Rn Rd, or by element
+    // 01 0 11111 size L M Rm 110 R H 0 Rn Rd.
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const uint32_t u          = (instruction >> 29U) & 1U;
+    const uint32_t narrow_key = (u << 5U) | ((instruction >> 12U) & 0x1FU);
+    const bool     is_narrow  = 0x5E200800U == (instruction & 0xDF3E0C00U)
+                           && (0x14U == narrow_key || 0x34U == narrow_key || 0x32U == narrow_key);
+    const bool is_register = 0x5E20B400U == (instruction & 0xDF20FC00U);
+    const bool is_element  = 0x5F00C000U == (instruction & 0xFF00E400U);
+
+    if ((false == is_narrow && false == is_register && false == is_element)
+        || false == has_feature(compiler, BAL_TIER1_FEATURE_SSE41))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    if (true == is_narrow)
+    {
+        if (size > 1U)
+        {
+            return false;
+        }
+
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_load_element(assembler, XMM0, rn, size + 1U);
+        emit_saturating_narrow(assembler, size, narrow_key);
+        emit_store_element(assembler, XMM0, rd, size);
+        return true;
+    }
+
+    if (size != 1U && size != 2U)
+    {
+        return false;
+    }
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_element(assembler, XMM0, rn, size);
+
+    if (true == is_register)
+    {
+        emit_load_element(assembler, XMM1, (instruction >> 16U) & 0x1FU, size);
+    }
+    else
+    {
+        const uint32_t h     = (instruction >> 11U) & 1U;
+        const uint32_t l     = (instruction >> 21U) & 1U;
+        const uint32_t m     = (instruction >> 20U) & 1U;
+        const uint32_t index = 1U == size ? (h << 2U) | (l << 1U) | m : (h << 1U) | l;
+        const uint32_t rm = 1U == size ? (instruction >> 16U) & 0xFU : (instruction >> 16U) & 0x1FU;
+        emit_load_vector(assembler, XMM1, rm, true);
+        emit_broadcast_element(assembler, XMM1, size, index);
+    }
+
+    emit_doubling_multiply_high(
+        assembler, size, true == is_register ? 1U == u : 1U == ((instruction >> 12U) & 1U));
+    emit_store_element(assembler, XMM0, rd, size);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -12660,5 +13314,13 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_scalar_more(compiler, instruction)
            || emit_fast_half_compare(compiler, instruction)
            || emit_fast_half_vector(compiler, instruction)
-           || emit_fast_register_shift(compiler, instruction);
+           || emit_fast_register_shift(compiler, instruction)
+           || emit_fast_count_leading(compiler, instruction)
+           || emit_fast_narrow_high(compiler, instruction)
+           || emit_fast_halving_subtract(compiler, instruction)
+           || emit_fast_byte_multiply(compiler, instruction)
+           || emit_fast_saturating_unary(compiler, instruction)
+           || emit_fast_saturating_arithmetic(compiler, instruction)
+           || emit_fast_mixed_saturating_add(compiler, instruction)
+           || emit_fast_saturating_scalar(compiler, instruction);
 }

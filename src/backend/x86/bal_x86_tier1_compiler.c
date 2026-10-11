@@ -95,6 +95,16 @@ static void emit_load_guest_mxcsr(bal_x86_assembler_t *assembler);
 
 static bool emit_fast_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
+static bool emit_fast_vector_interleaved(bal_tier1_compiler_t         *compiler,
+                                         const bal_memory_interface_t *memory_interface,
+                                         uint32_t                      instruction,
+                                         bal_guest_address_t           guest_address);
+
+static bool emit_fast_vector_single(bal_tier1_compiler_t         *compiler,
+                                    const bal_memory_interface_t *memory_interface,
+                                    uint32_t                      instruction,
+                                    bal_guest_address_t           guest_address);
+
 static uint32_t extract_operand_value(uint32_t instruction, const bal_decoder_operand_t *operand);
 
 static void translate_add_sub_imm(bal_tier1_compiler_t *compiler, uint32_t instruction);
@@ -4911,6 +4921,35 @@ emit_writeback_end(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint8_t rn
     compiler->is_dirty |= 1U << rn;
 }
 
+/// Ends a post-indexed structure load or store: the base register advances by the transfer size
+/// `total` (Rm = 31) or by Xm. The access has left the base alone, so a fault leaves it unchanged.
+static void
+emit_structure_writeback(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                         const uint8_t                      rn,
+                         const uint8_t                      rm,
+                         const uint64_t                     total)
+{
+    const bool               skip_load = false;
+    const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
+
+    if (31U == rm)
+    {
+        const bal_x86_macro_t add_macro = {
+            .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+            .destination         = x86_rn,
+            .immediate_or_offset = total,
+        };
+        bal_sliding_window_push(&compiler->window, add_macro);
+    }
+    else
+    {
+        const bal_x86_register_t x86_rm = allocate_x86_register(compiler, rm, skip_load);
+        push_macro(compiler, BAL_X86_MACRO_ADD_REGISTER_REGISTER, x86_rn, x86_rm);
+    }
+
+    compiler->is_dirty |= 1U << rn;
+}
+
 /// LD1 and ST1 (multiple structures) with one to four registers, without an offset or
 /// post-indexed. They copy whole registers to or from consecutive memory, so after the address
 /// translation they are plain 64-bit moves. Returns false for the other structure forms.
@@ -4996,29 +5035,9 @@ emit_fast_vector_structure(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         }
     }
 
-    // The post-indexed forms add the transfer size (Rm = 31) or Xm to the base, which the access
-    // has left alone.
     if (true == is_post)
     {
-        const bool               skip_load = false;
-        const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
-
-        if (31U == rm)
-        {
-            const bal_x86_macro_t add_macro = {
-                .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
-                .destination         = x86_rn,
-                .immediate_or_offset = total,
-            };
-            bal_sliding_window_push(&compiler->window, add_macro);
-        }
-        else
-        {
-            const bal_x86_register_t x86_rm = allocate_x86_register(compiler, rm, skip_load);
-            push_macro(compiler, BAL_X86_MACRO_ADD_REGISTER_REGISTER, x86_rn, x86_rm);
-        }
-
-        compiler->is_dirty |= 1U << rn;
+        emit_structure_writeback(compiler, rn, rm, total);
     }
 
     return true;
@@ -5064,7 +5083,14 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         }
 
         if (true
-            == emit_fast_vector_structure(compiler, memory_interface, instruction, guest_address))
+                == emit_fast_vector_structure(
+                    compiler, memory_interface, instruction, guest_address)
+            || true
+                   == emit_fast_vector_interleaved(
+                       compiler, memory_interface, instruction, guest_address)
+            || true
+                   == emit_fast_vector_single(
+                       compiler, memory_interface, instruction, guest_address))
         {
             return;
         }
@@ -9891,6 +9917,611 @@ emit_fast_float_extreme_pair(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// Inline Advanced SIMD structure loads and stores
+// -----------------------------------------------------------------------------
+
+/// Loads the 128 bits at [base + offset] into `xmm`, or with `is_partial` the 64 bits, clearing
+/// the rest.
+static void
+emit_load_memory_vector(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                        const uint8_t                     xmm,
+                        const bal_x86_register_t          base,
+                        const int32_t                     offset,
+                        const bool                        is_partial)
+{
+    static const uint8_t MOVUPS[2] = { 0x0F, 0x10 };
+    static const uint8_t MOVQ[2]   = { 0x0F, 0x7E };
+    bal_x86_emit_sse_base_offset(assembler,
+                                 true == is_partial ? 0xF3 : 0U,
+                                 false,
+                                 true == is_partial ? MOVQ : MOVUPS,
+                                 2U,
+                                 xmm,
+                                 base,
+                                 offset,
+                                 "movups/movq");
+}
+
+/// Stores `xmm` to [base + offset], all 128 bits or with `is_partial` the low 64.
+static void
+emit_store_memory_vector(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                         const uint8_t                     xmm,
+                         const bal_x86_register_t          base,
+                         const int32_t                     offset,
+                         const bool                        is_partial)
+{
+    static const uint8_t MOVUPS[2] = { 0x0F, 0x11 };
+    static const uint8_t MOVQ[2]   = { 0x0F, 0xD6 };
+    bal_x86_emit_sse_base_offset(assembler,
+                                 true == is_partial ? 0x66 : 0U,
+                                 false,
+                                 true == is_partial ? MOVQ : MOVUPS,
+                                 2U,
+                                 xmm,
+                                 base,
+                                 offset,
+                                 "movups/movq");
+}
+
+/// Gathers bytes into xmm0: byte j is byte `map[j]` % 16 of source `map[j]` / 16, or zero where
+/// `map[j]` is 0xFF. Source s is the 128 bits at [base + offsets[s]], or the 64 bits there when
+/// bit s of `partial` is set. Each source used is shuffled into place with PSHUFB, unless it is
+/// already in place, and ORed in. Uses xmm1 and xmm2 (SSSE3).
+static void
+emit_byte_gather(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                 const bal_x86_register_t          base,
+                 const int32_t                    *offsets,
+                 const uint32_t                    partial,
+                 const uint32_t                    count,
+                 const uint8_t                    *map)
+{
+    bool is_first = true;
+
+    for (uint32_t source = 0U; source < count; ++source)
+    {
+        uint64_t halves[2]   = { 0U, 0U };
+        bool     is_used     = false;
+        bool     is_in_place = true;
+
+        for (uint32_t byte = 0U; byte < 16U; ++byte)
+        {
+            uint64_t selector = 0x80U;
+
+            if (map[byte] != 0xFFU && (uint32_t)map[byte] / 16U == source)
+            {
+                selector = map[byte] % 16U;
+                is_used  = true;
+            }
+
+            is_in_place = is_in_place && selector == byte;
+            halves[byte / 8U] |= selector << (8U * (byte % 8U));
+        }
+
+        if (false == is_used)
+        {
+            continue;
+        }
+
+        const uint8_t destination = true == is_first ? XMM0 : XMM2;
+        emit_load_memory_vector(
+            assembler, destination, base, offsets[source], 0U != ((partial >> source) & 1U));
+
+        if (false == is_in_place)
+        {
+            emit_load_vector_constant(assembler, XMM1, halves[0], halves[1]);
+            emit_sse38(assembler, 0x00, destination, XMM1, "pshufb");
+        }
+
+        if (false == is_first)
+        {
+            emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM2, "por");
+        }
+
+        is_first = false;
+    }
+
+    if (true == is_first)
+    {
+        emit_zero_vector(assembler, XMM0);
+    }
+}
+
+/// LD2, LD3 and LD4 and ST2, ST3 and ST4 (multiple structures), without an offset or
+/// post-indexed: element e of register r is memory element e * count + r. LD2 and ST2 on words
+/// and doublewords use SHUFPS and the unpacks; the others gather each register (loads) or each
+/// 16 bytes of memory (stores) with emit_byte_gather().
+static bool
+emit_fast_vector_interleaved(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                             const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                             const uint32_t                             instruction,
+                             const bal_guest_address_t                  guest_address)
+{
+    // 0 Q 0011000 L 000000 opcode size Rn Rt, or post-indexed 0 Q 0011001 L 0 Rm opcode size Rn Rt.
+    const bool     is_plain = 0x0C000000U == (instruction & 0xBFBF0000U);
+    const bool     is_post  = 0x0C800000U == (instruction & 0xBFA00000U);
+    const bool     is_quad  = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t size     = (instruction >> 10U) & 0x3U;
+    uint32_t       count    = 0U;
+
+    switch ((instruction >> 12U) & 0xFU)
+    {
+        case 0x8U:
+            count = 2U;
+            break;
+        case 0x4U:
+            count = 3U;
+            break;
+        case 0x0U:
+            count = 4U;
+            break;
+        default:
+            return false;
+    }
+
+    if ((false == is_plain && false == is_post) || false == compiler->has_sse41
+        || (3U == size && false == is_quad))
+    {
+        return false;
+    }
+
+    const bool     is_load      = 1U == ((instruction >> 22U) & 1U);
+    const uint8_t  rt           = (uint8_t)(instruction & 0x1FU);
+    const uint8_t  rn           = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t  rm           = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t element      = 1U << size;
+    const uint32_t vector_bytes = true == is_quad ? 16U : 8U;
+    const uint32_t total        = count * vector_bytes;
+    const uint32_t chunks       = (total + 15U) / 16U;
+
+    emit_base_plus_offset(compiler, rn, 0);
+    emit_translate_data_address(compiler, memory_interface, total, guest_address);
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    const bal_x86_register_t          pointer   = BAL_X86_REGISTER_ZERO;
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (2U == count && true == is_quad && size >= 2U)
+    {
+        const uint32_t second = (rt + 1U) % 32U;
+
+        if (true == is_load)
+        {
+            emit_load_memory_vector(assembler, XMM0, pointer, 0, false);
+            emit_load_memory_vector(assembler, XMM1, pointer, 16, false);
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+
+            if (2U == size)
+            {
+                emit_sse_immediate(assembler, 0U, 0xC6, XMM0, XMM1, 0x88, "shufps");
+                emit_sse_immediate(assembler, 0U, 0xC6, XMM2, XMM1, 0xDD, "shufps");
+            }
+            else
+            {
+                emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM1, "punpcklqdq");
+                emit_sse(assembler, 0x66, false, 0x6D, XMM2, XMM1, "punpckhqdq");
+            }
+
+            emit_store_vector(assembler, XMM0, rt, true);
+            emit_store_vector(assembler, XMM2, second, true);
+        }
+        else
+        {
+            emit_load_vector(assembler, XMM0, rt, true);
+            emit_load_vector(assembler, XMM1, second, true);
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+            emit_sse(assembler, 0x66, false, 2U == size ? 0x62 : 0x6C, XMM0, XMM1, "punpckl");
+            emit_sse(assembler, 0x66, false, 2U == size ? 0x6A : 0x6D, XMM2, XMM1, "punpckh");
+            emit_store_memory_vector(assembler, XMM0, pointer, 0, false);
+            emit_store_memory_vector(assembler, XMM2, pointer, 16, false);
+        }
+    }
+    else if (true == is_load)
+    {
+        // Memory byte m lies in chunk m / 16 at m % 16, so the map entry is m itself.
+        const int32_t  offsets[4] = { 0, 16, 32, 48 };
+        const uint32_t partial    = 0U != (total % 16U) ? 1U << (chunks - 1U) : 0U;
+
+        for (uint32_t r = 0U; r < count; ++r)
+        {
+            uint8_t map[16];
+
+            for (uint32_t byte = 0U; byte < 16U; ++byte)
+            {
+                const uint32_t memory_element = ((byte / element) * count) + r;
+
+                map[byte] = byte < vector_bytes
+                                ? (uint8_t)((memory_element * element) + (byte % element))
+                                : 0xFFU;
+            }
+
+            emit_byte_gather(assembler, pointer, offsets, partial, chunks, map);
+            emit_store_vector(assembler, XMM0, (rt + r) % 32U, true);
+        }
+    }
+    else
+    {
+        int32_t offsets[4];
+
+        for (uint32_t r = 0U; r < count; ++r)
+        {
+            offsets[r] = (int32_t)offsetof(bal_cpu_t, v[(rt + r) % 32U][0]);
+        }
+
+        for (uint32_t chunk = 0U; chunk < chunks; ++chunk)
+        {
+            uint8_t map[16];
+
+            for (uint32_t byte = 0U; byte < 16U; ++byte)
+            {
+                const uint32_t memory_byte    = (chunk * 16U) + byte;
+                const uint32_t memory_element = memory_byte / element;
+                const uint32_t r              = memory_element % count;
+                const uint32_t e              = memory_element / count;
+
+                map[byte] = memory_byte < total
+                                ? (uint8_t)((r * 16U) + (e * element) + (memory_byte % element))
+                                : 0xFFU;
+            }
+
+            emit_byte_gather(assembler, BAL_X86_RBP, offsets, 0U, count, map);
+            emit_store_memory_vector(
+                assembler, XMM0, pointer, (int32_t)(chunk * 16U), total - (chunk * 16U) < 16U);
+        }
+    }
+
+    if (true == is_post)
+    {
+        emit_structure_writeback(compiler, rn, rm, total);
+    }
+
+    return true;
+}
+
+/// LD1R, and LD1 and ST1 (single structure) of one lane, without an offset or post-indexed.
+/// A lane moves through BAL_X86_REGISTER_DISCARD_RESULT between the guest memory and the lane's
+/// place in the cpu structure; LD1R broadcasts the element in an SSE register.
+static bool
+emit_fast_vector_single(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                        const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                        const uint32_t                             instruction,
+                        const bal_guest_address_t                  guest_address)
+{
+    // 0 Q 0011010 L R 00000 opcode S size Rn Rt, or post-indexed 0 Q 0011011 L R Rm opcode S size
+    // Rn Rt. R and the low opcode bit select LD2 to LD4.
+    const bool     is_plain = 0x0D000000U == (instruction & 0xBF9F0000U);
+    const bool     is_post  = 0x0D800000U == (instruction & 0xBF800000U);
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t s        = (instruction >> 12U) & 1U;
+    const uint32_t size     = (instruction >> 10U) & 0x3U;
+    const bool     is_load  = 1U == ((instruction >> 22U) & 1U);
+
+    if ((false == is_plain && false == is_post) || 1U == ((instruction >> 21U) & 1U)
+        || false == compiler->has_sse41)
+    {
+        return false;
+    }
+
+    bool     is_replicate = false;
+    uint32_t log2         = 0U;
+    uint32_t index        = 0U;
+
+    switch ((instruction >> 13U) & 0x7U)
+    {
+        case 0x0U:
+            index = (q << 3U) | (s << 2U) | size;
+            break;
+        case 0x2U:
+            if (1U == (size & 1U))
+            {
+                return false;
+            }
+
+            log2  = 1U;
+            index = (q << 2U) | (s << 1U) | (size >> 1U);
+            break;
+        case 0x4U:
+            if (0U == size)
+            {
+                log2  = 2U;
+                index = (q << 1U) | s;
+            }
+            else if (1U == size && 0U == s)
+            {
+                log2  = 3U;
+                index = q;
+            }
+            else
+            {
+                return false;
+            }
+            break;
+        case 0x6U:
+            if (false == is_load || 1U == s)
+            {
+                return false;
+            }
+
+            is_replicate = true;
+            log2         = size;
+            break;
+        default:
+            return false;
+    }
+
+    const uint8_t            rt      = (uint8_t)(instruction & 0x1FU);
+    const uint8_t            rn      = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t            rm      = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint64_t           bytes   = 1ULL << log2;
+    const bal_x86_register_t pointer = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t data    = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    emit_base_plus_offset(compiler, rn, 0);
+    emit_translate_data_address(compiler, memory_interface, bytes, guest_address);
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    const int32_t lane_offset = (int32_t)(offsetof(bal_cpu_t, v[rt][0]) + (index << log2));
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (true == is_load || true == is_replicate)
+    {
+        switch (log2)
+        {
+            case 0U:
+                bal_x86_emit_load_r32_mem8(assembler, data, pointer);
+                break;
+            case 1U:
+                bal_x86_emit_load_r32_mem16(assembler, data, pointer);
+                break;
+            case 2U:
+                bal_x86_emit_load_r32_mem32(assembler, data, pointer);
+                break;
+            default:
+                bal_x86_emit_load_r64_mem64(assembler, data, pointer);
+                break;
+        }
+    }
+
+    if (true == is_replicate)
+    {
+        emit_sse(assembler, 0x66, true, 0x6E, XMM0, (uint8_t)data, "movq");
+
+        switch (log2)
+        {
+            case 0U:
+                emit_zero_vector(assembler, XMM1);
+                emit_sse38(assembler, 0x00, XMM0, XMM1, "pshufb");
+                break;
+            case 1U:
+                emit_sse_immediate(assembler, 0xF2, 0x70, XMM0, XMM0, 0U, "pshuflw");
+                emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM0, "punpcklqdq");
+                break;
+            case 2U:
+                emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0U, "pshufd");
+                break;
+            default:
+                emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM0, "punpcklqdq");
+                break;
+        }
+
+        emit_store_vector(assembler, XMM0, rt, 1U == q);
+    }
+    else if (true == is_load)
+    {
+        // The guest pointer is no longer needed, so it points at the lane.
+        bal_x86_emit_mov_r64_r64(assembler, pointer, BAL_X86_RBP);
+        bal_x86_emit_add_r64_imm32(assembler, pointer, lane_offset);
+
+        switch (log2)
+        {
+            case 0U:
+                bal_x86_emit_store_mem8_r8(assembler, pointer, data);
+                break;
+            case 1U:
+                bal_x86_emit_store_mem16_r16(assembler, pointer, data);
+                break;
+            case 2U:
+                bal_x86_emit_store_mem32_r32(assembler, pointer, data);
+                break;
+            default:
+                bal_x86_emit_store_mem64_r64(assembler, pointer, data);
+                break;
+        }
+    }
+    else
+    {
+        bal_x86_emit_mov_r64_r64(assembler, data, BAL_X86_RBP);
+        bal_x86_emit_add_r64_imm32(assembler, data, lane_offset);
+
+        switch (log2)
+        {
+            case 0U:
+                bal_x86_emit_load_r32_mem8(assembler, data, data);
+                bal_x86_emit_store_mem8_r8(assembler, pointer, data);
+                break;
+            case 1U:
+                bal_x86_emit_load_r32_mem16(assembler, data, data);
+                bal_x86_emit_store_mem16_r16(assembler, pointer, data);
+                break;
+            case 2U:
+                bal_x86_emit_load_r32_mem32(assembler, data, data);
+                bal_x86_emit_store_mem32_r32(assembler, pointer, data);
+                break;
+            default:
+                bal_x86_emit_load_r64_mem64(assembler, data, data);
+                bal_x86_emit_store_mem64_r64(assembler, pointer, data);
+                break;
+        }
+    }
+
+    if (true == is_post)
+    {
+        emit_structure_writeback(compiler, rn, rm, bytes);
+    }
+
+    return true;
+}
+
+/// Advanced SIMD instructions that only move bytes, for every element size: ZIP, UZP and TRN,
+/// REV16, REV32 and REV64, DUP (element, vector and scalar), INS (element) and EXT. The
+/// interpreter runs the instruction at translation time on registers whose bytes name their own
+/// register and position, twice with different names, which gives the source of every result
+/// byte; emit_byte_gather() then collects them. The emitters before this one translate the
+/// common sizes with fewer instructions.
+static bool
+emit_fast_byte_permute(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    const bool is_candidate = 0x0E000800U == (instruction & 0xBF208C00U)     // ZIP, UZP, TRN
+                              || 0x0E200800U == (instruction & 0x9F3FEC00U)  // REV64, REV32, REV16
+                              || 0x0E000400U == (instruction & 0xBFE0FC00U)  // DUP (element)
+                              || 0x5E000400U == (instruction & 0xFFE0FC00U)  // DUP (scalar)
+                              || 0x6E000400U == (instruction & 0xFFE08400U)  // INS (element)
+                              || 0x2E000000U == (instruction & 0xBFE08400U); // EXT
+
+    if (false == is_candidate || false == compiler->has_sse41
+        || false == bal_is_simd_supported(instruction))
+    {
+        return false;
+    }
+
+    // The sources: Rn, Rm, and Rd, which INS partly keeps. A register named twice is one source.
+    const uint32_t rd           = instruction & 0x1FU;
+    const uint32_t registers[3] = { (instruction >> 5U) & 0x1FU, (instruction >> 16U) & 0x1FU, rd };
+    uint8_t        maps[2][16];
+
+    for (uint32_t variant = 0U; variant < 2U; ++variant)
+    {
+        bal_cpu_t probe;
+        (void)memset(&probe, 0, sizeof(probe));
+
+        for (uint32_t source = 3U; source-- > 0U;)
+        {
+            uint8_t bytes[16];
+
+            for (uint32_t byte = 0U; byte < 16U; ++byte)
+            {
+                const uint32_t name = (source * 16U) + byte;
+
+                bytes[byte] = (uint8_t)(0U == variant ? 1U + name : 0xFFU - name);
+            }
+
+            (void)memcpy(probe.v[registers[source]], bytes, sizeof(bytes));
+        }
+
+        (void)bal_execute_simd(&probe, instruction);
+        uint8_t result[16];
+        (void)memcpy(result, probe.v[rd], sizeof(result));
+
+        for (uint32_t byte = 0U; byte < 16U; ++byte)
+        {
+            const uint32_t value = result[byte];
+
+            if (0U == value)
+            {
+                maps[variant][byte] = 0xFFU;
+                continue;
+            }
+
+            const uint32_t name = 0U == variant ? value - 1U : 0xFFU - value;
+
+            if (name >= 48U)
+            {
+                return false;
+            }
+
+            // The lowest source that is the same register supplies the byte.
+            uint32_t source = name / 16U;
+
+            for (uint32_t other = 0U; other < source; ++other)
+            {
+                if (registers[other] == registers[source])
+                {
+                    source = other;
+                    break;
+                }
+            }
+
+            maps[variant][byte] = (uint8_t)((source * 16U) + (name % 16U));
+        }
+    }
+
+    if (0 != memcmp(maps[0], maps[1], sizeof(maps[0])))
+    {
+        return false;
+    }
+
+    const int32_t offsets[3] = {
+        (int32_t)offsetof(bal_cpu_t, v[registers[0]][0]),
+        (int32_t)offsetof(bal_cpu_t, v[registers[1]][0]),
+        (int32_t)offsetof(bal_cpu_t, v[registers[2]][0]),
+    };
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_byte_gather(assembler, BAL_X86_RBP, offsets, 0U, 3U, maps[0]);
+    emit_store_vector(assembler, XMM0, rd, true);
+    return true;
+}
+
+/// TBL with two to four table registers and TBX with one to four. For each table register t,
+/// PSHUFB looks up index - 16t, which PADDUSB with 0x70 leaves with bit 7 set (selecting zero)
+/// unless it is below 16, and the results are ORed. TBX keeps the bytes of Rd whose indices are
+/// beyond the table, where PMINUB with the last index changes the index.
+static bool
+emit_fast_table_lookup(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 001110 000 Rm 0 len op 00 Rn Rd.
+    const uint32_t length = ((instruction >> 13U) & 0x3U) + 1U;
+    const bool     is_tbx = 1U == ((instruction >> 12U) & 1U);
+
+    if (0x0E000000U != (instruction & 0xBFE08C00U) || false == compiler->has_sse41
+        || (false == is_tbx && 1U == length))
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM3, rm, is_quad);
+    emit_zero_vector(assembler, XMM0);
+
+    for (uint32_t t = 0U; t < length; ++t)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM3, "movaps");
+
+        if (t != 0U)
+        {
+            emit_broadcast_pattern(assembler, XMM2, replicate_lane(16U * t, 0U));
+            emit_sse(assembler, 0x66, false, 0xF8, XMM1, XMM2, "psubb");
+        }
+
+        emit_broadcast_pattern(assembler, XMM2, 0x7070707070707070ULL);
+        emit_sse(assembler, 0x66, false, 0xDC, XMM1, XMM2, "paddusb");
+        emit_load_vector(assembler, XMM2, (rn + t) % 32U, true);
+        emit_sse38(assembler, 0x00, XMM2, XMM1, "pshufb");
+        emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM2, "por");
+    }
+
+    if (true == is_tbx)
+    {
+        emit_sse(assembler, 0U, false, 0x28, XMM1, XMM3, "movaps");
+        emit_broadcast_pattern(assembler, XMM2, replicate_lane((16U * length) - 1U, 0U));
+        emit_sse(assembler, 0x66, false, 0xDA, XMM1, XMM2, "pminub");
+        emit_sse(assembler, 0x66, false, 0x74, XMM1, XMM3, "pcmpeqb");
+        emit_load_vector(assembler, XMM2, rd, is_quad);
+        emit_sse(assembler, 0x66, false, 0xDF, XMM1, XMM2, "pandn");
+        emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM1, "por");
+    }
+
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -9923,5 +10554,7 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_vector_misc_more(compiler, instruction)
            || emit_fast_across_lanes(compiler, instruction)
            || emit_fast_float_add_pair(compiler, instruction)
-           || emit_fast_float_extreme_pair(compiler, instruction);
+           || emit_fast_float_extreme_pair(compiler, instruction)
+           || emit_fast_table_lookup(compiler, instruction)
+           || emit_fast_byte_permute(compiler, instruction);
 }

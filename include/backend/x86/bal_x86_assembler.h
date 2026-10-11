@@ -1543,6 +1543,27 @@ extern "C"
                                      int32_t              offset,
                                      const char          *mnemonic);
 
+    /// Emits an SSE instruction with a memory operand at `[base + offset]`, otherwise like
+    /// bal_x86_emit_sse_rbp_offset().
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - `reg` is above 15.
+    void bal_x86_emit_sse_base_offset(bal_x86_assembler_t *assembler,
+                                      uint8_t              prefix,
+                                      bool                 is_64bit,
+                                      const uint8_t       *opcode,
+                                      size_t               opcode_size,
+                                      uint8_t              reg,
+                                      bal_x86_register_t   base,
+                                      int32_t              offset,
+                                      const char          *mnemonic);
+
     /// Emits a 128-bit VEX instruction from the 0F38 map with the 66 prefix, such as the FMA3
     /// VFMADD231PS: `opcode reg, vvvv, rm` on XMM registers 0-15. `is_64bit` sets VEX.W, which
     /// selects the double precision forms of the FMA instructions.

@@ -3395,6 +3395,68 @@ bal_x86_emit_sse_rbp_offset(bal_x86_assembler_t *BAL_RESTRICT assembler,
 }
 
 void
+bal_x86_emit_sse_base_offset(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                             const uint8_t                     prefix,
+                             const bool                        is_64bit,
+                             const uint8_t *BAL_RESTRICT       opcode,
+                             const size_t                      opcode_size,
+                             const uint8_t                     reg,
+                             const bal_x86_register_t          base,
+                             const int32_t                     offset,
+                             const char *BAL_RESTRICT          mnemonic)
+{
+    const uint8_t base_number = (uint8_t)base;
+    const bool    needs_rex   = true == is_64bit || reg > 7U || base_number > 7U;
+    const bool    needs_sib   = 4U == (base_number & 7U); // RSP and R12 need a SIB byte.
+    const size_t  size = (prefix != 0U ? 1U : 0U) + (true == needs_rex ? 1U : 0U) + opcode_size + 1U
+                        + (true == needs_sib ? 1U : 0U) + 4U;
+
+    if (false == can_emit_vector(assembler, size, reg > base_number ? reg : base_number))
+    {
+        return;
+    }
+
+    BAL_LOG_DEBUG(&bal_thread_logger,
+                  "[+0x%04zx] %s %u, [r%u + 0x%X]",
+                  assembler->offset,
+                  mnemonic,
+                  reg,
+                  base_number,
+                  (uint32_t)offset);
+
+    if (prefix != 0U)
+    {
+        emit8(assembler->buffer, &assembler->offset, prefix);
+    }
+
+    if (true == needs_rex)
+    {
+        emit_rex(assembler->buffer,
+                 &assembler->offset,
+                 true == is_64bit ? 1U : 0U,
+                 (uint8_t)(reg >> 3U),
+                 (uint8_t)(base_number >> 3U));
+    }
+
+    for (size_t i = 0U; i < opcode_size; ++i)
+    {
+        emit8(assembler->buffer, &assembler->offset, opcode[i]);
+    }
+
+    // mod = 10 (disp32), reg, rm = base.
+    emit8(assembler->buffer,
+          &assembler->offset,
+          (uint8_t)(0x80U | (unsigned)(reg & 7U) << 3U | (base_number & 7U)));
+
+    if (true == needs_sib)
+    {
+        emit8(assembler->buffer, &assembler->offset, 0x24);
+    }
+
+    emit32(assembler->buffer, &assembler->offset, (uint32_t)offset);
+}
+
+void
 bal_x86_emit_vex_0f38_register(bal_x86_assembler_t *BAL_RESTRICT assembler,
                                const bool                        is_64bit,
                                const uint8_t                     opcode,

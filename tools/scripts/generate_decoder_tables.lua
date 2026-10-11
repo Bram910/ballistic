@@ -90,7 +90,8 @@ local function derive_opcode(mnemonic)
     end
 
     -- CRC32 and the flag manipulation instructions, executed by a runtime helper.
-    if m:match("^CRC32C?[BHWX]$") or m == "CFINV" or m == "RMIF" or m == "SETF8" or m == "SETF16" then
+    if m:match("^CRC32C?[BHWX]$") or m == "CFINV" or m == "RMIF" or m == "SETF8" or m == "SETF16"
+        or m == "AXFLAG" or m == "XAFLAG" then
         return "OPCODE_INTEGER_HELPER"
     end
 

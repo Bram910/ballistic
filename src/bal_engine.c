@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <xmmintrin.h>
 
 #define MAX_INSTRUCTIONS 65535
 
@@ -692,7 +693,13 @@ link_block(internal_engine_state_t *BAL_RESTRICT engine_state,
 static void
 execute_jit_block(const bal_jit_block_t block, bal_cpu_t *cpu)
 {
+    // Translated code runs under the guest MXCSR, which chained blocks share; the flags inline
+    // floating point raised go to FPSR when it returns.
+    const uint32_t host_mxcsr = _mm_getcsr();
+    _mm_setcsr(BAL_TIER1_GUEST_MXCSR);
     block(cpu);
+    cpu->fpsr |= bal_tier1_fpsr_flags_from_mxcsr(_mm_getcsr());
+    _mm_setcsr(host_mxcsr);
 }
 
 BAL_HOT void *

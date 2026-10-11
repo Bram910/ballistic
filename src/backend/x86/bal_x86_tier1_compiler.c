@@ -267,6 +267,7 @@ bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
 
     compiler->debug_context = debug_context;
     compiler->has_fma       = 0 != __builtin_cpu_supports("fma");
+    compiler->has_sse41     = 0 != __builtin_cpu_supports("sse4.1");
     bal_error_t error
         = bal_x86_assembler_init(&compiler->assembler, executable_buffer, buffer_size);
 
@@ -4072,8 +4073,9 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         return;
     }
 
-    // FPSR includes the flags that inline floating point has raised into MXCSR in this block.
-    if (SYSTEM_REGISTER_FPSR == system_register && true == compiler->is_guest_mxcsr_active)
+    // FPSR includes the flags inline floating point has raised into MXCSR, in this block or the
+    // ones before it. They go to FPSR first, and MXCSR is cleared so that a write replaces them.
+    if (SYSTEM_REGISTER_FPSR == system_register)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_fold_mxcsr_flags(&compiler->assembler);
@@ -4370,6 +4372,12 @@ translate_data_address(const bal_cpu_t          *cpu,
     return host_address;
 }
 
+uint64_t
+bal_tier1_fpsr_flags_from_mxcsr(const uint32_t mxcsr)
+{
+    return (uint64_t)((mxcsr & 1U) | (((mxcsr >> 2U) & 0xFU) << 1U));
+}
+
 void
 bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb)
 {
@@ -4388,9 +4396,14 @@ bal_tier1_tlb_clear(bal_tier1_tlb_entry_t *tlb)
 static void
 emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t function)
 {
-    // The helpers use the host floating-point environment themselves: the flags the block has
-    // raised so far go to FPSR first, and the guest environment is reloaded after the call.
-    if (true == compiler->is_guest_mxcsr_active)
+    // Translated code runs under BAL_TIER1_GUEST_MXCSR, with the flags inline floating point
+    // raises left in MXCSR. The floating-point helpers clear and test the flags themselves, so
+    // the pending ones go to FPSR first, and whatever the helper leaves behind is cleared after
+    // the call. The other helpers do no floating point.
+    const bool is_float_helper = (uint64_t)(uintptr_t)&bal_execute_float == function
+                                 || (uint64_t)(uintptr_t)&bal_execute_simd == function;
+
+    if (true == is_float_helper)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_fold_mxcsr_flags(&compiler->assembler);
@@ -4425,7 +4438,7 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
         bal_sliding_window_push(&compiler->window, release_macro);
     }
 
-    if (true == compiler->is_guest_mxcsr_active)
+    if (true == is_float_helper)
     {
         bal_sliding_window_flush_all(&compiler->window);
         emit_load_guest_mxcsr(&compiler->assembler);
@@ -4897,6 +4910,119 @@ emit_writeback_end(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint8_t rn
     compiler->is_dirty |= 1U << rn;
 }
 
+/// LD1 and ST1 (multiple structures) with one to four registers, without an offset or
+/// post-indexed. They copy whole registers to or from consecutive memory, so after the address
+/// translation they are plain 64-bit moves. Returns false for the other structure forms.
+static bool
+emit_fast_vector_structure(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                           const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                           const uint32_t                             instruction,
+                           const bal_guest_address_t                  guest_address)
+{
+    // 0 Q 0011000 L 000000 opcode size Rn Rt, or post-indexed 0 Q 0011001 L 0 Rm opcode size Rn Rt.
+    const bool is_plain = 0x0C000000U == (instruction & 0xBFBF0000U);
+    const bool is_post  = 0x0C800000U == (instruction & 0xBFA00000U);
+
+    if (false == is_plain && false == is_post)
+    {
+        return false;
+    }
+
+    uint32_t count = 0U;
+
+    switch ((instruction >> 12U) & 0xFU)
+    {
+        case 0x7U:
+            count = 1U;
+            break;
+        case 0xAU:
+            count = 2U;
+            break;
+        case 0x6U:
+            count = 3U;
+            break;
+        case 0x2U:
+            count = 4U;
+            break;
+        default:
+            return false; // LD2 to LD4 interleave the elements.
+    }
+
+    const bool               is_quad = 1U == ((instruction >> 30U) & 1U);
+    const bool               is_load = 1U == ((instruction >> 22U) & 1U);
+    const uint8_t            rt      = (uint8_t)(instruction & 0x1FU);
+    const uint8_t            rn      = (uint8_t)((instruction >> 5U) & 0x1FU);
+    const uint8_t            rm      = (uint8_t)((instruction >> 16U) & 0x1FU);
+    const uint32_t           halves  = true == is_quad ? 2U : 1U;
+    const uint64_t           total   = (uint64_t)count * halves * 8U;
+    const bal_x86_register_t pointer = BAL_X86_REGISTER_ZERO;
+    const bal_x86_register_t data    = BAL_X86_REGISTER_DISCARD_RESULT;
+
+    emit_base_plus_offset(compiler, rn, 0);
+    emit_translate_data_address(compiler, memory_interface, total, guest_address);
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+
+    for (uint32_t r = 0U; r < count; ++r)
+    {
+        const uint32_t index = (rt + r) % 32U;
+
+        for (uint32_t half = 0U; half < halves; ++half)
+        {
+            const int32_t offset = (int32_t)offsetof(bal_cpu_t, v[index][half]);
+
+            if (true == is_load)
+            {
+                bal_x86_emit_load_r64_mem64(assembler, data, pointer);
+                bal_x86_emit_store_r64_rbp_offset(assembler, data, offset);
+            }
+            else
+            {
+                bal_x86_emit_load_r64_rbp_offset(assembler, data, offset);
+                bal_x86_emit_store_mem64_r64(assembler, pointer, data);
+            }
+
+            bal_x86_emit_add_r64_imm32(assembler, pointer, 8);
+        }
+
+        // A 64-bit load clears the upper half of the register.
+        if (true == is_load && false == is_quad)
+        {
+            bal_x86_emit_xor_r32_r32(assembler, data, data);
+            bal_x86_emit_store_r64_rbp_offset(
+                assembler, data, (int32_t)offsetof(bal_cpu_t, v[index][1]));
+        }
+    }
+
+    // The post-indexed forms add the transfer size (Rm = 31) or Xm to the base, which the access
+    // has left alone.
+    if (true == is_post)
+    {
+        const bool               skip_load = false;
+        const bal_x86_register_t x86_rn    = allocate_x86_register(compiler, rn, skip_load);
+
+        if (31U == rm)
+        {
+            const bal_x86_macro_t add_macro = {
+                .opcode              = BAL_X86_MACRO_ADD_REGISTER_IMMEDIATE,
+                .destination         = x86_rn,
+                .immediate_or_offset = total,
+            };
+            bal_sliding_window_push(&compiler->window, add_macro);
+        }
+        else
+        {
+            const bal_x86_register_t x86_rm = allocate_x86_register(compiler, rm, skip_load);
+            push_macro(compiler, BAL_X86_MACRO_ADD_REGISTER_REGISTER, x86_rn, x86_rm);
+        }
+
+        compiler->is_dirty |= 1U << rn;
+    }
+
+    return true;
+}
+
 /// Rejects a load or store encoding tier 1 does not translate.
 static void
 reject_load_store(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
@@ -4933,6 +5059,12 @@ translate_load_store(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         if (BAL_UNLIKELY(false == bal_is_simd_memory_supported(instruction)))
         {
             reject_load_store(compiler, instruction);
+            return;
+        }
+
+        if (true
+            == emit_fast_vector_structure(compiler, memory_interface, instruction, guest_address))
+        {
             return;
         }
 
@@ -5580,18 +5712,12 @@ emit_fold_mxcsr_flags(bal_x86_assembler_t *BAL_RESTRICT assembler)
     bal_x86_emit_store_r64_rbp_offset(assembler, invalid, offsetof(bal_cpu_t, fpsr));
 }
 
-/// Switches MXCSR to GUEST_MXCSR the first time a block runs floating point inline, saving the
-/// host's value for emit_block_exit().
+/// Notes that the block runs floating point inline. MXCSR already is GUEST_MXCSR: the engine
+/// loads it before running translated code and folds the flags into FPSR afterwards, so blocks
+/// chained to each other never switch it.
 static void
 emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        return;
-    }
-
-    emit_stmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    emit_load_guest_mxcsr(&compiler->assembler);
     compiler->is_guest_mxcsr_active = true;
 }
 
@@ -5602,18 +5728,11 @@ emit_enter_guest_mxcsr(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 /// A linkable exit first checks bal_cpu_t::jit_exit_requested, then has a jump the engine can
 /// point at the block for `next_pc`, skipping its prologue. Until then the jump falls through
 /// to the ordinary exit, which records the jump's address in bal_cpu_t::jit_link_site, stores
-/// the PC and returns to the engine. Either way the host MXCSR is back in place first, as a
-/// block expects on entry.
+/// the PC and returns to the engine.
 static void
 emit_exit_to(bal_tier1_compiler_t *BAL_RESTRICT compiler, const bal_guest_address_t next_pc)
 {
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(assembler);
-        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
 
     if (true == compiler->is_linkable)
     {
@@ -5644,12 +5763,6 @@ static void
 emit_indirect_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
-
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(assembler);
-        emit_ldmxcsr(assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
 
     if (true == compiler->is_linkable)
     {
@@ -5689,12 +5802,6 @@ emit_indirect_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 static void
 emit_block_exit(bal_tier1_compiler_t *BAL_RESTRICT compiler)
 {
-    if (true == compiler->is_guest_mxcsr_active)
-    {
-        emit_fold_mxcsr_flags(&compiler->assembler);
-        emit_ldmxcsr(&compiler->assembler, offsetof(bal_cpu_t, jit_host_mxcsr));
-    }
-
     emit_epilogue(&compiler->assembler);
 }
 
@@ -6576,7 +6683,114 @@ emit_fast_duplicate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t 
     return true;
 }
 
-/// ADD, SUB, AND, BIC, ORR and EOR (vector), which SSE2 computes exactly; MOV is ORR with Rn = Rm.
+// -----------------------------------------------------------------------------
+// More inline Advanced SIMD
+// -----------------------------------------------------------------------------
+
+/// Emits `66 0F 38 opcode` (SSSE3 and SSE4.1) with two register operands.
+static void
+emit_sse38(bal_x86_assembler_t *BAL_RESTRICT assembler,
+           const uint8_t                     opcode,
+           const uint8_t                     reg,
+           const uint8_t                     rm,
+           const char                       *mnemonic)
+{
+    const uint8_t bytes[3] = { 0x0F, 0x38, opcode };
+    bal_x86_emit_sse_register(assembler, 0x66, false, bytes, 3U, reg, rm, false, 0U, mnemonic);
+}
+
+/// Emits `66 0F 3A opcode ib` (SSSE3 and SSE4.1) with two register operands.
+static void
+emit_sse3a(bal_x86_assembler_t *BAL_RESTRICT assembler,
+           const uint8_t                     opcode,
+           const uint8_t                     reg,
+           const uint8_t                     rm,
+           const uint8_t                     immediate,
+           const char                       *mnemonic)
+{
+    const uint8_t bytes[3] = { 0x0F, 0x3A, opcode };
+    bal_x86_emit_sse_register(
+        assembler, 0x66, false, bytes, 3U, reg, rm, true, immediate, mnemonic);
+}
+
+/// Sets every bit of `xmm`.
+static void
+emit_all_ones(bal_x86_assembler_t *BAL_RESTRICT assembler, const uint8_t xmm)
+{
+    emit_sse(assembler, 0x66, false, 0x76, xmm, xmm, "pcmpeqd");
+}
+
+/// Clears `xmm`.
+static void
+emit_zero_vector(bal_x86_assembler_t *BAL_RESTRICT assembler, const uint8_t xmm)
+{
+    emit_sse(assembler, 0x66, false, 0xEF, xmm, xmm, "pxor");
+}
+
+/// Fills both 64-bit halves of `xmm` with `pattern`.
+static void
+emit_broadcast_pattern(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                       const uint8_t                     xmm,
+                       const uint64_t                    pattern)
+{
+    bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_A, pattern);
+    emit_sse(assembler, 0x66, true, 0x6E, xmm, (uint8_t)SCRATCH_A, "movq");
+    emit_sse(assembler, 0x66, false, 0x6C, xmm, xmm, "punpcklqdq");
+}
+
+/// The sign bit of every `8 << size`-bit lane, as a 64-bit pattern.
+static uint64_t
+lane_sign_pattern(const uint32_t size)
+{
+    static const uint64_t PATTERNS[4] = {
+        0x8080808080808080ULL, 0x8000800080008000ULL, 0x8000000080000000ULL, 0x8000000000000000ULL
+    };
+    return PATTERNS[size];
+}
+
+/// Emits PCMPEQB/W/D/Q `a`, `b`: a lane becomes all ones where they are equal. Quadwords need
+/// SSE4.1, which the caller checks.
+static void
+emit_lanes_equal(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                 const uint32_t                    size,
+                 const uint8_t                     a,
+                 const uint8_t                     b)
+{
+    static const uint8_t OPCODES[3] = { 0x74, 0x75, 0x76 };
+
+    if (3U == size)
+    {
+        emit_sse38(assembler, 0x29, a, b, "pcmpeqq");
+        return;
+    }
+
+    emit_sse(assembler, 0x66, false, OPCODES[size], a, b, "pcmpeq");
+}
+
+/// Emits PCMPGTB/W/D `a`, `b`: a lane becomes all ones where `a` is greater, signed.
+static void
+emit_lanes_greater(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                   const uint32_t                    size,
+                   const uint8_t                     a,
+                   const uint8_t                     b)
+{
+    static const uint8_t OPCODES[3] = { 0x64, 0x65, 0x66 };
+    emit_sse(assembler, 0x66, false, OPCODES[size], a, b, "pcmpgt");
+}
+
+/// Inverts `xmm`, using `scratch`.
+static void
+emit_not_vector(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                const uint8_t                     xmm,
+                const uint8_t                     scratch)
+{
+    emit_all_ones(assembler, scratch);
+    emit_sse(assembler, 0x66, false, 0xEF, xmm, scratch, "pxor");
+}
+
+/// Advanced SIMD three same, integer: ADD, SUB, the logical operations (AND, BIC, ORR, ORN, EOR,
+/// BSL, BIT, BIF), the comparisons (CMEQ, CMTST, CMGT, CMHI, CMGE, CMHS), SMAX, SMIN, UMAX, UMIN
+/// and MUL. None of them touches FPSR, so they need no slow path.
 static bool
 emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
 {
@@ -6586,44 +6800,1196 @@ emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
         return false;
     }
 
-    const bool     is_quad   = 1U == ((instruction >> 30U) & 1U);
-    const uint32_t u         = (instruction >> 29U) & 1U;
-    const uint32_t size      = (instruction >> 22U) & 0x3U;
-    const uint32_t opcode    = (instruction >> 11U) & 0x1FU;
-    uint8_t        operation = 0U;
-    bool           is_bic    = false;
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t u       = (instruction >> 29U) & 1U;
+    const uint32_t size    = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode  = (instruction >> 11U) & 0x1FU;
+    const bool     sse41   = compiler->has_sse41;
 
-    if (0x10U == opcode)
+    // SMAX/SMIN on halfwords and UMAX/UMIN on bytes are SSE2; the rest need SSE4.1. Each entry is
+    // the opcode, with 0x3800 marking the 0F 38 map.
+    static const uint16_t MAXIMA[2][3] = { { 0x383C, 0x00EE, 0x383D }, { 0x00DE, 0x383E, 0x383F } };
+    static const uint16_t MINIMA[2][3] = { { 0x3838, 0x00EA, 0x3839 }, { 0x00DA, 0x383A, 0x383B } };
+
+    switch (opcode)
     {
-        static const uint8_t ADDS[4] = { 0xFC, 0xFD, 0xFE, 0xD4 };
-        static const uint8_t SUBS[4] = { 0xF8, 0xF9, 0xFA, 0xFB };
+        case 0x10U: // ADD, SUB
+        case 0x03U: // logical
+            if (0x10U == opcode && 3U == size && false == is_quad)
+            {
+                return false;
+            }
+            break;
+        case 0x11U: // CMTST, CMEQ
+            if (3U == size && (false == is_quad || false == sse41))
+            {
+                return false;
+            }
+            break;
+        case 0x06U: // CMGT, CMHI
+        case 0x07U: // CMGE, CMHS
+            if (3U == size)
+            {
+                return false;
+            }
+            break;
+        case 0x0CU: // SMAX, UMAX
+        case 0x0DU: // SMIN, UMIN
+        {
+            if (3U == size)
+            {
+                return false;
+            }
 
-        if (3U == size && false == is_quad)
+            const uint16_t entry = 0x0CU == opcode ? MAXIMA[u][size] : MINIMA[u][size];
+
+            if (0U != (entry & 0xFF00U) && false == sse41)
+            {
+                return false;
+            }
+            break;
+        }
+        case 0x13U: // MUL (PMUL with U = 1 is left to the helper)
+            if (1U == u || 0U == size || 3U == size || (2U == size && false == sse41))
+            {
+                return false;
+            }
+            break;
+        default:
+            return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    uint8_t                           result    = XMM0;
+
+    // Only the cpu structure and xmm registers are involved, so the register cache stays.
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    switch (opcode)
+    {
+        case 0x10U: {
+            static const uint8_t ADDS[4] = { 0xFC, 0xFD, 0xFE, 0xD4 };
+            static const uint8_t SUBS[4] = { 0xF8, 0xF9, 0xFA, 0xFB };
+            emit_sse(
+                assembler, 0x66, false, 0U == u ? ADDS[size] : SUBS[size], XMM0, XMM1, "padd/psub");
+            break;
+        }
+        case 0x03U:
+            switch ((u << 2U) | size)
+            {
+                case 0U: // AND
+                    emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+                    break;
+                case 1U: // BIC: PANDN computes ~m & n
+                    emit_sse(assembler, 0x66, false, 0xDF, XMM1, XMM0, "pandn");
+                    result = XMM1;
+                    break;
+                case 2U: // ORR
+                    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM1, "por");
+                    break;
+                case 3U: // ORN: n | ~m
+                    emit_not_vector(assembler, XMM1, XMM2);
+                    emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM1, "por");
+                    break;
+                case 4U: // EOR
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+                    break;
+                case 5U: // BSL: ((n ^ m) & d) ^ m
+                    emit_load_vector(assembler, XMM2, rd, is_quad);
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+                    emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM2, "pand");
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+                    break;
+                case 6U: // BIT: ((n ^ d) & m) ^ d
+                    emit_load_vector(assembler, XMM2, rd, is_quad);
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+                    emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+                    break;
+                default: // BIF: ((n ^ d) & ~m) ^ d
+                    emit_load_vector(assembler, XMM2, rd, is_quad);
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+                    emit_sse(assembler, 0x66, false, 0xDF, XMM1, XMM0, "pandn");
+                    emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM2, "pxor");
+                    result = XMM1;
+                    break;
+            }
+            break;
+        case 0x11U:
+            if (1U == u) // CMEQ
+            {
+                emit_lanes_equal(assembler, size, XMM0, XMM1);
+                break;
+            }
+
+            // CMTST: all ones where n & m is not zero.
+            emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_equal(assembler, size, XMM0, XMM1);
+            emit_not_vector(assembler, XMM0, XMM1);
+            break;
+        case 0x06U: // CMGT n > m; CMHI compares with the sign bits flipped.
+        case 0x07U: // CMGE n >= m is NOT (m > n); CMHS likewise.
+            if (1U == u)
+            {
+                emit_broadcast_pattern(assembler, XMM2, lane_sign_pattern(size));
+                emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM2, "pxor");
+                emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM2, "pxor");
+            }
+
+            if (0x06U == opcode)
+            {
+                emit_lanes_greater(assembler, size, XMM0, XMM1);
+            }
+            else
+            {
+                emit_lanes_greater(assembler, size, XMM1, XMM0);
+                emit_not_vector(assembler, XMM1, XMM2);
+                result = XMM1;
+            }
+            break;
+        case 0x0CU:
+        case 0x0DU: {
+            const uint16_t entry = 0x0CU == opcode ? MAXIMA[u][size] : MINIMA[u][size];
+
+            if (0U != (entry & 0xFF00U))
+            {
+                emit_sse38(assembler, (uint8_t)entry, XMM0, XMM1, "pmax/pmin");
+            }
+            else
+            {
+                emit_sse(assembler, 0x66, false, (uint8_t)entry, XMM0, XMM1, "pmax/pmin");
+            }
+            break;
+        }
+        default: // MUL
+            if (1U == size)
+            {
+                emit_sse(assembler, 0x66, false, 0xD5, XMM0, XMM1, "pmullw");
+            }
+            else
+            {
+                emit_sse38(assembler, 0x40, XMM0, XMM1, "pmulld");
+            }
+            break;
+    }
+
+    emit_store_vector(assembler, result, rd, is_quad);
+    return true;
+}
+
+/// Advanced SIMD shift by immediate: SHL, SSHR, USHR, SSHLL and USHLL (with SXTL and UXTL), on
+/// halfwords and wider; SSE has no byte shifts and no 64-bit arithmetic shift.
+static bool
+emit_fast_shift_immediate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 011110 immh immb opcode 1 Rn Rd, immh nonzero.
+    const uint32_t immh = (instruction >> 19U) & 0xFU;
+
+    if (0x0F000400U != (instruction & 0x9F800400U) || 0U == immh)
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t u       = (instruction >> 29U) & 1U;
+    const uint32_t opcode  = (instruction >> 11U) & 0x1FU;
+    const uint32_t shift   = (instruction >> 16U) & 0x7FU;
+    const uint32_t size
+        = 0U != (immh & 8U) ? 3U : (0U != (immh & 4U) ? 2U : (0U != (immh & 2U) ? 1U : 0U));
+    const uint32_t esize = 8U << size;
+
+    // PSLL, PSRL and PSRA by immediate: 0F 71 (words), 72 (doublewords), 73 (quadwords), with
+    // /6, /2 and /4.
+    static const uint8_t SHIFT_OPCODES[4] = { 0U, 0x71, 0x72, 0x73 };
+    bool                 is_long          = false;
+    uint8_t              operation        = 0U;
+    uint32_t             amount           = 0U;
+
+    if (0x0AU == opcode && 0U == u) // SHL
+    {
+        operation = 6U;
+        amount    = shift - esize;
+    }
+    else if (0x00U == opcode) // SSHR, USHR
+    {
+        operation = 0U == u ? 4U : 2U;
+        amount    = 2U * esize - shift;
+
+        if (0U == u && 3U == size)
+        {
+            return false;
+        }
+    }
+    else if (0x14U == opcode) // SSHLL, USHLL
+    {
+        if (3U == size || false == compiler->has_sse41)
         {
             return false;
         }
 
-        operation = 0U == u ? ADDS[size] : SUBS[size];
+        is_long = true;
+        amount  = shift - esize;
     }
-    else if (0x03U == opcode)
+    else
     {
-        switch ((u << 2U) | size)
+        return false;
+    }
+
+    if ((false == is_long && 0U == size) || (3U == size && false == is_quad))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (false == is_long)
+    {
+        emit_load_vector(assembler, XMM0, rn, is_quad);
+        emit_sse_immediate(
+            assembler, 0x66, SHIFT_OPCODES[size], operation, XMM0, (uint8_t)amount, "shift");
+        emit_store_vector(assembler, XMM0, rd, is_quad);
+        return true;
+    }
+
+    // The "2" forms widen the upper half.
+    static const uint8_t ZERO_EXTEND[3] = { 0x30, 0x33, 0x35 };
+    static const uint8_t SIGN_EXTEND[3] = { 0x20, 0x23, 0x25 };
+    emit_load_vector(assembler, XMM0, rn, true);
+
+    if (true == is_quad)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 8U, "psrldq");
+    }
+
+    emit_sse38(
+        assembler, 1U == u ? ZERO_EXTEND[size] : SIGN_EXTEND[size], XMM0, XMM0, "pmovzx/pmovsx");
+
+    if (amount != 0U)
+    {
+        emit_sse_immediate(
+            assembler, 0x66, SHIFT_OPCODES[size + 1U], 6U, XMM0, (uint8_t)amount, "psll");
+    }
+
+    emit_store_vector(assembler, XMM0, rd, true);
+    return true;
+}
+
+/// Advanced SIMD two-register miscellaneous without floating-point arithmetic: NOT, NEG, ABS, the
+/// comparisons with zero (CMEQ, CMGT, CMGE, CMLT, CMLE), REV64 and REV32 on halfwords and words,
+/// XTN, and FABS and FNEG, which only change sign bits.
+static bool
+emit_fast_vector_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 size 10000 opcode 10 Rn Rd.
+    if (0x0E200800U != (instruction & 0x9F3E0C00U))
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t u       = (instruction >> 29U) & 1U;
+    const uint32_t size    = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode  = (instruction >> 12U) & 0x1FU;
+    const uint32_t key     = (u << 5U) | opcode;
+    const bool     sse41   = compiler->has_sse41;
+    const bool     is_wide = 3U == size;
+
+    switch (key)
+    {
+        case 0x25U: // NOT
+            if (size != 0U)
+            {
+                return false;
+            }
+            break;
+        case 0x2BU: // NEG
+            if (true == is_wide && false == is_quad)
+            {
+                return false;
+            }
+            break;
+        case 0x0BU: // ABS
+            if (true == is_wide || false == sse41)
+            {
+                return false;
+            }
+            break;
+        case 0x09U: // CMEQ #0
+            if (true == is_wide && (false == is_quad || false == sse41))
+            {
+                return false;
+            }
+            break;
+        case 0x08U: // CMGT #0
+        case 0x28U: // CMGE #0
+        case 0x0AU: // CMLT #0
+        case 0x29U: // CMLE #0
+            if (true == is_wide)
+            {
+                return false;
+            }
+            break;
+        case 0x00U: // REV64
+            if (size != 1U && size != 2U)
+            {
+                return false;
+            }
+            break;
+        case 0x20U: // REV32
+            if (size != 1U)
+            {
+                return false;
+            }
+            break;
+        case 0x12U: // XTN (not XTN2)
+            if (true == is_quad || true == is_wide || (1U == size && false == sse41))
+            {
+                return false;
+            }
+            break;
+        case 0x0FU: // FABS
+        case 0x2FU: // FNEG
+            if (size < 2U || (true == is_wide && false == is_quad))
+            {
+                return false;
+            }
+            break;
+        default:
+            return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    uint8_t                           result    = XMM0;
+    bal_sliding_window_flush_all(&compiler->window);
+
+    // XTN narrows a whole 128-bit register into a 64-bit one.
+    emit_load_vector(assembler, XMM0, rn, true == is_quad || 0x12U == key);
+
+    switch (key)
+    {
+        case 0x25U:
+            emit_not_vector(assembler, XMM0, XMM1);
+            break;
+        case 0x2BU: {
+            static const uint8_t SUBS[4] = { 0xF8, 0xF9, 0xFA, 0xFB };
+            emit_zero_vector(assembler, XMM1);
+            emit_sse(assembler, 0x66, false, SUBS[size], XMM1, XMM0, "psub");
+            result = XMM1;
+            break;
+        }
+        case 0x0BU:
+            emit_sse38(assembler, (uint8_t)(0x1CU + size), XMM0, XMM0, "pabs");
+            break;
+        case 0x09U: // x == 0
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_equal(assembler, size, XMM0, XMM1);
+            break;
+        case 0x08U: // x > 0
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_greater(assembler, size, XMM0, XMM1);
+            break;
+        case 0x0AU: // 0 > x
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_greater(assembler, size, XMM1, XMM0);
+            result = XMM1;
+            break;
+        case 0x28U: // x >= 0 is NOT (0 > x)
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_greater(assembler, size, XMM1, XMM0);
+            emit_not_vector(assembler, XMM1, XMM2);
+            result = XMM1;
+            break;
+        case 0x29U: // x <= 0 is NOT (x > 0)
+            emit_zero_vector(assembler, XMM1);
+            emit_lanes_greater(assembler, size, XMM0, XMM1);
+            emit_not_vector(assembler, XMM0, XMM2);
+            break;
+        case 0x00U:
+            if (2U == size)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0xB1, "pshufd");
+            }
+            else
+            {
+                emit_sse_immediate(assembler, 0xF2, 0x70, XMM0, XMM0, 0x1B, "pshuflw");
+                emit_sse_immediate(assembler, 0xF3, 0x70, XMM0, XMM0, 0x1B, "pshufhw");
+            }
+            break;
+        case 0x20U:
+            emit_sse_immediate(assembler, 0xF2, 0x70, XMM0, XMM0, 0xB1, "pshuflw");
+            emit_sse_immediate(assembler, 0xF3, 0x70, XMM0, XMM0, 0xB1, "pshufhw");
+            break;
+        case 0x12U:
+            if (2U == size)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0x08, "pshufd");
+                break;
+            }
+
+            // Keep the low half of each lane, then pack without saturating anything.
+            emit_all_ones(assembler, XMM1);
+
+            if (0U == size)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x71, 2U, XMM1, 8U, "psrlw");
+                emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+                emit_sse(assembler, 0x66, false, 0x67, XMM0, XMM0, "packuswb");
+            }
+            else
+            {
+                emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM1, 16U, "psrld");
+                emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+                emit_sse38(assembler, 0x2B, XMM0, XMM0, "packusdw");
+            }
+            break;
+        default: // FABS clears and FNEG flips the sign bits.
         {
-            case 0U:
-                operation = 0xDB; // AND: PAND
+            const uint8_t shift_opcode = true == is_wide ? 0x73 : 0x72;
+            emit_all_ones(assembler, XMM1);
+
+            if (0x0FU == key)
+            {
+                emit_sse_immediate(assembler, 0x66, shift_opcode, 2U, XMM1, 1U, "psrl");
+                emit_sse(assembler, 0x66, false, 0xDB, XMM0, XMM1, "pand");
+            }
+            else
+            {
+                emit_sse_immediate(
+                    assembler, 0x66, shift_opcode, 6U, XMM1, true == is_wide ? 63U : 31U, "psll");
+                emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+            }
+            break;
+        }
+    }
+
+    emit_store_vector(assembler, result, rd, is_quad);
+    return true;
+}
+
+/// Advanced SIMD two-register miscellaneous floating point, under FPCR = 0 like the other fast
+/// paths: FRINTN, FRINTM, FRINTP, FRINTZ, FRINTX and FRINTI (ROUNDPS/ROUNDPD), FCVTZS and SCVTF on
+/// words, the comparisons with zero, and FSQRT. Their flags match the AArch64 ones under
+/// GUEST_MXCSR; a conversion out of range and a NaN square root go to the slow path.
+static bool
+emit_fast_float_misc(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 a sz 10000 opcode 10 Rn Rd.
+    if (0x0E200800U != (instruction & 0x9F3E0C00U))
+    {
+        return false;
+    }
+
+    const bool     is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_double = 1U == ((instruction >> 22U) & 1U);
+    const uint32_t key = (((instruction >> 29U) & 1U) << 6U) | (((instruction >> 23U) & 1U) << 5U)
+                         | ((instruction >> 12U) & 0x1FU);
+    uint8_t rounding = 0xFFU;
+
+    switch (key)
+    {
+        case 0x18U: // FRINTN
+            rounding = 0x08;
+            break;
+        case 0x19U: // FRINTM
+            rounding = 0x09;
+            break;
+        case 0x38U: // FRINTP
+            rounding = 0x0A;
+            break;
+        case 0x39U: // FRINTZ
+            rounding = 0x0B;
+            break;
+        case 0x59U: // FRINTX: the current mode, raising Inexact
+            rounding = 0x04;
+            break;
+        case 0x79U: // FRINTI: the current mode
+            rounding = 0x0C;
+            break;
+        case 0x3BU: // FCVTZS
+        case 0x1DU: // SCVTF
+            if (true == is_double)
+            {
+                return false;
+            }
+            break;
+        case 0x2CU: // FCMGT #0
+        case 0x2DU: // FCMEQ #0
+        case 0x2EU: // FCMLT #0
+        case 0x6CU: // FCMGE #0
+        case 0x6DU: // FCMLE #0
+        case 0x7FU: // FSQRT
+            break;
+        default:
+            return false;
+    }
+
+    if ((true == is_double && false == is_quad)
+        || (rounding != 0xFFU && false == compiler->has_sse41))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint8_t                     packed    = true == is_double ? 0x66 : 0U;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    uint8_t                           result    = XMM0;
+    size_t                            slow_jumps[3];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+
+    if (rounding != 0xFFU)
+    {
+        emit_sse3a(assembler, true == is_double ? 0x09 : 0x08, XMM0, XMM0, rounding, "roundp");
+    }
+    else if (0x3BU == key)
+    {
+        // CVTTPS2DQ gives 0x80000000 for NaNs and values out of range, which AArch64 saturates.
+        emit_sse(assembler, 0xF3, false, 0x5B, XMM0, XMM0, "cvttps2dq");
+        emit_all_ones(assembler, XMM1);
+        emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM1, 31U, "pslld");
+        emit_sse(assembler, 0x66, false, 0x76, XMM1, XMM0, "pcmpeqd");
+        emit_sse(assembler, 0U, false, 0x50, (uint8_t)SCRATCH_A, XMM1, "movmskps");
+        bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        slow_jumps[count++] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    }
+    else if (0x1DU == key)
+    {
+        emit_sse(assembler, 0U, false, 0x5B, XMM0, XMM0, "cvtdq2ps");
+    }
+    else if (0x7FU == key)
+    {
+        emit_sse(assembler, packed, false, 0x51, XMM0, XMM0, "sqrtp");
+        count += emit_vector_checks(assembler, is_double, &slow_jumps[1]);
+    }
+    else
+    {
+        // CMPP with EQ_OQ signals Invalid only for signalling NaNs, like FCMEQ; LT_OS and LE_OS
+        // signal for every NaN, like FCMGT, FCMGE, FCMLT and FCMLE.
+        emit_zero_vector(assembler, XMM1);
+
+        switch (key)
+        {
+            case 0x2CU: // 0 < x
+                emit_sse_immediate(assembler, packed, 0xC2, XMM1, XMM0, 1U, "cmpltp");
+                result = XMM1;
                 break;
-            case 1U:
-                operation = 0xDF; // BIC: PANDN computes ~m & n
-                is_bic    = true;
+            case 0x2DU: // x == 0
+                emit_sse_immediate(assembler, packed, 0xC2, XMM0, XMM1, 0U, "cmpeqp");
                 break;
-            case 2U:
-                operation = 0xEB; // ORR: POR
+            case 0x2EU: // x < 0
+                emit_sse_immediate(assembler, packed, 0xC2, XMM0, XMM1, 1U, "cmpltp");
                 break;
-            case 4U:
-                operation = 0xEF; // EOR: PXOR
+            case 0x6CU: // 0 <= x
+                emit_sse_immediate(assembler, packed, 0xC2, XMM1, XMM0, 2U, "cmplep");
+                result = XMM1;
+                break;
+            default: // x <= 0
+                emit_sse_immediate(assembler, packed, 0xC2, XMM0, XMM1, 2U, "cmplep");
+                break;
+        }
+    }
+
+    emit_store_vector(assembler, result, rd, is_quad);
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, count);
+    return true;
+}
+
+/// FCMEQ, FCMGE and FCMGT (vector), under FPCR = 0. CMPP signals Invalid as these do (see
+/// emit_fast_float_misc()) and the results are masks, so only the FPCR check can fail.
+static bool
+emit_fast_vector_float_compare(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                               const uint32_t                     instruction)
+{
+    // 0 Q U 01110 a sz 1 Rm 11100 1 Rn Rd.
+    if (0x0E20E400U != (instruction & 0x9F20FC00U))
+    {
+        return false;
+    }
+
+    const bool     is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const bool     is_double = 1U == ((instruction >> 22U) & 1U);
+    const uint32_t key       = (((instruction >> 29U) & 1U) << 1U) | ((instruction >> 23U) & 1U);
+
+    // FCMEQ (U = 0, a = 0), FCMGE (U = 1, a = 0), FCMGT (U = 1, a = 1).
+    if (1U == key || (true == is_double && false == is_quad))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    const uint8_t                     packed    = true == is_double ? 0x66 : 0U;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[1];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    if (0U == key)
+    {
+        emit_sse_immediate(assembler, packed, 0xC2, XMM0, XMM1, 0U, "cmpeqp");
+        emit_store_vector(assembler, XMM0, rd, is_quad);
+    }
+    else
+    {
+        // n >= m is m <= n, and n > m is m < n.
+        emit_sse_immediate(assembler, packed, 0xC2, XMM1, XMM0, 2U == key ? 2U : 1U, "cmpp");
+        emit_store_vector(assembler, XMM1, rd, is_quad);
+    }
+
+    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, 1U);
+    return true;
+}
+
+/// Advanced SIMD permute: ZIP1 and ZIP2 for every element size, and UZP1, UZP2, TRN1 and TRN2 on
+/// words and doublewords.
+static bool
+emit_fast_permute(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 0 01110 size 0 Rm 0 opcode 10 Rn Rd.
+    if (0x0E000800U != (instruction & 0xBF208C00U))
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t size    = (instruction >> 22U) & 0x3U;
+    const uint32_t opcode  = (instruction >> 12U) & 0x7U;
+    const bool     is_zip  = 0x3U == (opcode & 0x3U);
+    const bool     is_two  = 0U != (opcode & 0x4U);
+
+    if (0U == (opcode & 0x3U) || (3U == size && false == is_quad) || (false == is_zip && size < 2U))
+    {
+        return false;
+    }
+
+    static const uint8_t              LOW[4]    = { 0x60, 0x61, 0x62, 0x6C };
+    static const uint8_t              HIGH[4]   = { 0x68, 0x69, 0x6A, 0x6D };
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    // On doublewords all six are interleavings; on 64-bit vectors of words UZP and TRN are too.
+    if (true == is_zip || 3U == size || false == is_quad)
+    {
+        if (true == is_quad)
+        {
+            emit_sse(assembler,
+                     0x66,
+                     false,
+                     true == is_two ? HIGH[size] : LOW[size],
+                     XMM0,
+                     XMM1,
+                     "punpck");
+        }
+        else
+        {
+            // The interleaved low halves; the "2" forms take its upper 64 bits.
+            emit_sse(assembler, 0x66, false, LOW[size], XMM0, XMM1, "punpckl");
+
+            if (true == is_two)
+            {
+                emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 8U, "psrldq");
+            }
+        }
+    }
+    else
+    {
+        // UZP picks the even (or odd) words of n then m; TRN then interleaves them.
+        emit_sse_immediate(assembler, 0U, 0xC6, XMM0, XMM1, true == is_two ? 0xDD : 0x88, "shufps");
+
+        if (2U == (opcode & 0x3U))
+        {
+            emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0xD8, "pshufd");
+        }
+    }
+
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
+/// EXT: the bytes of m:n from byte imm4 on.
+static bool
+emit_fast_extract(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 101110 00 0 Rm 0 imm4 0 Rn Rd.
+    if (0x2E000000U != (instruction & 0xBFE08400U))
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t imm4    = (instruction >> 11U) & 0xFU;
+
+    if ((false == is_quad && imm4 >= 8U) || (true == is_quad && false == compiler->has_sse41))
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, rn, is_quad);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    if (true == is_quad)
+    {
+        emit_sse3a(assembler, 0x0F, XMM1, XMM0, (uint8_t)imm4, "palignr");
+        emit_store_vector(assembler, XMM1, rd, true);
+        return true;
+    }
+
+    emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM1, "punpcklqdq");
+
+    if (imm4 != 0U)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, (uint8_t)imm4, "psrldq");
+    }
+
+    emit_store_vector(assembler, XMM0, rd, false);
+    return true;
+}
+
+/// TBL with a one-register table: PSHUFB, with every index above 15 made to select zero.
+static bool
+emit_fast_table(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 001110 000 Rm 0 00 0 00 Rn Rd.
+    if (0x0E000000U != (instruction & 0xBFE0FC00U) || false == compiler->has_sse41)
+    {
+        return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+    emit_load_vector(assembler, XMM0, rn, true);
+    emit_load_vector(assembler, XMM1, rm, is_quad);
+
+    // PSHUFB zeroes a byte whose index has bit 7 set, which covers 128-255; 16-127 get it set.
+    emit_broadcast_pattern(assembler, XMM2, 0x0F0F0F0F0F0F0F0FULL);
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM1, "movaps");
+    emit_sse(assembler, 0x66, false, 0x64, XMM3, XMM2, "pcmpgtb");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM3, "por");
+    emit_sse38(assembler, 0x00, XMM0, XMM1, "pshufb");
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    return true;
+}
+
+/// Advanced SIMD modified immediate: MOVI, MVNI, FMOV, ORR and BIC. The interpreter evaluates
+/// the immediate at translation time, so the code only stores, ORs or ANDs constants.
+static bool
+emit_fast_modified_immediate(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                             const uint32_t                     instruction)
+{
+    // 0 Q op 0111100000 a b c cmode o2 1 d e f g h Rd.
+    if (0x0F000400U != (instruction & 0x9FF80400U) || false == bal_is_simd_supported(instruction))
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t op      = (instruction >> 29U) & 1U;
+    const uint32_t cmode   = (instruction >> 12U) & 0xFU;
+    const uint32_t rd      = instruction & 0x1FU;
+
+    // ORR and BIC (immediate): cmode 0xx1 or 10x1. The rest set the register outright.
+    const bool is_logical = 1U == (cmode & 1U) && cmode < 0xCU;
+
+    // Evaluate on a zeroed register (MOVI, MVNI, FMOV and ORR give the immediate) or, for BIC, on
+    // one of all ones (giving the mask to AND with).
+    bal_cpu_t scratch;
+    (void)memset(&scratch, 0, sizeof(scratch));
+
+    if (true == is_logical && 1U == op)
+    {
+        scratch.v[rd][0] = ~0ULL;
+        scratch.v[rd][1] = ~0ULL;
+    }
+
+    (void)bal_execute_simd(&scratch, instruction);
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_sliding_window_flush_all(&compiler->window);
+
+    for (uint32_t half = 0U; half < 2U; ++half)
+    {
+        const int32_t  offset = (int32_t)offsetof(bal_cpu_t, v[rd][half]);
+        const uint64_t value  = scratch.v[rd][half];
+
+        if (false == is_logical || (1U == half && false == is_quad))
+        {
+            // A 64-bit operation also clears the upper half.
+            bal_x86_emit_mov_r64_imm64(
+                assembler, SCRATCH_A, 1U == half && false == is_quad ? 0U : value);
+            bal_x86_emit_store_r64_rbp_offset(assembler, SCRATCH_A, offset);
+            continue;
+        }
+
+        bal_x86_emit_load_r64_rbp_offset(assembler, SCRATCH_A, offset);
+        bal_x86_emit_mov_r64_imm64(assembler, SCRATCH_B, value);
+
+        if (0U == op)
+        {
+            bal_x86_emit_or_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        }
+        else
+        {
+            bal_x86_emit_and_r64_r64(assembler, SCRATCH_A, SCRATCH_B);
+        }
+
+        bal_x86_emit_store_r64_rbp_offset(assembler, SCRATCH_A, offset);
+    }
+
+    return true;
+}
+
+/// Points SCRATCH_B at byte `byte` of SIMD&FP register `index` in the cpu structure.
+static void
+emit_vector_element_address(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                            const uint32_t                    index,
+                            const uint32_t                    byte)
+{
+    bal_x86_emit_mov_r64_r64(assembler, SCRATCH_B, BAL_X86_RBP);
+    bal_x86_emit_add_r64_imm32(
+        assembler, SCRATCH_B, (int32_t)(offsetof(bal_cpu_t, v[index][0]) + byte));
+}
+
+/// Moves between general purpose registers and vector elements: UMOV, SMOV, INS (general and
+/// element) and DUP (general).
+static bool
+emit_fast_element_move(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q op 01110000 imm5 0 imm4 1 Rn Rd.
+    if (0x0E000400U != (instruction & 0x9FE08400U))
+    {
+        return false;
+    }
+
+    const bool     is_quad = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t op      = (instruction >> 29U) & 1U;
+    const uint32_t imm5    = (instruction >> 16U) & 0x1FU;
+    const uint32_t imm4    = (instruction >> 11U) & 0xFU;
+    const uint32_t rd      = instruction & 0x1FU;
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+
+    if (0U == (imm5 & 0xFU))
+    {
+        return false;
+    }
+
+    const uint32_t size  = (uint32_t)__builtin_ctz(imm5);
+    const uint32_t index = imm5 >> (size + 1U);
+    const uint32_t bytes = 1U << size;
+    enum
+    {
+        MOVE_UMOV,
+        MOVE_SMOV,
+        MOVE_INS_GENERAL,
+        MOVE_INS_ELEMENT,
+        MOVE_DUP_GENERAL,
+    } kind
+        = MOVE_UMOV;
+
+    if (1U == op)
+    {
+        if (false == is_quad)
+        {
+            return false;
+        }
+
+        kind = MOVE_INS_ELEMENT;
+    }
+    else
+    {
+        switch (imm4)
+        {
+            case 0x7U: // UMOV: W from bytes to words, X from doublewords
+                if ((true == is_quad) != (3U == size))
+                {
+                    return false;
+                }
+                kind = MOVE_UMOV;
+                break;
+            case 0x5U: // SMOV: W from bytes and halfwords, X from bytes to words
+                if (size > (true == is_quad ? 2U : 1U))
+                {
+                    return false;
+                }
+                kind = MOVE_SMOV;
+                break;
+            case 0x3U: // INS (general)
+                if (false == is_quad)
+                {
+                    return false;
+                }
+                kind = MOVE_INS_GENERAL;
+                break;
+            case 0x1U: // DUP (general)
+                if (3U == size && false == is_quad)
+                {
+                    return false;
+                }
+                kind = MOVE_DUP_GENERAL;
                 break;
             default:
                 return false;
+        }
+    }
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    if (MOVE_UMOV == kind || MOVE_SMOV == kind)
+    {
+        if (31U == rd)
+        {
+            return true;
+        }
+
+        const bool               skip_load = true;
+        const bal_x86_register_t x86_rd = allocate_x86_register(compiler, (uint8_t)rd, skip_load);
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_vector_element_address(assembler, rn, index * bytes);
+
+        if (MOVE_UMOV == kind)
+        {
+            switch (size)
+            {
+                case 0U:
+                    bal_x86_emit_load_r32_mem8(assembler, x86_rd, SCRATCH_B);
+                    break;
+                case 1U:
+                    bal_x86_emit_load_r32_mem16(assembler, x86_rd, SCRATCH_B);
+                    break;
+                case 2U:
+                    bal_x86_emit_load_r32_mem32(assembler, x86_rd, SCRATCH_B);
+                    break;
+                default:
+                    bal_x86_emit_load_r64_mem64(assembler, x86_rd, SCRATCH_B);
+                    break;
+            }
+        }
+        else if (true == is_quad)
+        {
+            switch (size)
+            {
+                case 0U:
+                    bal_x86_emit_load_sign_r64_mem8(assembler, x86_rd, SCRATCH_B);
+                    break;
+                case 1U:
+                    bal_x86_emit_load_sign_r64_mem16(assembler, x86_rd, SCRATCH_B);
+                    break;
+                default:
+                    bal_x86_emit_load_sign_r64_mem32(assembler, x86_rd, SCRATCH_B);
+                    break;
+            }
+        }
+        else if (0U == size)
+        {
+            bal_x86_emit_load_sign_r32_mem8(assembler, x86_rd, SCRATCH_B);
+        }
+        else
+        {
+            bal_x86_emit_load_sign_r32_mem16(assembler, x86_rd, SCRATCH_B);
+        }
+
+        compiler->is_dirty |= 1U << rd;
+        return true;
+    }
+
+    if (MOVE_INS_ELEMENT == kind)
+    {
+        const uint32_t source = (imm4 >> size) * bytes;
+        bal_sliding_window_flush_all(&compiler->window);
+        emit_vector_element_address(assembler, rn, source);
+
+        switch (size)
+        {
+            case 0U:
+                bal_x86_emit_load_r32_mem8(assembler, SCRATCH_A, SCRATCH_B);
+                break;
+            case 1U:
+                bal_x86_emit_load_r32_mem16(assembler, SCRATCH_A, SCRATCH_B);
+                break;
+            case 2U:
+                bal_x86_emit_load_r32_mem32(assembler, SCRATCH_A, SCRATCH_B);
+                break;
+            default:
+                bal_x86_emit_load_r64_mem64(assembler, SCRATCH_A, SCRATCH_B);
+                break;
+        }
+
+        emit_vector_element_address(assembler, rd, index * bytes);
+    }
+    else
+    {
+        // INS and DUP (general) take Wn or Xn, which reads as zero for register 31.
+        bal_x86_register_t source = SCRATCH_A;
+
+        if (31U == rn)
+        {
+            bal_sliding_window_flush_all(&compiler->window);
+            bal_x86_emit_xor_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        }
+        else
+        {
+            const bool skip_load = false;
+            source               = allocate_x86_register(compiler, (uint8_t)rn, skip_load);
+            bal_sliding_window_flush_all(&compiler->window);
+        }
+
+        if (MOVE_DUP_GENERAL == kind)
+        {
+            emit_sse(assembler, 0x66, true, 0x6E, XMM0, (uint8_t)source, "movq");
+
+            switch (size)
+            {
+                case 0U:
+                    emit_sse(assembler, 0x66, false, 0x60, XMM0, XMM0, "punpcklbw");
+                    emit_sse_immediate(assembler, 0xF2, 0x70, XMM0, XMM0, 0U, "pshuflw");
+                    emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM0, "punpcklqdq");
+                    break;
+                case 1U:
+                    emit_sse_immediate(assembler, 0xF2, 0x70, XMM0, XMM0, 0U, "pshuflw");
+                    emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM0, "punpcklqdq");
+                    break;
+                case 2U:
+                    emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0U, "pshufd");
+                    break;
+                default:
+                    emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM0, "punpcklqdq");
+                    break;
+            }
+
+            emit_store_vector(assembler, XMM0, rd, is_quad);
+            return true;
+        }
+
+        if (source != SCRATCH_A)
+        {
+            bal_x86_emit_mov_r64_r64(assembler, SCRATCH_A, source);
+        }
+
+        emit_vector_element_address(assembler, rd, index * bytes);
+    }
+
+    switch (size)
+    {
+        case 0U:
+            bal_x86_emit_store_mem8_r8(assembler, SCRATCH_B, SCRATCH_A);
+            break;
+        case 1U:
+            bal_x86_emit_store_mem16_r16(assembler, SCRATCH_B, SCRATCH_A);
+            break;
+        case 2U:
+            bal_x86_emit_store_mem32_r32(assembler, SCRATCH_B, SCRATCH_A);
+            break;
+        default:
+            bal_x86_emit_store_mem64_r64(assembler, SCRATCH_B, SCRATCH_A);
+            break;
+    }
+
+    return true;
+}
+
+/// FCVT between single and double precision (scalar). Widening is exact; narrowing rounds as
+/// AArch64 does under FPCR = 0, and emit_scalar_checks() sends NaNs and results at the smallest
+/// normal magnitude, where the underflow flag can differ, to the slow path.
+static bool
+emit_fast_convert_precision(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // FCVT Dd, Sn is 0x1E22C000 and FCVT Sd, Dn 0x1E624000.
+    const uint32_t form = instruction & 0xFFFFFC00U;
+
+    if (form != 0x1E22C000U && form != 0x1E624000U)
+    {
+        return false;
+    }
+
+    const bool     is_widening = 0x1E22C000U == form;
+    const uint32_t rd          = instruction & 0x1FU;
+    const uint32_t rn          = (instruction >> 5U) & 0x1FU;
+    size_t         slow_jumps[3];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_scalar(&compiler->assembler, XMM0, rn, false == is_widening);
+    emit_sse(&compiler->assembler,
+             true == is_widening ? 0xF3 : 0xF2,
+             false,
+             0x5A,
+             XMM0,
+             XMM0,
+             "cvtss2sd/cvtsd2ss");
+    const uint32_t count = 1U + emit_scalar_checks(compiler, is_widening, &slow_jumps[1]);
+    emit_store_scalar_result(&compiler->assembler, rd);
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, count);
+    return true;
+}
+
+/// FMAX, FMIN, FMAXNM and FMINNM, scalar and vector, when no operand is a NaN: then the NM forms
+/// equal the others. CMPUNORD checks that first, quietly, so a quiet NaN raises no flag. MAXP and
+/// MINP return the second operand when the two are equal, which only matters for zeros of
+/// different signs: there the AND (maximum) or OR (minimum) of the two gives AArch64's +0 or -0.
+static bool
+emit_fast_float_minmax(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    bool is_scalar  = false;
+    bool is_double  = false;
+    bool is_minimum = false;
+    bool is_quad    = true;
+
+    if (0x1E200800U == (instruction & 0xFF200C00U))
+    {
+        // M 0 S 11110 ftype 1 Rm opcode 10 Rn Rd, opcode 01xx.
+        const uint32_t ftype  = (instruction >> 22U) & 0x3U;
+        const uint32_t opcode = (instruction >> 12U) & 0xFU;
+
+        if (ftype > 1U || 0x4U != (opcode & 0xCU))
+        {
+            return false;
+        }
+
+        is_scalar  = true;
+        is_double  = 1U == ftype;
+        is_minimum = 1U == (opcode & 1U);
+    }
+    else if (0x0E20F400U == (instruction & 0xBF20FC00U)
+             || 0x0E20C400U == (instruction & 0xBF20FC00U))
+    {
+        // 0 Q 0 01110 a sz 1 Rm 11110 1 (FMAX, FMIN) or 11000 1 (FMAXNM, FMINNM) Rn Rd.
+        is_double  = 1U == ((instruction >> 22U) & 1U);
+        is_minimum = 1U == ((instruction >> 23U) & 1U);
+        is_quad    = 1U == ((instruction >> 30U) & 1U);
+
+        if (true == is_double && false == is_quad)
+        {
+            return false;
         }
     }
     else
@@ -6634,22 +8000,72 @@ emit_fast_vector_integer(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
     const uint32_t                    rd        = instruction & 0x1FU;
     const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
     const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    const uint8_t                     scalar    = true == is_double ? 0xF2 : 0xF3;
+    const uint8_t                     packed    = true == is_double ? 0x66 : 0U;
+    const uint8_t                     prefix    = true == is_scalar ? scalar : packed;
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
 
-    // Only the cpu structure and xmm registers are involved, so the register cache stays.
-    bal_sliding_window_flush_all(&compiler->window);
-    emit_load_vector(assembler, XMM0, rn, is_quad);
-    emit_load_vector(assembler, XMM1, rm, is_quad);
+    slow_jumps[0] = begin_float_sequence(compiler);
 
-    if (true == is_bic)
+    if (true == is_scalar)
     {
-        emit_sse(assembler, 0x66, false, operation, XMM1, XMM0, "pandn");
-        emit_store_vector(assembler, XMM1, rd, is_quad);
-        return true;
+        emit_load_scalar(assembler, XMM0, rn, is_double);
+        emit_load_scalar(assembler, XMM1, rm, is_double);
+    }
+    else
+    {
+        emit_load_vector(assembler, XMM0, rn, is_quad);
+        emit_load_vector(assembler, XMM1, rm, is_quad);
     }
 
-    emit_sse(assembler, 0x66, false, operation, XMM0, XMM1, "padd/psub/logical");
-    emit_store_vector(assembler, XMM0, rd, is_quad);
+    // Any NaN operand goes to the slow path.
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse_immediate(assembler, prefix, 0xC2, XMM2, XMM1, 3U, "cmpunord");
+    emit_sse(assembler, packed, false, 0x50, (uint8_t)SCRATCH_A, XMM2, "movmskp");
+
+    if (true == is_scalar)
+    {
+        bal_x86_emit_shl_r32_imm8(assembler, SCRATCH_A, 31U);
+    }
+
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    slow_jumps[1] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    // XMM2 = max or min, XMM3 = the lanes where the operands are equal, XMM0 = their AND or OR.
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+    emit_sse(assembler, prefix, false, true == is_minimum ? 0x5D : 0x5F, XMM2, XMM1, "max/min");
+    emit_sse(assembler, 0U, false, 0x28, XMM3, XMM0, "movaps");
+    emit_sse_immediate(assembler, prefix, 0xC2, XMM3, XMM1, 0U, "cmpeq");
+    emit_sse(assembler, 0U, false, true == is_minimum ? 0x56 : 0x54, XMM0, XMM1, "orps/andps");
+    emit_sse(assembler, 0U, false, 0x54, XMM0, XMM3, "andps");
+    emit_sse(assembler, 0U, false, 0x55, XMM3, XMM2, "andnps");
+    emit_sse(assembler, 0U, false, 0x56, XMM0, XMM3, "orps");
+
+    if (true == is_scalar)
+    {
+        // The upper lanes of a scalar operation hold the AND or OR of zeros, so a 64-bit move
+        // gives the zero-extended result.
+        emit_sse(assembler, 0x66, true, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movq");
+
+        if (false == is_double)
+        {
+            bal_x86_emit_mov_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+        }
+
+        emit_store_scalar_result(assembler, rd);
+    }
+    else
+    {
+        emit_store_vector(assembler, XMM0, rd, is_quad);
+    }
+
+    emit_slow_path(compiler,
+                   instruction,
+                   true == is_scalar ? (uint64_t)(uintptr_t)&bal_execute_float
+                                     : (uint64_t)(uintptr_t)&bal_execute_simd,
+                   slow_jumps,
+                   2U);
     return true;
 }
 
@@ -6667,5 +8083,15 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_convert_to_integer(compiler, instruction)
            || emit_fast_move(compiler, instruction) || emit_fast_select(compiler, instruction)
            || emit_fast_duplicate(compiler, instruction)
-           || emit_fast_vector_integer(compiler, instruction);
+           || emit_fast_vector_integer(compiler, instruction)
+           || emit_fast_shift_immediate(compiler, instruction)
+           || emit_fast_vector_misc(compiler, instruction)
+           || emit_fast_float_misc(compiler, instruction)
+           || emit_fast_vector_float_compare(compiler, instruction)
+           || emit_fast_permute(compiler, instruction) || emit_fast_extract(compiler, instruction)
+           || emit_fast_table(compiler, instruction)
+           || emit_fast_modified_immediate(compiler, instruction)
+           || emit_fast_element_move(compiler, instruction)
+           || emit_fast_convert_precision(compiler, instruction)
+           || emit_fast_float_minmax(compiler, instruction);
 }

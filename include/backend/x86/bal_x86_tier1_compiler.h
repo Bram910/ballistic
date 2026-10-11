@@ -33,8 +33,10 @@ extern "C"
         bool has_fma;
         /// Whether the exits of the block being translated may be chained to the next block.
         /// Blocks that raise a guest exception or end on ISB always return to the engine.
-        bool    is_linkable;
-        uint8_t pad1[2];
+        bool is_linkable;
+        /// Whether the host has SSE4.1 (and so SSSE3), which some vector fast paths need.
+        bool    has_sse41;
+        uint8_t pad1[1];
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");

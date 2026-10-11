@@ -10,6 +10,7 @@
 #include "bal_engine_flags.h"
 #include "bal_platform.h"
 
+#include <cpuid.h>
 #include <string.h>
 
 // Set which registers holds the first argument passed to the JIT block based on the OS calling
@@ -248,6 +249,17 @@ static void translate_mov_immediate(bal_tier1_compiler_t                     *co
                                     const bal_decoder_instruction_metadata_t *metadata,
                                     uint32_t                                  instruction);
 
+/// Whether the host has F16C (CPUID.1:ECX bit 29), which __builtin_cpu_supports() cannot test.
+static bool
+host_has_f16c(void)
+{
+    unsigned int eax = 0U;
+    unsigned int ebx = 0U;
+    unsigned int ecx = 0U;
+    unsigned int edx = 0U;
+    return 0 != __get_cpuid(1U, &eax, &ebx, &ecx, &edx) && 0U != (ecx & bit_F16C);
+}
+
 bal_error_t
 bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
                         const bal_executable_buffer_t executable_buffer,
@@ -276,7 +288,7 @@ bal_tier1_compiler_init(bal_tier1_compiler_t         *compiler,
     }
 
     compiler->debug_context = debug_context;
-    compiler->has_fma       = 0 != __builtin_cpu_supports("fma");
+    compiler->has_fma       = 0 != __builtin_cpu_supports("fma") && true == host_has_f16c();
     compiler->has_sse41     = 0 != __builtin_cpu_supports("sse4.1");
     compiler->has_sse42     = 0 != __builtin_cpu_supports("sse4.2");
     bal_error_t error
@@ -10522,6 +10534,271 @@ emit_fast_table_lookup(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// Inline half precision (F16C)
+// -----------------------------------------------------------------------------
+
+/// VCVTPH2PS: the four halves in the low 64 bits of `source` to singles in `destination`, exactly.
+static void
+emit_halves_to_singles(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                       const uint8_t                     destination,
+                       const uint8_t                     source)
+{
+    bal_x86_emit_vex_0f38_register(assembler, false, 0x13, destination, 0U, source, "vcvtph2ps");
+}
+
+/// VCVTPS2PH: the four singles of `source` to halves in the low 64 bits of `destination`,
+/// clearing the rest, rounded as MXCSR says.
+static void
+emit_singles_to_halves(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                       const uint8_t                     destination,
+                       const uint8_t                     source)
+{
+    bal_x86_emit_vex_0f3a_register_immediate(
+        assembler, false, 0x1D, source, 0U, destination, 4U, "vcvtps2ph");
+}
+
+/// Returns a jump to the slow path for a half precision lane of xmm0 that is a NaN, whose NaN
+/// rules differ, or whose magnitude is the smallest normal number, where AArch64, detecting
+/// tininess before rounding, may raise Underflow when x86 does not. Uses xmm1 to xmm3.
+static size_t
+emit_half_checks(bal_x86_assembler_t *BAL_RESTRICT assembler)
+{
+    emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+    emit_broadcast_pattern(assembler, XMM2, 0x7FFF7FFF7FFF7FFFULL);
+    emit_sse(assembler, 0x66, false, 0xDB, XMM1, XMM2, "pand");
+    emit_sse(assembler, 0U, false, 0x28, XMM2, XMM1, "movaps");
+    emit_broadcast_pattern(assembler, XMM3, 0x7C007C007C007C00ULL);
+    emit_sse(assembler, 0x66, false, 0x65, XMM2, XMM3, "pcmpgtw");
+    emit_broadcast_pattern(assembler, XMM3, 0x0400040004000400ULL);
+    emit_sse(assembler, 0x66, false, 0x75, XMM1, XMM3, "pcmpeqw");
+    emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM2, "por");
+    emit_sse(assembler, 0x66, false, 0xD7, (uint8_t)SCRATCH_A, XMM1, "pmovmskb");
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    return emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+}
+
+/// Returns a jump to the slow path when a lane of `xmm` is a NaN, quietly. Uses xmm2.
+static size_t
+emit_nan_check(bal_x86_assembler_t *BAL_RESTRICT assembler, const uint8_t xmm, const bool is_double)
+{
+    const uint8_t packed = true == is_double ? 0x66 : 0U;
+    emit_sse(assembler, 0U, false, 0x28, XMM2, xmm, "movaps");
+    emit_sse_immediate(assembler, packed, 0xC2, XMM2, XMM2, 3U, "cmpunordp");
+    emit_sse(assembler, packed, false, 0x50, (uint8_t)SCRATCH_A, XMM2, "movmskp");
+    bal_x86_emit_test_r32_r32(assembler, SCRATCH_A, SCRATCH_A);
+    return emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+}
+
+/// FADD, FSUB, FMUL, FDIV and FABD (vector) in half precision. The halves convert to single
+/// precision exactly, the operation rounds there and VCVTPS2PH rounds again to half precision:
+/// single precision has more than twice the bits plus two, so the result is the correctly
+/// rounded one, and a single precision result of halves can neither overflow nor be tiny.
+/// emit_half_checks() sends NaNs and the smallest normal magnitude to the slow path.
+static bool
+emit_fast_half_arithmetic(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q U 01110 a 10 Rm 00 opcode 1 Rn Rd.
+    if (0x0E400400U != (instruction & 0x9F60C400U) || false == compiler->has_fma)
+    {
+        return false;
+    }
+
+    const uint32_t key = (((instruction >> 29U) & 1U) << 4U) | (((instruction >> 23U) & 1U) << 3U)
+                         | ((instruction >> 11U) & 0x7U);
+    uint8_t operation = 0U;
+
+    switch (key)
+    {
+        case 0x02U: // FADD
+            operation = 0x58;
+            break;
+        case 0x0AU: // FSUB
+        case 0x1AU: // FABD
+            operation = 0x5C;
+            break;
+        case 0x13U: // FMUL
+            operation = 0x59;
+            break;
+        case 0x17U: // FDIV
+            operation = 0x5E;
+            break;
+        default:
+            return false;
+    }
+
+    const bool                        is_quad   = 1U == ((instruction >> 30U) & 1U);
+    const bool                        is_abs    = 0x1AU == key;
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    const uint32_t                    rm        = (instruction >> 16U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM2, rn, is_quad);
+    emit_load_vector(assembler, XMM3, rm, is_quad);
+    emit_halves_to_singles(assembler, XMM0, XMM2);
+    emit_halves_to_singles(assembler, XMM1, XMM3);
+    emit_sse(assembler, 0U, false, operation, XMM0, XMM1, "op");
+
+    if (true == is_abs)
+    {
+        emit_all_ones(assembler, XMM1);
+        emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM1, 1U, "psrld");
+        emit_sse(assembler, 0U, false, 0x54, XMM0, XMM1, "andps");
+    }
+
+    emit_singles_to_halves(assembler, XMM0, XMM0);
+
+    if (true == is_quad)
+    {
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM2, 8U, "psrldq");
+        emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM3, 8U, "psrldq");
+        emit_halves_to_singles(assembler, XMM1, XMM2);
+        emit_halves_to_singles(assembler, XMM2, XMM3);
+        emit_sse(assembler, 0U, false, operation, XMM1, XMM2, "op");
+
+        if (true == is_abs)
+        {
+            emit_all_ones(assembler, XMM2);
+            emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 1U, "psrld");
+            emit_sse(assembler, 0U, false, 0x54, XMM1, XMM2, "andps");
+        }
+
+        emit_singles_to_halves(assembler, XMM1, XMM1);
+        emit_sse(assembler, 0x66, false, 0x6C, XMM0, XMM1, "punpcklqdq");
+    }
+
+    slow_jumps[1] = emit_half_checks(assembler);
+    emit_store_vector(assembler, XMM0, rd, is_quad);
+    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, 2U);
+    return true;
+}
+
+/// FCVTL and FCVTN (vector), with their "2" forms, between half and single and between single and
+/// double precision. Widening is exact and narrowing rounds once; NaNs take the slow path, as do
+/// narrowed results at the smallest normal magnitude (see emit_half_checks()).
+static bool
+emit_fast_vector_precision(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // 0 Q 0 01110 0 sz 10000 1011 x 10 Rn Rd: FCVTL with x = 1, FCVTN with x = 0.
+    const uint32_t form      = instruction & 0xBFBFFC00U;
+    const bool     is_long   = 0x0E217800U == form;
+    const bool     is_double = 1U == ((instruction >> 22U) & 1U);
+
+    if ((false == is_long && form != 0x0E216800U) || false == compiler->has_fma)
+    {
+        return false;
+    }
+
+    const bool                        is_upper  = 1U == ((instruction >> 30U) & 1U);
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[4];
+    uint32_t                          count = 1U;
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_vector(assembler, XMM0, rn, true);
+
+    if (true == is_long)
+    {
+        if (true == is_upper)
+        {
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 8U, "psrldq");
+        }
+
+        if (true == is_double)
+        {
+            emit_sse(assembler, 0U, false, 0x5A, XMM1, XMM0, "cvtps2pd");
+        }
+        else
+        {
+            emit_halves_to_singles(assembler, XMM1, XMM0);
+        }
+
+        slow_jumps[count++] = emit_nan_check(assembler, XMM1, is_double);
+        emit_store_vector(assembler, XMM1, rd, true);
+    }
+    else
+    {
+        slow_jumps[count++] = emit_nan_check(assembler, XMM0, is_double);
+
+        if (true == is_double)
+        {
+            emit_sse(assembler, 0x66, false, 0x5A, XMM0, XMM0, "cvtpd2ps");
+            count += emit_vector_checks(assembler, false, &slow_jumps[count]);
+        }
+        else
+        {
+            emit_singles_to_halves(assembler, XMM0, XMM0);
+            slow_jumps[count++] = emit_half_checks(assembler);
+        }
+
+        emit_store_narrow(assembler, rd, is_upper);
+    }
+
+    emit_slow_path(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_simd, slow_jumps, count);
+    return true;
+}
+
+/// FCVT (scalar) from half to single or double precision, exact, and from single to half
+/// precision, rounding once. NaNs take the slow path, as do half results at the smallest normal
+/// magnitude.
+static bool
+emit_fast_half_convert(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // FCVT Sd, Hn is 0x1EE24000, FCVT Dd, Hn 0x1EE2C000 and FCVT Hd, Sn 0x1E23C000.
+    const uint32_t form = instruction & 0xFFFFFC00U;
+
+    if ((form != 0x1EE24000U && form != 0x1EE2C000U && form != 0x1E23C000U)
+        || false == compiler->has_fma)
+    {
+        return false;
+    }
+
+    const uint32_t                    rd        = instruction & 0x1FU;
+    const uint32_t                    rn        = (instruction >> 5U) & 0x1FU;
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    size_t                            slow_jumps[2];
+
+    slow_jumps[0] = begin_float_sequence(compiler);
+    emit_load_scalar(assembler, XMM0, rn, false);
+
+    if (0x1E23C000U == form)
+    {
+        slow_jumps[1] = emit_nan_check(assembler, XMM0, false);
+        emit_singles_to_halves(assembler, XMM0, XMM0);
+        const size_t check = emit_half_checks(assembler);
+        emit_sse(assembler, 0x66, false, 0x7E, XMM0, (uint8_t)SCRATCH_A, "movd");
+        bal_x86_emit_shl_r32_imm8(assembler, SCRATCH_A, 16U);
+        bal_x86_emit_shr_r32_imm8(assembler, SCRATCH_A, 16U);
+        emit_store_scalar_result(assembler, rd);
+        const size_t jumps[3] = { slow_jumps[0], slow_jumps[1], check };
+        emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, jumps, 3U);
+        return true;
+    }
+
+    // The bits above the half are cleared, so that only it is converted (into lane 0).
+    const bool is_double = 0x1EE2C000U == form;
+    emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM0, 16U, "pslld");
+    emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM0, 16U, "psrld");
+    emit_halves_to_singles(assembler, XMM1, XMM0);
+    slow_jumps[1] = emit_nan_check(assembler, XMM1, false);
+
+    if (true == is_double)
+    {
+        emit_sse(assembler, 0xF3, false, 0x5A, XMM1, XMM1, "cvtss2sd");
+    }
+
+    emit_sse(assembler, 0x66, is_double, 0x7E, XMM1, (uint8_t)SCRATCH_A, "movd/movq");
+    emit_store_scalar_result(assembler, rd);
+    emit_slow_path(compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_float, slow_jumps, 2U);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -10556,5 +10833,8 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_float_add_pair(compiler, instruction)
            || emit_fast_float_extreme_pair(compiler, instruction)
            || emit_fast_table_lookup(compiler, instruction)
-           || emit_fast_byte_permute(compiler, instruction);
+           || emit_fast_byte_permute(compiler, instruction)
+           || emit_fast_half_arithmetic(compiler, instruction)
+           || emit_fast_vector_precision(compiler, instruction)
+           || emit_fast_half_convert(compiler, instruction);
 }

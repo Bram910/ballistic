@@ -29,7 +29,8 @@ extern "C"
         uint16_t                 pinned_registers;
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
-        /// Whether the host has FMA3, which the fused multiply-add fast paths need.
+        /// Whether the host has FMA3 and F16C, which every CPU with FMA3 also has: the fused
+        /// multiply-add and the half precision fast paths need them.
         bool has_fma;
         /// Whether the exits of the block being translated may be chained to the next block.
         /// Blocks that raise a guest exception or end on ISB always return to the engine.

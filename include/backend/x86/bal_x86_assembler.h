@@ -1584,6 +1584,26 @@ extern "C"
                                         uint8_t              rm,
                                         const char          *mnemonic);
 
+    /// Emits a 128-bit VEX instruction from the 0F3A map with the 66 prefix and an 8-bit
+    /// immediate, such as the F16C VCVTPS2PH: `opcode rm, reg, immediate` on XMM registers 0-15.
+    ///
+    /// # Warning
+    ///
+    /// This function fails if:
+    ///
+    /// - `assembler` is `NULL`.
+    /// - `assembler->status` != [`BAL_SUCCESS`]
+    /// - `assembler->buffer` is full.
+    /// - a register is above 15.
+    void bal_x86_emit_vex_0f3a_register_immediate(bal_x86_assembler_t *assembler,
+                                                  bool                 is_64bit,
+                                                  uint8_t              opcode,
+                                                  uint8_t              reg,
+                                                  uint8_t              vvvv,
+                                                  uint8_t              rm,
+                                                  uint8_t              immediate,
+                                                  const char          *mnemonic);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

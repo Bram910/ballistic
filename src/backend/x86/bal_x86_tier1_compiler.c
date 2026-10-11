@@ -13265,6 +13265,177 @@ emit_fast_saturating_scalar(bal_tier1_compiler_t *BAL_RESTRICT compiler, const u
     return true;
 }
 
+/// Emits a SHA extension instruction `0F map opcode` (no prefix) on two registers, with an 8-bit
+/// immediate for the 0F 3A map.
+static void
+emit_sha(bal_x86_assembler_t *BAL_RESTRICT assembler,
+         const uint8_t                     map,
+         const uint8_t                     opcode,
+         const uint8_t                     reg,
+         const uint8_t                     rm,
+         const uint8_t                     immediate,
+         const char                       *mnemonic)
+{
+    const uint8_t bytes[3] = { 0x0F, map, opcode };
+    bal_x86_emit_sse_register(
+        assembler, 0U, false, bytes, 3U, reg, rm, 0x3A == map, immediate, mnemonic);
+}
+
+/// SHA1H, SHA1SU0 and SHA1SU1 with SSE, and with the SHA extensions SHA1C, SHA1P, SHA1M,
+/// SHA256H, SHA256H2, SHA256SU0 and SHA256SU1.
+///
+/// SHA256SU0 is SHA256MSG1 and SHA256SU1 is SHA256MSG2 after adding Rd to the words
+/// Rm<31:0>:Rn<127:32>. SHA256H and SHA256H2 run two SHA256RNDS2 on the state rearranged from
+/// ABCD and EFGH to x86's ABEF and CDGH. SHA1C, SHA1P and SHA1M are SHA1RNDS4, which numbers the
+/// words the other way round and adds E to the first and the round constant, which AArch64 code
+/// adds to the words itself, to each.
+static bool
+emit_fast_sha(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t instruction)
+{
+    // Three registers: 01011110 000 Rm 0 opcode 00 Rn Rd. Two: 01011110 0010100 00 opcode 10 Rn Rd.
+    const uint32_t three = instruction & 0xFFE0FC00U;
+    const uint32_t two   = instruction & 0xFFFFFC00U;
+    const uint32_t rd    = instruction & 0x1FU;
+    const uint32_t rn    = (instruction >> 5U) & 0x1FU;
+    const uint32_t rm    = (instruction >> 16U) & 0x1FU;
+
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+
+    switch (two)
+    {
+        case 0x5E280800U: // SHA1H: ROL(Sn, 30)
+            bal_sliding_window_flush_all(&compiler->window);
+            bal_x86_emit_load_r64_rbp_offset(
+                assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, v[rn][0]));
+            bal_x86_emit_ror_r32_imm8(assembler, SCRATCH_A, 2U);
+            emit_store_scalar_result(assembler, rd);
+            return true;
+        case 0x5E281800U: // SHA1SU1
+            bal_sliding_window_flush_all(&compiler->window);
+            emit_load_vector(assembler, XMM0, rn, true);
+            emit_sse_immediate(assembler, 0x66, 0x73, 3U, XMM0, 4U, "psrldq");
+            emit_load_vector(assembler, XMM1, rd, true);
+            emit_sse(assembler, 0x66, false, 0xEF, XMM0, XMM1, "pxor");
+
+            // ROL by one, and lane 0 rotated by two into lane 3.
+            emit_sse(assembler, 0U, false, 0x28, XMM1, XMM0, "movaps");
+            emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM1, 1U, "pslld");
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+            emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 31U, "psrld");
+            emit_sse(assembler, 0x66, false, 0xEB, XMM1, XMM2, "por");
+            emit_sse_immediate(assembler, 0x66, 0x73, 7U, XMM0, 12U, "pslldq");
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+            emit_sse_immediate(assembler, 0x66, 0x72, 6U, XMM0, 2U, "pslld");
+            emit_sse_immediate(assembler, 0x66, 0x72, 2U, XMM2, 30U, "psrld");
+            emit_sse(assembler, 0x66, false, 0xEB, XMM0, XMM2, "por");
+            emit_sse(assembler, 0x66, false, 0xEF, XMM1, XMM0, "pxor");
+            emit_store_vector(assembler, XMM1, rd, true);
+            return true;
+        case 0x5E282800U: // SHA256SU0
+            if (false == has_feature(compiler, BAL_TIER1_FEATURE_SHA))
+            {
+                return false;
+            }
+
+            bal_sliding_window_flush_all(&compiler->window);
+            emit_load_vector(assembler, XMM0, rd, true);
+            emit_load_vector(assembler, XMM1, rn, true);
+            emit_sha(assembler, 0x38, 0xCC, XMM0, XMM1, 0U, "sha256msg1");
+            emit_store_vector(assembler, XMM0, rd, true);
+            return true;
+        default:
+            break;
+    }
+
+    switch (three)
+    {
+        case 0x5E003000U: // SHA1SU0: Rn<63:0>:Rd<127:64> ^ Rd ^ Rm
+            bal_sliding_window_flush_all(&compiler->window);
+            emit_load_vector(assembler, XMM0, rd, true);
+            emit_load_vector(assembler, XMM1, rn, true);
+            emit_sse(assembler, 0U, false, 0x28, XMM2, XMM0, "movaps");
+            emit_sse_immediate(assembler, 0U, 0xC6, XMM2, XMM1, 0x4E, "shufps");
+            emit_sse(assembler, 0x66, false, 0xEF, XMM2, XMM0, "pxor");
+            emit_load_vector(assembler, XMM1, rm, true);
+            emit_sse(assembler, 0x66, false, 0xEF, XMM2, XMM1, "pxor");
+            emit_store_vector(assembler, XMM2, rd, true);
+            return true;
+        case 0x5E000000U: // SHA1C
+        case 0x5E001000U: // SHA1P
+        case 0x5E002000U: // SHA1M
+        case 0x5E004000U: // SHA256H
+        case 0x5E005000U: // SHA256H2
+        case 0x5E006000U: // SHA256SU1
+            if (false == has_feature(compiler, BAL_TIER1_FEATURE_SHA))
+            {
+                return false;
+            }
+            break;
+        default:
+            return false;
+    }
+
+    bal_sliding_window_flush_all(&compiler->window);
+
+    if (0x5E006000U == three)
+    {
+        // Rd + Rm<31:0>:Rn<127:32>, then SHA256MSG2 with Rm.
+        emit_load_vector(assembler, XMM0, rm, true);
+        emit_load_vector(assembler, XMM1, rn, true);
+        emit_sse3a(assembler, 0x0F, XMM0, XMM1, 4U, "palignr");
+        emit_load_vector(assembler, XMM1, rd, true);
+        emit_sse(assembler, 0x66, false, 0xFE, XMM0, XMM1, "paddd");
+        emit_load_vector(assembler, XMM1, rm, true);
+        emit_sha(assembler, 0x38, 0xCD, XMM0, XMM1, 0U, "sha256msg2");
+        emit_store_vector(assembler, XMM0, rd, true);
+        return true;
+    }
+
+    if (three >= 0x5E004000U)
+    {
+        // ABCD and EFGH: Rd and Rn for SHA256H, Rn and Rd for SHA256H2. XMM1 = ABEF (lanes F E B
+        // A), XMM2 = CDGH (H G D C), XMM0 = the words, which SHA256RNDS2 reads implicitly.
+        const bool     is_first = 0x5E004000U == three;
+        const uint32_t abcd     = true == is_first ? rd : rn;
+        const uint32_t efgh     = true == is_first ? rn : rd;
+        emit_load_vector(assembler, XMM1, efgh, true);
+        emit_load_vector(assembler, XMM3, abcd, true);
+        emit_sse(assembler, 0U, false, 0x28, XMM2, XMM1, "movaps");
+        emit_sse(assembler, 0x66, false, 0x6C, XMM1, XMM3, "punpcklqdq");
+        emit_sse(assembler, 0x66, false, 0x6D, XMM2, XMM3, "punpckhqdq");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM1, XMM1, 0xB1, "pshufd");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM2, XMM2, 0xB1, "pshufd");
+        emit_load_vector(assembler, XMM0, rm, true);
+        emit_sha(assembler, 0x38, 0xCB, XMM2, XMM1, 0U, "sha256rnds2");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0x0E, "pshufd");
+        emit_sha(assembler, 0x38, 0xCB, XMM1, XMM2, 0U, "sha256rnds2");
+
+        // XMM1 = ABEF and XMM2 = CDGH after four rounds, back to ABCD or EFGH.
+        emit_sse(assembler, 0x66, false, true == is_first ? 0x6D : 0x6C, XMM1, XMM2, "punpckhqdq");
+        emit_sse_immediate(assembler, 0x66, 0x70, XMM1, XMM1, 0xB1, "pshufd");
+        emit_store_vector(assembler, XMM1, rd, true);
+        return true;
+    }
+
+    // SHA1C, SHA1P and SHA1M: the round constants of rounds 0-19, 20-39 and 40-59.
+    static const uint32_t CONSTANTS[3] = { 0x5A827999U, 0x6ED9EBA1U, 0x8F1BBCDCU };
+    const uint32_t        function     = (three >> 12U) & 0x3U;
+    emit_load_vector(assembler, XMM0, rd, true);
+    emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0x1B, "pshufd");
+    emit_load_vector(assembler, XMM1, rm, true);
+    emit_sse_immediate(assembler, 0x66, 0x70, XMM1, XMM1, 0x1B, "pshufd");
+    bal_x86_emit_load_r64_rbp_offset(assembler, SCRATCH_A, (int32_t)offsetof(bal_cpu_t, v[rn][0]));
+    emit_sse(assembler, 0x66, false, 0x6E, XMM2, (uint8_t)SCRATCH_A, "movd");
+    emit_sse_immediate(assembler, 0x66, 0x73, 7U, XMM2, 12U, "pslldq");
+    emit_sse(assembler, 0x66, false, 0xFE, XMM1, XMM2, "paddd");
+    emit_broadcast_pattern(assembler, XMM2, 0x0000000100000001ULL * CONSTANTS[function]);
+    emit_sse(assembler, 0x66, false, 0xFA, XMM1, XMM2, "psubd");
+    emit_sha(assembler, 0x3A, 0xCC, XMM0, XMM1, (uint8_t)function, "sha1rnds4");
+    emit_sse_immediate(assembler, 0x66, 0x70, XMM0, XMM0, 0x1B, "pshufd");
+    emit_store_vector(assembler, XMM0, rd, true);
+    return true;
+}
+
 /// Emits an inline translation of the SIMD&FP data processing instruction when tier 1 has one.
 /// Returns false to leave it to the runtime helpers.
 static bool
@@ -13322,5 +13493,6 @@ emit_fast_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
            || emit_fast_saturating_unary(compiler, instruction)
            || emit_fast_saturating_arithmetic(compiler, instruction)
            || emit_fast_mixed_saturating_add(compiler, instruction)
-           || emit_fast_saturating_scalar(compiler, instruction);
+           || emit_fast_saturating_scalar(compiler, instruction)
+           || emit_fast_sha(compiler, instruction);
 }

@@ -4,6 +4,72 @@
 #include <math.h>
 #include <string.h>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <xmmintrin.h>
+
+// Everything here computes with SSE, whose rounding mode and exception flags live in MXCSR.
+// fesetround(), feclearexcept() and fetestexcept() also keep the x87 unit in step, which makes them
+// many times slower than the MXCSR access they need; these replace them.
+
+static int
+sse_fegetround(void)
+{
+    static const int MODES[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
+    return MODES[(_mm_getcsr() >> 13U) & 3U];
+}
+
+static int
+sse_fesetround(const int mode)
+{
+    const uint32_t control = FE_DOWNWARD == mode     ? 1U
+                             : FE_UPWARD == mode     ? 2U
+                             : FE_TOWARDZERO == mode ? 3U
+                                                     : 0U;
+    const uint32_t current = _mm_getcsr();
+    const uint32_t wanted  = (current & ~0x6000U) | (control << 13U);
+
+    // Writing MXCSR is the slow part, and the mode is usually the one already set.
+    if (wanted != current)
+    {
+        _mm_setcsr(wanted);
+    }
+
+    return 0;
+}
+
+static int
+sse_feclearexcept(const int excepts)
+{
+    (void)excepts;
+    const uint32_t current = _mm_getcsr();
+
+    if (0U != (current & 0x3FU))
+    {
+        _mm_setcsr(current & ~0x3FU);
+    }
+
+    return 0;
+}
+
+static int
+sse_fetestexcept(const int excepts)
+{
+    const uint32_t raised = _mm_getcsr();
+    int            flags  = 0;
+    flags |= 0U != (raised & 0x01U) ? FE_INVALID : 0;
+    flags |= 0U != (raised & 0x04U) ? FE_DIVBYZERO : 0;
+    flags |= 0U != (raised & 0x08U) ? FE_OVERFLOW : 0;
+    flags |= 0U != (raised & 0x10U) ? FE_UNDERFLOW : 0;
+    flags |= 0U != (raised & 0x20U) ? FE_INEXACT : 0;
+    return flags & excepts;
+}
+
+#define fegetround    sse_fegetround
+#define fesetround    sse_fesetround
+#define feclearexcept sse_feclearexcept
+#define fetestexcept  sse_fetestexcept
+#endif
+
 // The helper reads and changes the host floating-point environment, so the compiler must not
 // constant-fold, reorder or speculate floating-point operations across the fenv calls.
 #pragma STDC FENV_ACCESS ON
@@ -1106,12 +1172,14 @@ convert_from_integer(context_t     *context,
     if (PRECISION_DOUBLE == context->precision)
     {
         const double converted = true == is_unsigned ? (double)value : (double)(int64_t)value;
-        result                 = from_double(ldexp(converted, -(int)fraction_bits));
+        result                 = from_double(
+            0U == fraction_bits ? converted : ldexp(converted, -(int)fraction_bits));
     }
     else
     {
         const float converted = true == is_unsigned ? (float)value : (float)(int64_t)value;
-        result                = from_float(ldexpf(converted, -(int)fraction_bits));
+        result                = from_float(
+            0U == fraction_bits ? converted : ldexpf(converted, -(int)fraction_bits));
     }
 
     const uint64_t flags = host_flags() & FPSR_IXC;

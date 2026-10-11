@@ -29,14 +29,16 @@ extern "C"
         uint16_t                 pinned_registers;
         bal_jit_debug_context_t *debug_context;
         bal_error_t              status;
-        /// Whether the host has FMA3, which the fused multiply-add fast paths need.
+        /// Whether the host has FMA3 and F16C, which every CPU with FMA3 also has: the fused
+        /// multiply-add and the half precision fast paths need them.
         bool has_fma;
         /// Whether the exits of the block being translated may be chained to the next block.
         /// Blocks that raise a guest exception or end on ISB always return to the engine.
         bool is_linkable;
         /// Whether the host has SSE4.1 (and so SSSE3), which some vector fast paths need.
-        bool    has_sse41;
-        uint8_t pad1[1];
+        bool has_sse41;
+        /// Whether the host has SSE4.2, whose PCMPGTQ the doubleword comparisons need.
+        bool has_sse42;
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");

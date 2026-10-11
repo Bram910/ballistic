@@ -35,8 +35,9 @@ extern "C"
         /// Blocks that raise a guest exception or end on ISB always return to the engine.
         bool is_linkable;
         /// Whether the host has SSE4.1 (and so SSSE3), which some vector fast paths need.
-        bool    has_sse41;
-        uint8_t pad1[1];
+        bool has_sse41;
+        /// Whether the host has SSE4.2, whose PCMPGTQ the doubleword comparisons need.
+        bool has_sse42;
     } bal_tier1_compiler_t;
 
     static_assert(256 == sizeof(bal_tier1_compiler_t), "Struct size mismatch");

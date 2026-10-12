@@ -7,7 +7,7 @@
 static void fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, uint64_t seed_index);
 
 /// Returns true for the instructions of extensions the Unicorn reference is too old to run, which
-/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128, FEAT_MOPS and FEAT_THE.
+/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128, FEAT_MOPS, FEAT_MTE and FEAT_THE.
 /// Ballistic's unit tests check them instead.
 static bool
 is_newer_than_unicorn(const uint32_t instruction)
@@ -29,6 +29,12 @@ is_newer_than_unicorn(const uint32_t instruction)
         { 0xBF20FC00U, 0x38209000U }, // RCWCLR, RCWSCLR
         { 0xBF20FC00U, 0x3820A000U }, // RCWSWP, RCWSSWP
         { 0xBF20FC00U, 0x3820B000U }, // RCWSET, RCWSSET
+        { 0xBFC0C000U, 0x91800000U }, // ADDG, SUBG
+        { 0xDFE0FC00U, 0x9AC00000U }, // SUBP, SUBPS
+        { 0xFFE0F800U, 0x9AC01000U }, // IRG, GMI
+        { 0xFF200000U, 0xD9200000U }, // LDG, STG, STZG, ST2G, STZ2G and the bulk forms
+        { 0xFE400000U, 0x68000000U }, // STGP
+        { 0xFFE00C00U, 0x1DC00400U }, // SETG*
     };
 
     for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)

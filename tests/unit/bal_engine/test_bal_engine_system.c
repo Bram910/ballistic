@@ -989,6 +989,100 @@ test_Rcw_SoftChecksProtectBitZeroAndTheMask(void)
     TEST_ASSERT_EQUAL_HEX64(0x131U, final);
 }
 
+static void
+test_Mte_RegisterFormsClearTheTag(void)
+{
+    // ADDG X1, X2, #32, #3; SUBG SP, SP, #16, #0; IRG X3, X2; GMI X4, X2, X5; SUBPS X6, X7, X8.
+    const uint32_t program[] = { 0x91820C41U, 0xD18103FFU, 0x9ADF1043U, 0x9AC51444U, 0xBAC800E6U };
+    load_program(program, 5U);
+    g_cpu.x[2]  = 0x0500000000001000ULL;
+    g_cpu.x[5]  = 0x1U;
+    g_cpu.x[7]  = 0xFF00000000000010ULL;
+    g_cpu.x[8]  = 0x20U;
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    // Allocation tag access is disabled at EL0, so the generated tags are zero.
+    TEST_ASSERT_EQUAL_HEX64(0x1020U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0x3EF0U, g_cpu.x[31]);
+    TEST_ASSERT_EQUAL_HEX64(0x1000U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x21U, g_cpu.x[4]);
+    // SUBPS subtracts the sign-extended 56-bit addresses: 0x10 - 0x20.
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFFFFFFFFF0ULL, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_c);
+}
+
+static void
+test_Mte_TagStoresKeepTheirDataEffects(void)
+{
+    // STZG X1, [X2, #16]!; STZ2G X1, [X3], #32; STGP X4, X5, [X6, #16]; LDG X7, [X2].
+    const uint32_t program[] = { 0xD9601C41U, 0xD9E02461U, 0x690094C4U, 0xD9600047U };
+    load_program(program, 4U);
+    (void)memset(g_memory + 0x2000U, 0xFF, 0x300U);
+    g_cpu.x[2] = 0x2000U;
+    g_cpu.x[3] = 0x2100U;
+    g_cpu.x[4] = 0x1111111111111111ULL;
+    g_cpu.x[5] = 0x2222222222222222ULL;
+    g_cpu.x[6] = 0x2200U;
+    g_cpu.x[7] = 0x0A00000000004000ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x2010U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x2120U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x2200U, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_HEX64(0x4000U, g_cpu.x[7]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x200FU]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x2010U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x201FU]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x2020U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x2100U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x211FU]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x2120U]);
+
+    uint64_t pair[2];
+    (void)memcpy(pair, g_memory + 0x2210U, sizeof(pair));
+    TEST_ASSERT_EQUAL_HEX64(0x1111111111111111ULL, pair[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2222222222222222ULL, pair[1]);
+}
+
+static void
+test_Mte_UnalignedTagStoreRaisesDataAbort(void)
+{
+    // STG X1, [X8] at an address that is not 16-byte aligned.
+    const uint32_t program[] = { 0xD9200901U };
+    load_program(program, 1U);
+    g_cpu.x[8] = 0x2208U;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+}
+
+static void
+test_Mte_SetgFillsWholeGranules(void)
+{
+    // SETGP [X0]!, X2!, X3; SETGM; SETGE, then again with a size that is not a granule multiple.
+    const uint32_t program[] = { 0x1DC30440U, 0x1DC34440U, 0x1DC38440U };
+    load_program(program, 3U);
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[2] = 48U;
+    g_cpu.x[3] = 0x5AU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX8(0x5AU, g_memory[0x3000U]);
+    TEST_ASSERT_EQUAL_HEX8(0x5AU, g_memory[0x302FU]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3030U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3030U, g_cpu.x[0]);
+
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    g_cpu.x[0]  = 0x3100U;
+    g_cpu.x[2]  = 40U;
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3100U]);
+}
+
 int
 main(void)
 {
@@ -1024,6 +1118,10 @@ main(void)
     RUN_TEST(test_Mops_UnmappedSetFaultsWithoutWriting);
     RUN_TEST(test_Rcw_OperationsSetTheFlags);
     RUN_TEST(test_Rcw_SoftChecksProtectBitZeroAndTheMask);
+    RUN_TEST(test_Mte_RegisterFormsClearTheTag);
+    RUN_TEST(test_Mte_TagStoresKeepTheirDataEffects);
+    RUN_TEST(test_Mte_UnalignedTagStoreRaisesDataAbort);
+    RUN_TEST(test_Mte_SetgFillsWholeGranules);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

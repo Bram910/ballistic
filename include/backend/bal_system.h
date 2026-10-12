@@ -37,7 +37,8 @@ extern "C"
     uint64_t bal_execute_counter_read(bal_cpu_t *cpu, uint32_t instruction);
 
     /// Returns true if bal_execute_memory_operation() implements `instruction`: the FEAT_MOPS
-    /// CPY* and SET* instructions other than the tag-setting SETG*.
+    /// CPY* and SET* instructions, and the FEAT_MTE SETG*, LDG, STG, STZG, ST2G, STZ2G and STGP,
+    /// with allocation tag access disabled.
     bool bal_is_memory_operation_supported(uint32_t instruction);
 
     /// Executes a FEAT_MOPS memory copy or memory set instruction with option B: the prologue

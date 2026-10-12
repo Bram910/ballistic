@@ -1247,6 +1247,638 @@ multi_vector_memory(sve_t *sve, const uint32_t instruction)
 }
 
 // -----------------------------------------------------------------------------
+// SME2 multi-vector operations
+// -----------------------------------------------------------------------------
+
+/// Whether streaming mode is on, which the multi-vector operations need.
+static bool
+is_streaming(const sve_t *sve)
+{
+    return 0U != (sve->cpu->svcr & SVCR_SM);
+}
+
+/// A BFloat16 value as the single precision value it equals.
+static uint64_t
+bfloat_to_single(const uint64_t value)
+{
+    return (value & 0xFFFFU) << 16U;
+}
+
+/// One floating-point maximum or minimum (`kind` 0 FMAX, 1 FMAXNM, 2 FMIN, 3 FMINNM) of
+/// `esize` bits, BFloat16 when `esize` is 0.
+static uint64_t
+float_extreme(
+    sve_t *sve, const uint32_t esize, const uint32_t kind, const uint64_t a, const uint64_t b)
+{
+    static const bal_float_operation_t OPERATIONS[4] = {
+        BAL_FLOAT_MAXIMUM,
+        BAL_FLOAT_MAXIMUM_NUMBER,
+        BAL_FLOAT_MINIMUM,
+        BAL_FLOAT_MINIMUM_NUMBER,
+    };
+
+    if (0U == esize)
+    {
+        // The result is one of the operands, or a NaN with the low half of a single clear.
+        return fp(sve, 32U, OPERATIONS[kind], bfloat_to_single(a), bfloat_to_single(b), 0U) >> 16U;
+    }
+
+    return fp(sve, esize, OPERATIONS[kind], a, b, 0U);
+}
+
+/// The SME2 multi-vector operations on two or four consecutive vectors, destructive, with one
+/// vector (11000001 size 10 Zm 1010 N Q opc Zdn ...) or as many vectors (11000001 size 1 Zm
+/// 1011 N Q ...) for the second operands: SMAX, UMAX, SMIN, UMIN (opc 0000 op, U in bit 0),
+/// FMAX, FMAXNM, FMIN, FMINNM and the BFloat16 forms (0100 op, o2 in bit 0), SRSHL and URSHL
+/// (10001), ADD (11000, one vector only) and SQDMULH (Q).
+static sve_result_t
+multi_vector_binary(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_multi   = 0U != (instruction & 0x1000U);
+    const uint32_t nreg       = 0U != (instruction & 0x800U) ? 4U : 2U;
+    const bool     is_sqdmulh = 0U != (instruction & 0x400U);
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const uint32_t opc        = (instruction >> 5U) & 0x1FU;
+    const uint32_t low        = instruction & 0x1U;
+    const uint32_t dn         = instruction & (2U == nreg ? 0x1EU : 0x1CU);
+    uint32_t       m;
+
+    if (true == is_multi)
+    {
+        // Zm:0 in bits 20:17 with bit 16 clear, or Zm:00 in bits 20:18 with bits 17:16 clear.
+        if (0U != (instruction & (2U == nreg ? 0x10000U : 0x30000U)))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        m = (instruction >> 16U) & (2U == nreg ? 0x1EU : 0x1CU);
+    }
+    else
+    {
+        m = (instruction >> 16U) & 0xFU;
+    }
+
+    uint32_t kind;
+
+    if (true == is_sqdmulh)
+    {
+        kind = 0U == opc && 0U == low ? 4U : 99U;
+    }
+    else if (0x0U == (opc >> 1U))
+    {
+        kind = 0U; // integer maximum and minimum
+    }
+    else if (0x4U == (opc >> 1U))
+    {
+        kind = 1U; // floating-point maximum and minimum
+    }
+    else if (0x11U == opc)
+    {
+        kind = 2U; // rounding shifts
+    }
+    else if (0x18U == opc && false == is_multi && 0U == low)
+    {
+        kind = 3U; // ADD
+    }
+    else
+    {
+        kind = 99U;
+    }
+
+    if (99U == kind || (4U == nreg && 0U != (instruction & 0x2U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    // BFloat16 (size 00 of the floating-point forms) has 16-bit elements.
+    const uint32_t esize     = 1U == kind && 0U == size ? 16U : 8U << size;
+    const uint32_t elements  = elements_of(esize);
+    const bool     is_signed = 0U == low;
+    vector_t       results[4];
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const vector_t a = read_z(sve, dn + r);
+        const vector_t b = read_z(sve, true == is_multi ? m + r : m);
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t x = get_element(&a, e, esize);
+            const uint64_t y = get_element(&b, e, esize);
+            uint64_t       value;
+
+            switch (kind)
+            {
+                case 0U: {
+                    const bool is_minimum = 0U != (opc & 1U);
+                    const bool greater    = wide(x, esize, is_signed) > wide(y, esize, is_signed);
+                    value                 = greater != is_minimum ? x : y;
+                    break;
+                }
+                case 1U: {
+                    const uint32_t extreme = (low << 1U) | (opc & 1U);
+                    value = float_extreme(sve, 0U == size ? 0U : esize, extreme, x, y);
+                    break;
+                }
+                case 2U:
+                    value = narrow_to(
+                        shift_wide(wide(x, esize, is_signed), sign_extend(y, esize), esize, true),
+                        esize,
+                        SATURATE_NONE);
+                    break;
+                case 3U:
+                    value = x + y;
+                    break;
+                default:
+                    value = doubling_multiply_high(x, y, esize, false);
+                    break;
+            }
+
+            set_element(&results[r], e, esize, value);
+        }
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        write_z(sve, dn + r, results[r]);
+    }
+
+    return SVE_OK;
+}
+
+/// SCLAMP, UCLAMP (11000001 size 1 Zm 1100 N 1 Zn Zd U) and FCLAMP and BFCLAMP (... 1100 N 0
+/// ...): each of two or four consecutive vectors clamped between Zn and Zm.
+static sve_result_t
+multi_vector_clamp(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t nreg       = 0U != (instruction & 0x800U) ? 4U : 2U;
+    const bool     is_integer = 0U != (instruction & 0x400U);
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const uint32_t d          = instruction & (2U == nreg ? 0x1EU : 0x1CU);
+    const bool     is_signed  = 0U == (instruction & 0x1U);
+
+    if ((false == is_integer && 0U != (instruction & 0x1U))
+        || (4U == nreg && 0U != (instruction & 0x2U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t esize = false == is_integer && 0U == size ? 16U : 8U << size;
+    const vector_t low   = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t high  = read_z(sve, (instruction >> 16U) & 0x1FU);
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        vector_t result = read_z(sve, d + r);
+
+        for (uint32_t e = 0U; e < elements_of(esize); ++e)
+        {
+            const uint64_t x = get_element(&result, e, esize);
+            const uint64_t a = get_element(&low, e, esize);
+            const uint64_t b = get_element(&high, e, esize);
+            uint64_t       value;
+
+            if (true == is_integer)
+            {
+                value = wide(a, esize, is_signed) > wide(x, esize, is_signed) ? a : x;
+                value = wide(value, esize, is_signed) > wide(b, esize, is_signed) ? b : value;
+            }
+            else
+            {
+                const uint32_t fsize = 0U == size ? 0U : esize;
+                value = float_extreme(sve, fsize, 3U, float_extreme(sve, fsize, 1U, a, x), b);
+            }
+
+            set_element(&result, e, esize, value);
+        }
+
+        write_z(sve, d + r, result);
+    }
+
+    return SVE_OK;
+}
+
+/// The single precision conversions and roundings of two or four consecutive vectors: FRINTN,
+/// FRINTP, FRINTM and FRINTA (11000001 10 1 N1 opc 111000 ...), FCVTZS and FCVTZU (11000001 00 1 N
+/// 0001 111000 ... U ...) and SCVTF and UCVTF (... 0010 ...).
+static sve_result_t
+multi_vector_convert(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t nreg     = 0U != (instruction & 0x100000U) ? 4U : 2U;
+    const bool     is_round = 0U != (instruction & 0x800000U);
+    // FRINT has bits 21:19 = 1N1, the conversions 1N0.
+    const bool     is_frint_form = 0U != (instruction & 0x80000U);
+    const uint32_t opc           = (instruction >> 16U) & 0x7U;
+    const uint32_t n             = (instruction >> 5U) & (2U == nreg ? 0x1EU : 0x1CU);
+    const uint32_t d             = instruction & (2U == nreg ? 0x1EU : 0x1CU);
+    const bool     is_unsigned   = 0U != (instruction & 0x20U);
+
+    // FRINTN (000), FRINTP (001), FRINTM (010) and FRINTA (100); FCVTZ (001) and SCVTF (010).
+    const bool is_allocated = true == is_round
+                                  ? (opc <= 2U || 4U == opc) && 0U == (instruction & 0x20U)
+                                  : 1U == opc || 2U == opc;
+
+    if (false == is_allocated || is_round != is_frint_form
+        || 0U != (instruction & (2U == nreg ? 0x1U : 0x43U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    static const uint32_t RMODES[5] = { 0U, 1U, 2U, 0U, 4U };
+    const uint64_t        fpcr      = sve->cpu->fpcr;
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        vector_t value = read_z(sve, n + r);
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            const uint64_t x = get_element(&value, e, 32U);
+            uint64_t       result;
+
+            if (true == is_round)
+            {
+                result = bal_float_round_element(fpcr, &sve->flags, 32U, x, RMODES[opc], false);
+            }
+            else if (1U == opc)
+            {
+                result = bal_float_to_integer_element(
+                    fpcr, &sve->flags, 32U, x, 0U, 3U, is_unsigned, 32U);
+            }
+            else
+            {
+                result = bal_float_from_integer_element(
+                    fpcr, &sve->flags, 32U, x, 0U, is_unsigned, 32U);
+            }
+
+            set_element(&value, e, 32U, result);
+        }
+
+        write_z(sve, d + r, value);
+    }
+
+    return SVE_OK;
+}
+
+/// FCVT, FCVTN, BFCVT and BFCVTN from two single precision vectors to one (11000001 0 op
+/// 100000111000 Zn N Zd), in halves or interleaved (N), and FCVT and FCVTL from one half
+/// precision vector to two (11000001 10100000111000 Zn Zd L).
+static sve_result_t
+multi_vector_float_convert(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_widening = 0U != (instruction & 0x800000U);
+
+    if (true == is_widening && 0U != (instruction & 0x400000U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint64_t fpcr = sve->cpu->fpcr;
+
+    if (true == is_widening)
+    {
+        const bool     is_interleaved = 0U != (instruction & 0x1U);
+        const uint32_t d              = instruction & 0x1EU;
+        const vector_t source         = read_z(sve, (instruction >> 5U) & 0x1FU);
+        vector_t       results[2];
+
+        for (uint32_t e = 0U; e < 8U; ++e)
+        {
+            const uint64_t value = bal_float_convert_element(
+                fpcr, &sve->flags, 16U, 32U, get_element(&source, e, 16U));
+
+            if (true == is_interleaved)
+            {
+                set_element(&results[e & 1U], e / 2U, 32U, value);
+            }
+            else
+            {
+                set_element(&results[e / 4U], e % 4U, 32U, value);
+            }
+        }
+
+        write_z(sve, d, results[0]);
+        write_z(sve, d + 1U, results[1]);
+        return SVE_OK;
+    }
+
+    const bool     is_bfloat      = 0U != (instruction & 0x400000U);
+    const bool     is_interleaved = 0U != (instruction & 0x20U);
+    const uint32_t n              = (instruction >> 5U) & 0x1EU;
+    vector_t       result         = { { 0U, 0U } };
+
+    for (uint32_t r = 0U; r < 2U; ++r)
+    {
+        const vector_t source = read_z(sve, n + r);
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            const uint64_t x     = get_element(&source, e, 32U);
+            const uint64_t value = true == is_bfloat
+                                       ? bal_float_to_bfloat16_element(fpcr, &sve->flags, x)
+                                       : bal_float_convert_element(fpcr, &sve->flags, 32U, 16U, x);
+            set_element(&result, true == is_interleaved ? 2U * e + r : 4U * r + e, 16U, value);
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SUNPK and UUNPK (11000001 size 1 N 0101111000 Zn Zd U): the elements of one or two vectors
+/// extended to twice their size into two or four.
+static sve_result_t
+multi_vector_unpack(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t nreg = 0U != (instruction & 0x100000U) ? 4U : 2U;
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0U == size || (4U == nreg && 0U != (instruction & 0x22U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t esize     = 8U << size;
+    const uint32_t half      = esize / 2U;
+    const uint32_t elements  = elements_of(esize);
+    const bool     is_signed = 0U == (instruction & 0x1U);
+    const uint32_t n         = (instruction >> 5U) & (2U == nreg ? 0x1FU : 0x1EU);
+    const uint32_t d         = instruction & (2U == nreg ? 0x1EU : 0x1CU);
+    vector_t       results[4];
+
+    for (uint32_t r = 0U; r < nreg / 2U; ++r)
+    {
+        const vector_t source = read_z(sve, n + r);
+
+        for (uint32_t i = 0U; i < 2U; ++i)
+        {
+            for (uint32_t e = 0U; e < elements; ++e)
+            {
+                set_element(
+                    &results[2U * r + i],
+                    e,
+                    esize,
+                    narrow_to(wide(get_element(&source, i * elements + e, half), half, is_signed),
+                              esize,
+                              SATURATE_NONE));
+            }
+        }
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        write_z(sve, d + r, results[r]);
+    }
+
+    return SVE_OK;
+}
+
+/// ZIP and UZP of two vectors into two (11000001 size 1 Zm 11010 Q Zn Zd op) and of four into
+/// four (11000001 size 1 10110 Q 111000 Zn 00 Zd op 0), with quadwords for Q.
+static sve_result_t
+multi_vector_permute(sve_t *sve, const uint32_t instruction)
+{
+    // Four registers have bits 15:13 = 111, two 110; Q is bit 16 or bit 10.
+    const bool is_four = 0U != (instruction & 0x2000U);
+    const bool is_quad
+        = true == is_four ? 0U != (instruction & 0x10000U) : 0U != (instruction & 0x400U);
+    const uint32_t esize  = true == is_quad ? 128U : 8U << ((instruction >> 22U) & 0x3U);
+    const uint32_t nreg   = true == is_four ? 4U : 2U;
+    const bool     is_uzp = 0U != (instruction & (true == is_four ? 0x2U : 0x1U));
+
+    if ((true == is_quad && 0U != (instruction & 0xC00000U))
+        || (true == is_four && 0U != (instruction & 0x61U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    // The elements of one register must split into the groups.
+    if (VECTOR_BITS < esize * nreg)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t groups = VECTOR_BITS / (esize * nreg);
+    const uint32_t d      = instruction & (true == is_four ? 0x1CU : 0x1EU);
+    vector_t       sources[4];
+    vector_t       results[4];
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const uint32_t source = true == is_four ? ((instruction >> 5U) & 0x1CU) + r
+                                                : (0U == r ? (instruction >> 5U) & 0x1FU
+                                                           : (instruction >> 16U) & 0x1FU);
+        sources[r]            = read_z(sve, source);
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        for (uint32_t q = 0U; q < groups; ++q)
+        {
+            for (uint32_t i = 0U; i < nreg; ++i)
+            {
+                // ZIP puts element base + q of each source in turn; UZP deals each source's
+                // groups out to the results.
+                const uint32_t to   = true == is_uzp ? r * groups + q : nreg * q + i;
+                const uint32_t from = true == is_uzp ? nreg * q + i : r * groups + q;
+                const uint32_t into = true == is_uzp ? i : r;
+                const uint32_t of   = true == is_uzp ? r : i;
+
+                if (128U == esize)
+                {
+                    results[into] = sources[of];
+                }
+                else
+                {
+                    set_element(&results[into], to, esize, get_element(&sources[of], from, esize));
+                }
+            }
+        }
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        write_z(sve, d + r, results[r]);
+    }
+
+    return SVE_OK;
+}
+
+/// SEL of two or four consecutive vectors (11000001 size 1 Zm 0100 PNg Zn 0 Zd 0, or ... 01100
+/// ...), from Zn where the predicate-as-counter register is active and Zm elsewhere.
+static sve_result_t
+multi_vector_select(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t nreg = 0U != (instruction & 0x10000U) ? 4U : 2U;
+
+    if (0U != (instruction & (2U == nreg ? 0x21U : 0x20063U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t esize     = 8U << ((instruction >> 22U) & 0x3U);
+    const uint32_t mask_bits = 2U == nreg ? 0x1EU : 0x1CU;
+    const uint32_t n         = (instruction >> 5U) & mask_bits;
+    const uint32_t m         = (instruction >> 16U) & mask_bits;
+    const uint32_t d         = instruction & mask_bits;
+    const uint64_t mask = counter_to_predicate(read_p(sve, 8U + ((instruction >> 10U) & 0x7U)));
+    vector_t       results[4];
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const vector_t a = read_z(sve, n + r);
+        const vector_t b = read_z(sve, m + r);
+
+        for (uint32_t e = 0U; e < elements_of(esize); ++e)
+        {
+            const bool active = is_active((uint16_t)(mask >> (16U * r)), e, esize);
+            set_element(&results[r], e, esize, get_element(true == active ? &a : &b, e, esize));
+        }
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        write_z(sve, d + r, results[r]);
+    }
+
+    return SVE_OK;
+}
+
+/// The saturating narrowing conversions and shifts of two or four vectors into one: SQCVT,
+/// UQCVT and SQCVTU of two (11000001 0 op 100011111000 Zn U Zd) and four (11000001 sz op
+/// 110011111000 Zn N U Zd), and SQRSHR, UQRSHR and SQRSHRU of two (11000001111 op imm4 110101 Zn
+/// U Zd) and four (11000001 tsize 1 imm5 11011 N Zn op U Zd), in quarters or interleaved (N).
+static sve_result_t
+multi_vector_narrow(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_shift_four = 0xD800U == (instruction & 0xF800U);
+    const bool is_shift_two  = 0xD400U == (instruction & 0xFC00U);
+    const bool is_shift      = true == is_shift_four || true == is_shift_two;
+    // Two registers: the shifts above, and the conversions with bit 20 clear.
+    const bool is_two      = true == is_shift ? is_shift_two : 0U == (instruction & 0x100000U);
+    const bool is_unsigned = 0U != (instruction & 0x20U);
+    bool       op;
+    uint32_t   esize;
+    uint32_t   shift          = 0U;
+    bool       is_interleaved = false;
+
+    if (true == is_shift)
+    {
+        op = 0U != (instruction & (true == is_two ? 0x100000U : 0x40U));
+
+        if (true == is_two)
+        {
+            esize = 16U;
+            shift = 16U - ((instruction >> 16U) & 0xFU);
+        }
+        else
+        {
+            const uint32_t tsize = (instruction >> 22U) & 0x3U;
+
+            if (0U == tsize)
+            {
+                return SVE_UNDEFINED;
+            }
+
+            esize          = 1U == tsize ? 8U : 16U;
+            shift          = 8U * esize - ((tsize << 5U) | ((instruction >> 16U) & 0x1FU));
+            is_interleaved = 0U != (instruction & 0x400U);
+        }
+    }
+    else
+    {
+        op = 0U != (instruction & 0x400000U);
+
+        if (true == is_two)
+        {
+            esize = 16U;
+        }
+        else
+        {
+            esize          = 8U << ((instruction >> 23U) & 1U);
+            is_interleaved = 0U != (instruction & 0x40U);
+        }
+    }
+
+    // The unsigned conversions of a signed source have op set and U clear.
+    if (true == op && true == is_unsigned)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_streaming(sve))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t   nreg      = true == is_two ? 2U : 4U;
+    const uint32_t   wide_size = esize * nreg;
+    const uint32_t   elements  = VECTOR_BITS / wide_size;
+    const uint32_t   n         = (instruction >> 5U) & (2U == nreg ? 0x1EU : 0x1CU);
+    const saturate_t mode = true == is_unsigned || true == op ? SATURATE_UNSIGNED : SATURATE_SIGNED;
+    vector_t         result = { { 0U, 0U } };
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const vector_t source = read_z(sve, n + r);
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            __int128 value
+                = wide(get_element(&source, e, wide_size), wide_size, false == is_unsigned);
+
+            if (0U != shift)
+            {
+                value = (value + ((__int128)1 << (shift - 1U))) >> shift;
+            }
+
+            set_element(&result,
+                        true == is_interleaved ? nreg * e + r : r * elements + e,
+                        esize,
+                        narrow_to(value, esize, mode));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
 
@@ -1276,6 +1908,21 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFF80000U, 0xC0C80000U, table_lookup_zt0 },
     { 0xFFE80000U, 0xC0880000U, table_lookup_zt0 },
     { 0xFE800000U, 0xA0000000U, multi_vector_memory },
+    { 0xFFE0FC00U, 0xC1E0D400U, multi_vector_narrow },
+    { 0xFF20F800U, 0xC120D800U, multi_vector_narrow },
+    { 0xFFBFFC00U, 0xC123E000U, multi_vector_narrow },
+    { 0xFF3FFC00U, 0xC133E000U, multi_vector_narrow },
+    { 0xFFBFFC00U, 0xC120E000U, multi_vector_float_convert },
+    { 0xFFFFFC00U, 0xC1A0E000U, multi_vector_float_convert },
+    { 0xFF2FFC00U, 0xC125E000U, multi_vector_unpack },
+    { 0xFF3EFC00U, 0xC136E000U, multi_vector_permute },
+    { 0xFFE8FC00U, 0xC1A8E000U, multi_vector_convert },
+    { 0xFFE8FC00U, 0xC120E000U, multi_vector_convert },
+    { 0xFF20F800U, 0xC120D000U, multi_vector_permute },
+    { 0xFF20F000U, 0xC120C000U, multi_vector_clamp },
+    { 0xFF30F000U, 0xC120A000U, multi_vector_binary },
+    { 0xFF20F000U, 0xC120B000U, multi_vector_binary },
+    { 0xFF20E000U, 0xC1208000U, multi_vector_select },
 };
 
 sve_result_t

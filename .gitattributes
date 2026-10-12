@@ -1,2 +1,4 @@
 # Exclude all files in the 'vendor' directory and its subdirectories
 extern/** linguist-vendored
+# Shell scripts keep LF endings so they run from Windows checkouts under WSL.
+*.sh text eol=lf

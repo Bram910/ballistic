@@ -1291,7 +1291,15 @@ duplicate_indexed(sve_t *sve, const uint32_t instruction)
     const uint32_t imm    = (((instruction >> 22U) & 0x3U) << 5U) | tsz;
     const uint32_t index  = imm >> (lowest + 1U);
     const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
-    const uint64_t value  = index < elements_of(esize) ? get_element(&n, index, esize) : 0U;
+
+    // A quadword element is the whole vector.
+    if (128U == esize)
+    {
+        write_z(sve, instruction & 0x1FU, 0U == index ? n : (vector_t) { { 0U, 0U } });
+        return SVE_OK;
+    }
+
+    const uint64_t value = index < elements_of(esize) ? get_element(&n, index, esize) : 0U;
     write_z(sve,
             instruction & 0x1FU,
             index < elements_of(esize) ? replicate(value, esize) : (vector_t) { { 0U, 0U } });
@@ -1543,6 +1551,465 @@ integer_immediate(sve_t *sve, const uint32_t instruction)
     }
 
     write_z(sve, rdn, result);
+    return SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
+// Permutes
+// -----------------------------------------------------------------------------
+
+/// The `esize / 8`-bit field of predicate element `index`.
+static uint32_t
+get_predicate_field(const uint16_t predicate, const uint32_t index, const uint32_t esize)
+{
+    const uint32_t bits = esize / 8U;
+    return ((uint32_t)predicate >> (index * bits)) & ((1U << bits) - 1U);
+}
+
+static uint16_t
+set_predicate_field(uint16_t       predicate,
+                    const uint32_t index,
+                    const uint32_t esize,
+                    const uint32_t value)
+{
+    const uint32_t bits  = esize / 8U;
+    const uint32_t shift = index * bits;
+    const uint32_t mask  = ((1U << bits) - 1U) << shift;
+    return (uint16_t)((predicate & ~mask) | ((value << shift) & mask));
+}
+
+/// The index of the last active element of `mask`, or -1.
+static int32_t
+last_active(const uint16_t mask, const uint32_t esize)
+{
+    int32_t last = -1;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(mask, e, esize))
+        {
+            last = (int32_t)e;
+        }
+    }
+
+    return last;
+}
+
+/// ZIP1, ZIP2, UZP1, UZP2, TRN1 and TRN2 on elements `get` reads from the two operands, for
+/// vectors (00000101 size 1 Zm 011 opc Zn Zd) and predicates (00000101 size 10 Pm 010 opc 0 Pn 0
+/// Pd).
+static uint32_t
+permute_source(const uint32_t opc, const uint32_t e, const uint32_t elements, bool *from_second)
+{
+    const uint32_t half = elements / 2U;
+
+    switch (opc)
+    {
+        case 0U: // ZIP1
+        case 1U: // ZIP2
+            *from_second = 1U == (e & 1U);
+            return (0U == opc ? 0U : half) + e / 2U;
+        case 2U: // UZP1
+        case 3U: // UZP2
+        {
+            const uint32_t index = 2U * e + (opc - 2U);
+            *from_second         = index >= elements;
+            return index % elements;
+        }
+        default: // TRN1, TRN2
+            *from_second = 1U == (e & 1U);
+            return (e & ~1U) + (opc - 4U);
+    }
+}
+
+static sve_result_t
+permute_vectors(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t opc   = (instruction >> 10U) & 0x7U;
+    const uint32_t esize = size_at_22(instruction);
+
+    if (opc > 5U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        bool           from_second = false;
+        const uint32_t source      = permute_source(opc, e, elements_of(esize), &from_second);
+        set_element(&result, e, esize, get_element(true == from_second ? &m : &n, source, esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+static sve_result_t
+permute_predicates(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t opc   = (instruction >> 10U) & 0x7U;
+    const uint32_t esize = size_at_22(instruction);
+
+    if (opc > 5U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t n      = read_p(sve, (instruction >> 5U) & 0xFU);
+    const uint16_t m      = read_p(sve, (instruction >> 16U) & 0xFU);
+    uint16_t       result = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        bool           from_second = false;
+        const uint32_t source      = permute_source(opc, e, elements_of(esize), &from_second);
+        result                     = set_predicate_field(
+            result, e, esize, get_predicate_field(true == from_second ? m : n, source, esize));
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    return SVE_OK;
+}
+
+/// PUNPKLO and PUNPKHI: 00000101 00110 00 H 0100000 Pn 0 Pd.
+static sve_result_t
+unpack_predicate(sve_t *sve, const uint32_t instruction)
+{
+    const uint16_t n      = read_p(sve, (instruction >> 5U) & 0xFU);
+    const uint32_t base   = 0U != (instruction & 0x10000U) ? 8U : 0U;
+    uint16_t       result = 0U;
+
+    for (uint32_t e = 0U; e < 8U; ++e)
+    {
+        result = set_predicate_field(result, e, 16U, (n >> (base + e)) & 1U);
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    return SVE_OK;
+}
+
+/// REV (predicate, 00000101 size 110100 0100000 Pn 0 Pd, and vector, ... 111000 001110 Zn Zd).
+static sve_result_t
+reverse_elements(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize    = size_at_22(instruction);
+    const uint32_t elements = elements_of(esize);
+
+    if (0U != (instruction & 0x4000U))
+    {
+        const uint16_t n      = read_p(sve, (instruction >> 5U) & 0xFU);
+        uint16_t       result = 0U;
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            result = set_predicate_field(
+                result, e, esize, get_predicate_field(n, elements - 1U - e, esize));
+        }
+
+        sve->cpu->p[instruction & 0xFU] = result;
+        return SVE_OK;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        set_element(&result, e, esize, get_element(&n, elements - 1U - e, esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SUNPKLO, SUNPKHI, UUNPKLO and UUNPKHI: 00000101 size 1100 U H 001110 Zn Zd.
+static sve_result_t
+unpack_vector(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+
+    if (8U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool     is_unsigned = 0U != (instruction & 0x20000U);
+    const uint32_t base        = 0U != (instruction & 0x10000U) ? elements_of(esize) : 0U;
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result      = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t half = get_element(&n, base + e, esize / 2U);
+        set_element(&result,
+                    e,
+                    esize,
+                    true == is_unsigned ? half : (uint64_t)sign_extend(half, esize / 2U));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// REVB, REVH, REVW and RBIT (predicated): 00000101 size 1001 opc 100 Pg Zn Zd.
+static sve_result_t
+reverse_within_elements(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t opc   = (instruction >> 16U) & 0x3U;
+    const uint32_t esize = size_at_22(instruction);
+    // The size of the units reversed: bytes, halfwords, words or bits.
+    const uint32_t unit = 3U == opc ? 1U : 8U << opc;
+
+    if (unit != 1U && unit >= esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t rd     = instruction & 0x1FU;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    vector_t       result = read_z(sve, rd);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        const uint64_t value    = get_element(&n, e, esize);
+        uint64_t       reversed = 0U;
+
+        for (uint32_t i = 0U; i < esize / unit; ++i)
+        {
+            const uint64_t part = (value >> (i * unit)) & mask_of(unit);
+            reversed |= part << ((esize / unit - 1U - i) * unit);
+        }
+
+        set_element(&result, e, esize, reversed);
+    }
+
+    write_z(sve, rd, result);
+    return SVE_OK;
+}
+
+/// TBL (00000101 size 1 Zm 001100 Zn Zd), the two-register TBL (... 001010 ...) and TBX (...
+/// 001011 ...).
+static sve_result_t
+table_lookup(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+    const uint32_t mode  = (instruction >> 10U) & 0x7U; // 100 TBL, 010 two registers, 011 TBX
+
+    if (mode < 2U || mode > 4U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t elements = elements_of(esize);
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const vector_t first    = read_z(sve, rn);
+    const vector_t second   = read_z(sve, (rn + 1U) & 0x1FU);
+    const vector_t indices  = read_z(sve, (instruction >> 16U) & 0x1FU);
+    const uint32_t rd       = instruction & 0x1FU;
+    vector_t       result   = 3U == mode ? read_z(sve, rd) : (vector_t) { { 0U, 0U } };
+    const uint32_t table    = 2U == mode ? 2U * elements : elements;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        const uint64_t index = get_element(&indices, e, esize);
+
+        if (index < table)
+        {
+            const vector_t *source = index < elements ? &first : &second;
+            set_element(
+                &result, e, esize, get_element(source, (uint32_t)(index % elements), esize));
+        }
+        else if (mode != 3U)
+        {
+            set_element(&result, e, esize, 0U);
+        }
+    }
+
+    write_z(sve, rd, result);
+    return SVE_OK;
+}
+
+/// EXT (destructive, 00000101 001 imm8h Zm 000 imm8l Zn... Zdn, and constructive, 00000101 011
+/// imm8h 000 imm8l Zn Zd, which takes Zn and Zn+1).
+static sve_result_t
+extract_vector(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_constructive = 0U != (instruction & 0x400000U);
+    const uint32_t imm8 = (((instruction >> 16U) & 0x1FU) << 3U) | ((instruction >> 10U) & 0x7U);
+    const uint32_t position = imm8 >= BAL_SVE_VECTOR_BYTES ? 0U : imm8;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const vector_t low      = true == is_constructive ? read_z(sve, rn) : read_z(sve, rd);
+    const vector_t high
+        = true == is_constructive ? read_z(sve, (rn + 1U) & 0x1FU) : read_z(sve, rn);
+    vector_t result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < BAL_SVE_VECTOR_BYTES; ++e)
+    {
+        const uint32_t source = e + position;
+        set_element(&result,
+                    e,
+                    8U,
+                    source < BAL_SVE_VECTOR_BYTES
+                        ? get_element(&low, source, 8U)
+                        : get_element(&high, source - BAL_SVE_VECTOR_BYTES, 8U));
+    }
+
+    write_z(sve, rd, result);
+    return SVE_OK;
+}
+
+/// SPLICE (destructive, 00000101 size 101100 100 Pg Zm Zdn, and constructive, ... 101101 ...,
+/// which takes Zn and Zn+1).
+static sve_result_t
+splice_vectors(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize           = size_at_22(instruction);
+    const bool     is_constructive = 0U != (instruction & 0x10000U);
+    const uint32_t rd              = instruction & 0x1FU;
+    const uint32_t r5              = (instruction >> 5U) & 0x1FU;
+    const uint16_t pg              = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t first           = true == is_constructive ? read_z(sve, r5) : read_z(sve, rd);
+    const vector_t second
+        = true == is_constructive ? read_z(sve, (r5 + 1U) & 0x1FU) : read_z(sve, r5);
+    const int32_t last   = last_active(pg, esize);
+    vector_t      result = { { 0U, 0U } };
+    uint32_t      x      = 0U;
+    bool          active = false;
+
+    for (int32_t e = 0; e <= last; ++e)
+    {
+        active = active || is_active(pg, (uint32_t)e, esize);
+
+        if (true == active)
+        {
+            set_element(&result, x++, esize, get_element(&first, (uint32_t)e, esize));
+        }
+    }
+
+    for (uint32_t e = 0U; x < elements_of(esize); ++e)
+    {
+        set_element(&result, x++, esize, get_element(&second, e, esize));
+    }
+
+    write_z(sve, rd, result);
+    return SVE_OK;
+}
+
+/// COMPACT: 00000101 size 100001 100 Pg Zn Zd.
+static sve_result_t
+compact_vector(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+
+    if (esize < 32U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    vector_t       result = { { 0U, 0U } };
+    uint32_t       x      = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            set_element(&result, x++, esize, get_element(&n, e, esize));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// LASTA and LASTB to a general purpose register (00000101 size 10000 B 101 Pg Zn Rd) or a
+/// SIMD&FP one (... 10001 B 100 Pg Zn Vd), and CLASTA and CLASTB to a vector (... 10100 B 100 Pg
+/// Zm Zdn), a SIMD&FP register (... 10101 B 100 Pg Zm Vdn) or a general purpose one (... 11000 B
+/// 101 Pg Zm Rdn).
+static sve_result_t
+last_element(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize          = size_at_22(instruction);
+    const uint32_t kind           = (instruction >> 17U) & 0xFU; // bits 20:17
+    const bool     is_before      = 0U != (instruction & 0x10000U);
+    const bool     is_general     = 0U != (instruction & 0x2000U);
+    const bool     is_conditional = kind >= 4U;
+    const uint32_t rd             = instruction & 0x1FU;
+    const vector_t n              = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const uint16_t pg             = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint32_t elements       = elements_of(esize);
+    int32_t        last           = last_active(pg, esize);
+
+    // kind: 0000 LAST to general (with bit 13), 0001 LAST to SIMD&FP, 0100 CLAST vector, 0101
+    // CLAST SIMD&FP, 1000 CLAST general (with bit 13).
+    const bool to_vector = 4U == kind;
+    const bool valid     = (0U == kind && true == is_general) || (1U == kind && false == is_general)
+                       || (4U == kind && false == is_general) || (5U == kind && false == is_general)
+                       || (8U == kind && true == is_general);
+
+    if (false == valid)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (true == is_conditional && last < 0)
+    {
+        // No active element: the destination keeps its low element, zero extended.
+        if (true == to_vector)
+        {
+            return SVE_OK;
+        }
+
+        if (true == is_general)
+        {
+            write_x(sve, rd, read_x(sve, rd) & mask_of(esize));
+        }
+        else
+        {
+            vector_t result = { { sve->cpu->v[rd][0] & mask_of(esize), 0U } };
+            write_z(sve, rd, result);
+        }
+
+        return SVE_OK;
+    }
+
+    if (false == is_before)
+    {
+        last = last + 1 >= (int32_t)elements ? 0 : last + 1;
+    }
+    else if (last < 0)
+    {
+        last = (int32_t)elements - 1;
+    }
+
+    const uint64_t value = get_element(&n, (uint32_t)last, esize);
+
+    if (true == to_vector)
+    {
+        write_z(sve, rd, replicate(value, esize));
+    }
+    else if (true == is_general)
+    {
+        write_x(sve, rd, value);
+    }
+    else
+    {
+        vector_t result = { { value, 0U } };
+        write_z(sve, rd, result);
+    }
+
     return SVE_OK;
 }
 
@@ -2357,6 +2824,18 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFF3FE000U, 0x05208000U, copy_scalar },
     { 0xFF20C000U, 0x0520C000U, select_vectors },
     { 0xFF20C000U, 0x2520C000U, integer_immediate },
+    { 0xFF20E000U, 0x05206000U, permute_vectors },
+    { 0xFF30E210U, 0x05204000U, permute_predicates },
+    { 0xFFFEFE10U, 0x05304000U, unpack_predicate },
+    { 0xFF3FFE10U, 0x05344000U, reverse_elements },
+    { 0xFF3FFC00U, 0x05383800U, reverse_elements },
+    { 0xFF3CFC00U, 0x05303800U, unpack_vector },
+    { 0xFF3CE000U, 0x05248000U, reverse_within_elements },
+    { 0xFF20F000U, 0x05202000U, table_lookup },
+    { 0xFFA0E000U, 0x05200000U, extract_vector },
+    { 0xFF3EE000U, 0x052C8000U, splice_vectors },
+    { 0xFF3FE000U, 0x05218000U, compact_vector },
+    { 0xFF20C000U, 0x05208000U, last_element },
     { 0xFF3EFC10U, 0x2518E000U, predicate_true },
     { 0xFFFFFFF0U, 0x2518E400U, predicate_false },
     { 0xFFFFFFF0U, 0x2519F000U, read_ffr },

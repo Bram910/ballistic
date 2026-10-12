@@ -1106,6 +1106,146 @@ table_lookup_zt0(sve_t *sve, const uint32_t instruction)
     return SVE_OK;
 }
 
+/// CounterToPredicate(): the predicate a predicate-as-counter register describes, for four
+/// vectors, one 16-bit predicate per 16 bits of the result. The low set bit of bits 3:0 gives
+/// the element size, the bits above it up to bit 6 the number of leading active elements, and
+/// bit 15 inverts.
+static uint64_t
+counter_to_predicate(const uint16_t counter)
+{
+    if (0U == (counter & 0xFU))
+    {
+        return 0U;
+    }
+
+    const uint32_t shift  = (uint32_t)__builtin_ctz(counter & 0xFU);
+    const uint32_t psize  = 1U << shift;
+    const uint32_t count  = (counter >> (shift + 1U)) & ((1U << (6U - shift)) - 1U);
+    const bool     invert = 0U != (counter & 0x8000U);
+    uint64_t       result = 0U;
+
+    for (uint32_t e = 0U; e < 64U / psize; ++e)
+    {
+        if ((e < count) != invert)
+        {
+            result |= 1ULL << (e * psize);
+        }
+    }
+
+    return result;
+}
+
+/// The SME2 multi-vector contiguous loads and stores: LD1, LDNT1, ST1 and STNT1 of two or four
+/// consecutive (1010000 0 0 1 S imm4, or 0 0 S Rm, ...) or strided (1010000 1 ...) vectors,
+/// governed by a predicate-as-counter register PN8-PN15. Inactive elements load as zero.
+static sve_result_t
+multi_vector_memory(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_strided   = 0U != (instruction & 0x1000000U);
+    const bool     is_immediate = 0U != (instruction & 0x400000U);
+    const bool     is_store     = 0U != (instruction & 0x200000U);
+    const uint32_t nreg         = 0U != (instruction & 0x8000U) ? 4U : 2U;
+    const uint32_t mbytes       = 1U << ((instruction >> 13U) & 0x3U);
+    const uint32_t field        = instruction & 0x1FU;
+    uint32_t       t;
+    uint32_t       stride;
+
+    if (true == is_immediate && 0U != (instruction & 0x100000U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (true == is_strided)
+    {
+        // T:0:Zt for two registers (stride 8) and T:00:Zt for four (stride 4), N in bit 3.
+        if (4U == nreg && 0U != (instruction & 0x4U))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        t      = (field & 0x10U) | (field & (2U == nreg ? 0x7U : 0x3U));
+        stride = 2U == nreg ? 8U : 4U;
+    }
+    else
+    {
+        // Zt:0 or Zt:00, N in bit 0.
+        if (4U == nreg && 0U != (instruction & 0x2U))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        t      = field & (2U == nreg ? 0x1EU : 0x1CU);
+        stride = 1U;
+    }
+
+    // The consecutive forms are also SVE2.1 instructions, which do not need streaming mode.
+    if (true == is_strided && 0U == (sve->cpu->svcr & SVCR_SM))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t esize    = 8U * mbytes;
+    const uint32_t elements = SVL_BYTES / mbytes;
+    const uint64_t mask     = counter_to_predicate(read_p(sve, 8U + ((instruction >> 10U) & 0x7U)));
+    const uint64_t base     = sve->cpu->x[(instruction >> 5U) & 0x1FU];
+    const uint64_t offset   = true == is_immediate
+                                  ? (uint64_t)(sign_extend((instruction >> 16U) & 0xFU, 4U)
+                                             * (int64_t)(nreg * elements))
+                                  : read_x(sve, (instruction >> 16U) & 0x1FU);
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t address = base + (offset + r * elements + e) * mbytes;
+
+            if (true == is_active((uint16_t)(mask >> (16U * r)), e, esize)
+                && false == is_mapped(sve, address, mbytes))
+            {
+                return SVE_FAULT;
+            }
+        }
+    }
+
+    vector_t values[4];
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const uint16_t predicate = (uint16_t)(mask >> (16U * r));
+        const uint32_t z         = (t + r * stride) & 0x1FU;
+        values[r]                = true == is_store ? read_z(sve, z) : (vector_t) { { 0U, 0U } };
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint64_t address = base + (offset + r * elements + e) * mbytes;
+
+            if (false == is_active(predicate, e, esize))
+            {
+                continue;
+            }
+
+            if (true == is_store)
+            {
+                memory_write(sve, address, mbytes, get_element(&values[r], e, esize));
+            }
+            else
+            {
+                set_element(&values[r], e, esize, memory_read(sve, address, mbytes));
+            }
+        }
+    }
+
+    if (false == is_store)
+    {
+        for (uint32_t r = 0U; r < nreg; ++r)
+        {
+            write_z(sve, (t + r * stride) & 0x1FU, values[r]);
+        }
+    }
+
+    return SVE_OK;
+}
+
 // -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
@@ -1135,6 +1275,7 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFFC1FF8U, 0xC00C0000U, zero_vectors },
     { 0xFFF80000U, 0xC0C80000U, table_lookup_zt0 },
     { 0xFFE80000U, 0xC0880000U, table_lookup_zt0 },
+    { 0xFE800000U, 0xA0000000U, multi_vector_memory },
 };
 
 sve_result_t

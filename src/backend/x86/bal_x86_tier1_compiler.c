@@ -4662,6 +4662,21 @@ emit_memory_thunk(bal_tier1_compiler_t *BAL_RESTRICT compiler)
     bal_x86_emit_ret(assembler);
 }
 
+/// Pops the registers emit_translate_data_address() saved, in reverse order.
+static void
+emit_restore_borrowed(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                      const bal_x86_register_t          borrowed[2],
+                      const bool                        is_saved[2])
+{
+    for (uint32_t i = 2U; i > 0U; --i)
+    {
+        if (true == is_saved[i - 1U])
+        {
+            bal_x86_emit_pop_r64(assembler, borrowed[i - 1U]);
+        }
+    }
+}
+
 /// Turns the guest address in BAL_X86_REGISTER_ZERO into a host pointer in the same register for
 /// an access of `size` bytes, and raises a data abort when the address is not mapped.
 ///
@@ -4680,45 +4695,83 @@ emit_translate_data_address(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
     (void)memory_interface;
 
-    // The guest registers stay in their host registers on both paths: the fast path saves the
-    // two it borrows, and the slow path the caller-saved ones the call may clobber.
+    // The guest registers stay in their host registers on both paths: the fast path borrows two
+    // registers that hold no guest register, saving them only when there are none, and the slow
+    // path the caller-saved ones the call may clobber.
     bal_sliding_window_flush_all(&compiler->window);
-    bal_x86_emit_push_r64(assembler, BAL_X86_RAX);
-    bal_x86_emit_push_r64(assembler, BAL_X86_RCX);
+    bal_x86_register_t borrowed[2] = { BAL_X86_RAX, BAL_X86_RCX };
+    bool               is_saved[2] = { true, true };
+    uint32_t           found       = 0U;
 
-    // RAX = page number, RCX = its TLB entry.
-    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RAX, address);
-    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RAX, 12U);
-    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RCX, BAL_X86_RAX);
-    bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_RCX, 56U);
-    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RCX, 52U);
+    for (size_t i = 0U; i < SCRATCH_REGISTERS_SIZE && found < 2U; ++i)
+    {
+        if (-1 == compiler->x86_to_arm[SCRATCH_REGISTERS[i]])
+        {
+            borrowed[found] = SCRATCH_REGISTERS[i];
+            is_saved[found] = false;
+            ++found;
+        }
+    }
+
+    // With one free register, the other saved one must differ from it.
+    if (1U == found && borrowed[0] == BAL_X86_RCX)
+    {
+        borrowed[1] = BAL_X86_RAX;
+    }
+
+    const bal_x86_register_t page  = borrowed[0];
+    const bal_x86_register_t entry = borrowed[1];
+
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        if (true == is_saved[i])
+        {
+            bal_x86_emit_push_r64(assembler, borrowed[i]);
+        }
+    }
+
+    // `page` = page number, `entry` = its TLB entry.
+    bal_x86_emit_mov_r64_r64(assembler, page, address);
+    bal_x86_emit_shr_r64_imm8(assembler, page, 12U);
+    bal_x86_emit_mov_r64_r64(assembler, entry, page);
+    bal_x86_emit_shl_r64_imm8(assembler, entry, 56U);
+    bal_x86_emit_shr_r64_imm8(assembler, entry, 52U);
     bal_x86_emit_load_r64_rbp_offset(assembler, scratch, offsetof(bal_cpu_t, jit_memory_tlb));
-    bal_x86_emit_add_r64_r64(assembler, BAL_X86_RCX, scratch);
+    bal_x86_emit_add_r64_r64(assembler, entry, scratch);
 
-    // The entry must hold this page, and the access must not cross into the next one.
-    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RCX);
-    bal_x86_emit_xor_r64_r64(assembler, scratch, BAL_X86_RAX);
+    // The entry must hold this page, and the access must not cross into the next one; a single
+    // byte never does.
+    bal_x86_emit_load_r64_mem64(assembler, scratch, entry);
+    bal_x86_emit_xor_r64_r64(assembler, scratch, page);
     const size_t is_other_page = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
-    bal_x86_emit_mov_r64_r64(assembler, scratch, address);
-    bal_x86_emit_shl_r64_imm8(assembler, scratch, 52U);
-    bal_x86_emit_shr_r64_imm8(assembler, scratch, 52U);
-    bal_x86_emit_add_r64_imm32(assembler, scratch, (int32_t)size - 1);
-    bal_x86_emit_shr_r64_imm8(assembler, scratch, 12U);
-    const size_t is_crossing = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    size_t       is_crossing   = 0U;
 
-    bal_x86_emit_add_r64_imm32(assembler, BAL_X86_RCX, 8);
-    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RCX);
+    if (size > 1U)
+    {
+        bal_x86_emit_mov_r64_r64(assembler, scratch, address);
+        bal_x86_emit_shl_r64_imm8(assembler, scratch, 52U);
+        bal_x86_emit_shr_r64_imm8(assembler, scratch, 52U);
+        bal_x86_emit_add_r64_imm32(assembler, scratch, (int32_t)size - 1);
+        bal_x86_emit_shr_r64_imm8(assembler, scratch, 12U);
+        is_crossing = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    }
+
+    bal_x86_emit_add_r64_imm32(assembler, entry, 8);
+    bal_x86_emit_load_r64_mem64(assembler, scratch, entry);
     bal_x86_emit_add_r64_r64(assembler, address, scratch);
-    bal_x86_emit_pop_r64(assembler, BAL_X86_RCX);
-    bal_x86_emit_pop_r64(assembler, BAL_X86_RAX);
+    emit_restore_borrowed(assembler, borrowed, is_saved);
     const size_t is_translated = emit_forward_jump(assembler, false, BAL_X86_COND_E);
 
     // Slow path: translate_data_address() through the memory interface, which also fills the
     // TLB entry.
     patch_forward_jump(assembler, is_other_page, true);
-    patch_forward_jump(assembler, is_crossing, true);
-    bal_x86_emit_pop_r64(assembler, BAL_X86_RCX);
-    bal_x86_emit_pop_r64(assembler, BAL_X86_RAX);
+
+    if (size > 1U)
+    {
+        patch_forward_jump(assembler, is_crossing, true);
+    }
+
+    emit_restore_borrowed(assembler, borrowed, is_saved);
     bal_x86_emit_mov_r64_imm64(assembler, scratch, size);
     bal_x86_emit_call_rel32(assembler, (int32_t)(0 - (int64_t)(assembler->offset + 5U)));
 

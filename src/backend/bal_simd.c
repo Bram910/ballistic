@@ -1,6 +1,7 @@
 #include "backend/bal_simd.h"
 
 #include "backend/bal_float.h"
+#include <math.h>
 #include <string.h>
 
 #define FPSR_QC (1ULL << 27U)
@@ -1289,6 +1290,333 @@ three_same_extra(simd_t *simd, const uint32_t instruction, const bool is_scalar)
         const bool     is_add   = opcode >= 0xCU;
         const uint32_t rotation = true == is_add ? (opcode >> 1U) & 0x1U : opcode & 0x3U;
         result = complex_operation(simd, &n, &m, &d, esize, datasize / esize, is_add, rotation, -1);
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    return false;
+}
+
+/// A single precision value of BFloat16 arithmetic, as BFUnpack() sees it: denormals are zeros.
+typedef struct
+{
+    double   value;
+    uint32_t sign;
+    bool     is_nan;
+    bool     is_infinity;
+    bool     is_zero;
+    uint8_t  pad[1];
+} bfloat_operand_t;
+
+static bfloat_operand_t
+bfloat_unpack(const uint32_t bits)
+{
+    const uint32_t   exponent = (bits >> 23U) & 0xFFU;
+    const uint32_t   fraction = bits & 0x7FFFFFU;
+    bfloat_operand_t operand  = { 0.0, bits >> 31U, false, false, false, { 0U } };
+
+    if (0U == exponent)
+    {
+        operand.is_zero = true;
+    }
+    else if (0xFFU == exponent)
+    {
+        operand.is_nan      = 0U != fraction;
+        operand.is_infinity = 0U == fraction;
+    }
+    else
+    {
+        const double magnitude = ldexp((double)(fraction | 0x800000U), (int)exponent - 150);
+        operand.value          = 0U != operand.sign ? -magnitude : magnitude;
+    }
+
+    return operand;
+}
+
+/// BFRound(): the nonzero `value` plus the much smaller `error` (zero when `value` is exact) as a
+/// single precision value, rounded to odd, with tiny results flushed to zero and large ones
+/// overflowing to infinity.
+static uint32_t
+bfloat_round(double value, const double error)
+{
+    const uint32_t sign = value < 0.0 ? 0x80000000U : 0U;
+
+    // Below `value` in magnitude when the error points that way, so that truncating gives the
+    // truncation of the exact sum.
+    if (error != 0.0 && (error < 0.0) != (value < 0.0))
+    {
+        value = nextafter(value, 0.0);
+    }
+
+    int          exponent = 0;
+    const double fraction = frexp(fabs(value), &exponent); // [0.5, 1) * 2^exponent
+    const double scaled   = ldexp(fraction, 24);
+    uint32_t     mantissa = (uint32_t)scaled; // 24 bits, truncated
+    const int    unbiased = exponent - 1;
+
+    if (unbiased < -126)
+    {
+        return sign;
+    }
+
+    if (unbiased > 127)
+    {
+        return sign | 0x7F800000U;
+    }
+
+    if ((double)mantissa != scaled || error != 0.0)
+    {
+        mantissa |= 1U;
+    }
+
+    return sign | ((uint32_t)(unbiased + 127) << 23U) | (mantissa & 0x7FFFFFU);
+}
+
+/// BFMulH(): the product of two BFloat16 values as a single precision value.
+static uint32_t
+bfloat_multiply(const uint16_t a, const uint16_t b)
+{
+    const bfloat_operand_t x    = bfloat_unpack((uint32_t)a << 16U);
+    const bfloat_operand_t y    = bfloat_unpack((uint32_t)b << 16U);
+    const uint32_t         sign = (x.sign ^ y.sign) << 31U;
+
+    if (true == x.is_nan || true == y.is_nan || (true == x.is_infinity && true == y.is_zero)
+        || (true == x.is_zero && true == y.is_infinity))
+    {
+        return 0x7FC00000U;
+    }
+
+    if (true == x.is_infinity || true == y.is_infinity)
+    {
+        return sign | 0x7F800000U;
+    }
+
+    if (true == x.is_zero || true == y.is_zero)
+    {
+        return sign;
+    }
+
+    // Two 8-bit significands multiply exactly.
+    return bfloat_round(x.value * y.value, 0.0);
+}
+
+/// FPAdd_BF16(): a single precision sum following BFloat16 behaviours.
+static uint32_t
+bfloat_add(const uint32_t a, const uint32_t b)
+{
+    const bfloat_operand_t x = bfloat_unpack(a);
+    const bfloat_operand_t y = bfloat_unpack(b);
+
+    if (true == x.is_nan || true == y.is_nan
+        || (true == x.is_infinity && true == y.is_infinity && x.sign != y.sign))
+    {
+        return 0x7FC00000U;
+    }
+
+    if (true == x.is_infinity || true == y.is_infinity)
+    {
+        return ((true == x.is_infinity ? x.sign : y.sign) << 31U) | 0x7F800000U;
+    }
+
+    if (true == x.is_zero && true == y.is_zero && x.sign == y.sign)
+    {
+        return x.sign << 31U;
+    }
+
+    // TwoSum: the rounded sum and its exact error.
+    const double sum     = x.value + y.value;
+    const double partial = sum - x.value;
+    const double error   = (x.value - (sum - partial)) + (y.value - partial);
+
+    return 0.0 == sum ? 0U : bfloat_round(sum, error);
+}
+
+/// BFDotAdd(): addend + a1 * b1 + a2 * b2, without the extended BFloat16 behaviours.
+static uint32_t
+bfloat_dot_add(const uint32_t addend,
+               const uint16_t a1,
+               const uint16_t a2,
+               const uint16_t b1,
+               const uint16_t b2)
+{
+    return bfloat_add(addend, bfloat_add(bfloat_multiply(a1, b1), bfloat_multiply(a2, b2)));
+}
+
+/// The FEAT_BF16 and FEAT_I8MM instructions: BFDOT, BFMMLA, BFMLALB, BFMLALT and BFCVTN, and
+/// SMMLA, UMMLA, USMMLA, USDOT and SUDOT. Returns false for other instructions.
+static bool
+bfloat_and_matrix(simd_t *simd, const uint32_t instruction)
+{
+    const uint32_t q        = (instruction >> 30U) & 1U;
+    const uint32_t rd       = instruction & 0x1FU;
+    const uint32_t rn       = (instruction >> 5U) & 0x1FU;
+    const uint32_t rm       = (instruction >> 16U) & 0x1FU;
+    const uint32_t datasize = 1U == q ? 128U : 64U;
+    const vector_t n        = read_vector(simd, rn);
+    const vector_t d        = read_vector(simd, rd);
+    const uint64_t fpcr     = simd->cpu->fpcr;
+    vector_t       result   = { { 0U, 0U } };
+
+    // The by-element forms take index H:L and register M:Rm, except BFMLALB/T (index H:L:M,
+    // register Rm).
+    const uint32_t pair_index = (((instruction >> 11U) & 1U) << 1U) | ((instruction >> 21U) & 1U);
+    const bool     is_dot_element = 0x0F40F000U == (instruction & 0xBFC0F400U)
+                                || 0x0F80F000U == (instruction & 0xBFC0F400U)
+                                || 0x0F00F000U == (instruction & 0xBFC0F400U);
+
+    if (0x2E40FC00U == (instruction & 0xBFE0FC00U) || 0x0F40F000U == (instruction & 0xBFC0F400U))
+    {
+        // BFDOT: each single gets the dot product of a pair of BFloat16 values.
+        const vector_t m = read_vector(simd, rm);
+
+        for (uint32_t e = 0U; e < datasize / 32U; ++e)
+        {
+            const uint32_t pair = true == is_dot_element ? pair_index : e;
+            set_element(&result,
+                        e,
+                        32U,
+                        bfloat_dot_add((uint32_t)get_element(&d, e, 32U),
+                                       (uint16_t)get_element(&n, 2U * e, 16U),
+                                       (uint16_t)get_element(&n, 2U * e + 1U, 16U),
+                                       (uint16_t)get_element(&m, 2U * pair, 16U),
+                                       (uint16_t)get_element(&m, 2U * pair + 1U, 16U)));
+        }
+
+        write_vector(simd, rd, result, datasize);
+        return true;
+    }
+
+    if (0x6E40EC00U == (instruction & 0xFFE0FC00U))
+    {
+        // BFMMLA: a 2x4 by 4x2 BFloat16 matrix product added to a 2x2 single matrix.
+        const vector_t m = read_vector(simd, rm);
+
+        for (uint32_t i = 0U; i < 2U; ++i)
+        {
+            for (uint32_t j = 0U; j < 2U; ++j)
+            {
+                uint32_t sum = (uint32_t)get_element(&d, 2U * i + j, 32U);
+
+                for (uint32_t k = 0U; k < 2U; ++k)
+                {
+                    sum = bfloat_dot_add(sum,
+                                         (uint16_t)get_element(&n, 4U * i + 2U * k, 16U),
+                                         (uint16_t)get_element(&n, 4U * i + 2U * k + 1U, 16U),
+                                         (uint16_t)get_element(&m, 4U * j + 2U * k, 16U),
+                                         (uint16_t)get_element(&m, 4U * j + 2U * k + 1U, 16U));
+                }
+
+                set_element(&result, 2U * i + j, 32U, sum);
+            }
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    if (0x2EC0FC00U == (instruction & 0xBFE0FC00U) || 0x0FC0F000U == (instruction & 0xBFC0F400U))
+    {
+        // BFMLALB (Q = 0) and BFMLALT (Q = 1): the even or odd BFloat16 elements, which widen
+        // exactly to single precision, multiplied and accumulated with one rounding.
+        const bool     is_element = 0x0FC0F000U == (instruction & 0xBFC0F400U);
+        const vector_t m          = read_vector(simd, true == is_element ? rm & 0xFU : rm);
+        const uint32_t index      = (pair_index << 1U) | ((instruction >> 20U) & 1U);
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            const uint64_t a = get_element(&n, 2U * e + q, 16U) << 16U;
+            const uint64_t b = get_element(&m, true == is_element ? index : 2U * e + q, 16U) << 16U;
+            set_element(&result,
+                        e,
+                        32U,
+                        bal_float_element(fpcr,
+                                          &simd->flags,
+                                          32U,
+                                          BAL_FLOAT_MULTIPLY_ADD,
+                                          a,
+                                          b,
+                                          get_element(&d, e, 32U)));
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    if (0x0EA16800U == (instruction & 0xBFFFFC00U))
+    {
+        // BFCVTN writes the low half and clears the high one; BFCVTN2 writes the high half.
+        result.d[0] = 1U == q ? d.d[0] : 0U;
+
+        for (uint32_t e = 0U; e < 4U; ++e)
+        {
+            set_element(&result,
+                        4U * q + e,
+                        16U,
+                        bal_float_to_bfloat16_element(fpcr, &simd->flags, get_element(&n, e, 32U)));
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    const bool is_smmla  = 0x4E80A400U == (instruction & 0xFFE0FC00U);
+    const bool is_ummla  = 0x6E80A400U == (instruction & 0xFFE0FC00U);
+    const bool is_usmmla = 0x4E80AC00U == (instruction & 0xFFE0FC00U);
+
+    if (true == is_smmla || true == is_ummla || true == is_usmmla)
+    {
+        // A 2x8 by 8x2 byte matrix product added to a 2x2 word matrix.
+        const vector_t m = read_vector(simd, rm);
+
+        for (uint32_t i = 0U; i < 2U; ++i)
+        {
+            for (uint32_t j = 0U; j < 2U; ++j)
+            {
+                uint32_t sum = (uint32_t)get_element(&d, 2U * i + j, 32U);
+
+                for (uint32_t k = 0U; k < 8U; ++k)
+                {
+                    const uint64_t a = get_element(&n, 8U * i + k, 8U);
+                    const uint64_t b = get_element(&m, 8U * j + k, 8U);
+                    const int32_t  x = true == is_smmla ? (int32_t)(int8_t)a : (int32_t)a;
+                    const int32_t  y = true == is_ummla ? (int32_t)b : (int32_t)(int8_t)b;
+                    sum += (uint32_t)(x * y);
+                }
+
+                set_element(&result, 2U * i + j, 32U, sum);
+            }
+        }
+
+        write_vector(simd, rd, result, 128U);
+        return true;
+    }
+
+    const bool is_usdot_vector  = 0x0E809C00U == (instruction & 0xBFE0FC00U);
+    const bool is_usdot_element = 0x0F80F000U == (instruction & 0xBFC0F400U);
+    const bool is_sudot_element = 0x0F00F000U == (instruction & 0xBFC0F400U);
+
+    if (true == is_usdot_vector || true == is_usdot_element || true == is_sudot_element)
+    {
+        // USDOT multiplies unsigned bytes of Vn by signed ones of Vm; SUDOT the other way round.
+        const vector_t m = read_vector(simd, rm);
+
+        for (uint32_t e = 0U; e < datasize / 32U; ++e)
+        {
+            const uint32_t group = true == is_usdot_vector ? e : pair_index;
+            uint32_t       sum   = (uint32_t)get_element(&d, e, 32U);
+
+            for (uint32_t k = 0U; k < 4U; ++k)
+            {
+                const uint64_t a = get_element(&n, 4U * e + k, 8U);
+                const uint64_t b = get_element(&m, 4U * group + k, 8U);
+                const int32_t  x = true == is_sudot_element ? (int32_t)(int8_t)a : (int32_t)a;
+                const int32_t  y = true == is_sudot_element ? (int32_t)b : (int32_t)(int8_t)b;
+                sum += (uint32_t)(x * y);
+            }
+
+            set_element(&result, e, 32U, sum);
+        }
+
         write_vector(simd, rd, result, datasize);
         return true;
     }
@@ -3677,6 +4005,11 @@ execute(simd_t *simd, const uint32_t instruction)
     if (0x0E780800U == (instruction & 0x9F7E0C00U))
     {
         return float_two_register_misc(simd, instruction, false, 16U);
+    }
+
+    if (true == bfloat_and_matrix(simd, instruction))
+    {
+        return true;
     }
 
     if (0x0E20EC00U == (instruction & 0xBF60FC00U) || 0x2E20CC00U == (instruction & 0xBF60FC00U))

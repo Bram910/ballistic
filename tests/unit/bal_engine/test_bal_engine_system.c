@@ -1083,6 +1083,76 @@ test_Mte_SetgFillsWholeGranules(void)
     TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3100U]);
 }
 
+/// Fills both halves of V`index` with `lane`, repeated in elements of `bits` bits.
+static void
+fill_vector(const uint32_t index, const uint64_t lane, const uint32_t bits)
+{
+    uint64_t value = 0U;
+
+    for (uint32_t shift = 0U; shift < 64U; shift += bits)
+    {
+        value |= lane << shift;
+    }
+
+    g_cpu.v[index][0] = value;
+    g_cpu.v[index][1] = value;
+}
+
+static void
+test_I8mm_MatrixAndMixedSignDotProducts(void)
+{
+    // SMMLA V0, V1, V2; UMMLA V3, V1, V2; USMMLA V4, V1, V5; USDOT V6.4S, V1.16B, V5.16B;
+    // SUDOT V7.4S, V1.16B, V2.4B[1].
+    const uint32_t program[] = { 0x4E82A420U, 0x6E82A423U, 0x4E85AC24U, 0x4E859C26U, 0x4F22F027U };
+    load_program(program, 5U);
+    fill_vector(1U, 1U, 8U);
+    g_cpu.v[1][0] = (g_cpu.v[1][0] & ~0xFFULL) | 0xFFU; // Byte 0 is -1 or 255.
+    fill_vector(2U, 2U, 8U);
+    fill_vector(5U, 0xFFU, 8U);
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x0000000C0000000CULL, g_cpu.v[0][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000001000000010ULL, g_cpu.v[0][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000020C0000020CULL, g_cpu.v[3][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000001000000010ULL, g_cpu.v[3][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFEFAFFFFFEFAULL, g_cpu.v[4][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFF8FFFFFFF8ULL, g_cpu.v[4][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFCFFFFFEFEULL, g_cpu.v[6][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFCFFFFFFFCULL, g_cpu.v[6][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000000800000004ULL, g_cpu.v[7][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000000800000008ULL, g_cpu.v[7][1]);
+}
+
+static void
+test_Bf16_ArithmeticAndConversions(void)
+{
+    // BFDOT V0.4S, V1.8H, V2.8H; BFMMLA V3, V1, V2; BFMLALB V4.4S, V1.8H, V5.8H;
+    // BFMLALT V8.4S, V1.8H, V5.8H; BFCVTN V9.4H, V10.4S; BFCVT H11, S12.
+    const uint32_t program[]
+        = { 0x6E42FC20U, 0x6E42EC23U, 0x2EC5FC24U, 0x6EC5FC28U, 0x0EA16949U, 0x1E63418BU };
+    load_program(program, 6U);
+    fill_vector(0U, 0x3F800000U, 32U); // 1.0
+    fill_vector(1U, 0x3F80U, 16U);     // BFloat16 1.0
+    fill_vector(2U, 0x4000U, 16U);     // BFloat16 2.0
+    fill_vector(4U, 0x3F000000U, 32U); // 0.5
+    fill_vector(5U, 0x4040U, 16U);     // BFloat16 3.0
+    g_cpu.v[9][1]  = ~0ULL;
+    g_cpu.v[10][0] = 0x3F8080003F800000ULL; // 1.0 and a tie that rounds to even, down.
+    g_cpu.v[10][1] = 0x3F8000013F818000ULL; // A tie that rounds up and an inexact value.
+    g_cpu.v[12][0] = 0x40490FDBU;           // pi
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x40A0000040A00000ULL, g_cpu.v[0][0]); // 1 + 1*2 + 1*2
+    TEST_ASSERT_EQUAL_HEX64(0x4100000041000000ULL, g_cpu.v[3][1]); // 4 * (1*2)
+    TEST_ASSERT_EQUAL_HEX64(0x4060000040600000ULL, g_cpu.v[4][0]); // 0.5 + 1*3
+    TEST_ASSERT_EQUAL_HEX64(0x4040000040400000ULL, g_cpu.v[8][1]); // 0 + 1*3
+    TEST_ASSERT_EQUAL_HEX64(0x3F803F823F803F80ULL, g_cpu.v[9][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[9][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x4049U, g_cpu.v[11][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[11][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x10U, g_cpu.fpsr & 0x9FU); // Inexact only.
+}
+
 int
 main(void)
 {
@@ -1122,6 +1192,8 @@ main(void)
     RUN_TEST(test_Mte_TagStoresKeepTheirDataEffects);
     RUN_TEST(test_Mte_UnalignedTagStoreRaisesDataAbort);
     RUN_TEST(test_Mte_SetgFillsWholeGranules);
+    RUN_TEST(test_I8mm_MatrixAndMixedSignDotProducts);
+    RUN_TEST(test_Bf16_ArithmeticAndConversions);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

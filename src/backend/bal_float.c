@@ -272,6 +272,12 @@ bal_is_float_supported(const uint32_t instruction)
         case FLOAT_ONE_SOURCE: {
             const uint32_t opcode = (instruction >> 15U) & 0x3FU;
 
+            // BFCVT: single precision to BFloat16, with ftype 01.
+            if (6U == opcode && PRECISION_DOUBLE == precision)
+            {
+                return true;
+            }
+
             // FCVT between any two of half, single and double precision.
             if (4U == (opcode & 0x3CU))
             {
@@ -1122,6 +1128,66 @@ round_to_integral_bits(context_t     *context,
     return result;
 }
 
+/// FPConvertBF(): rounds the single precision `value` to BFloat16 in the FPCR rounding mode,
+/// raising the floating-point exceptions of the conversion.
+static uint64_t
+convert_to_bfloat16(context_t *context, uint64_t value)
+{
+    value = flush_input(context, value);
+
+    if (true == is_nan(&context->layout, value))
+    {
+        if (true == is_signalling_nan(&context->layout, value))
+        {
+            context->flags |= FPSR_IOC;
+        }
+
+        return 0U != (context->fpcr & FPCR_DN) ? 0x7FC0U : ((value | 0x00400000U) >> 16U) & 0xFFFFU;
+    }
+
+    const uint64_t truncated = value >> 16U;
+    const uint64_t low       = value & 0xFFFFU;
+
+    // Infinities, zeros and values that need no rounding convert exactly.
+    if (0U == low || true == is_infinity(&context->layout, value))
+    {
+        return truncated;
+    }
+
+    const bool is_negative = 0U != (value >> 31U);
+    bool       is_round_up = false;
+
+    switch (FPCR_RMODE(context->fpcr))
+    {
+        case 0U: // To nearest, ties to even.
+            is_round_up = low > 0x8000U || (0x8000U == low && 0U != (truncated & 1U));
+            break;
+        case 1U: // Towards +infinity.
+            is_round_up = false == is_negative;
+            break;
+        case 2U: // Towards -infinity.
+            is_round_up = is_negative;
+            break;
+        default: // Towards zero.
+            break;
+    }
+
+    const uint64_t result = truncated + (true == is_round_up ? 1U : 0U);
+    context->flags |= FPSR_IXC;
+
+    // A denormal input is tiny before rounding; rounding up the largest finite value overflows.
+    if (0U == (value & context->layout.exponent_mask))
+    {
+        context->flags |= FPSR_UFC;
+    }
+    else if (0x7F80U == (result & 0x7FFFU))
+    {
+        context->flags |= FPSR_OFC;
+    }
+
+    return result;
+}
+
 /// Converts to a signed or unsigned integer of `bits` bits, scaling by 2^`fraction_bits` first,
 /// with rounding mode `rmode` as in round_to_integral(). Out of range values and NaNs saturate and
 /// raise Invalid Operation.
@@ -1546,6 +1612,15 @@ execute_one_source(bal_cpu_t *cpu, context_t *context, const uint32_t instructio
         }
         default:
             break;
+    }
+
+    if (6U == opcode && PRECISION_DOUBLE == context->precision)
+    {
+        // BFCVT: the operand is a single precision register.
+        context->precision = PRECISION_SINGLE;
+        context->layout    = layout_of(PRECISION_SINGLE);
+        write_vector(cpu, rd, convert_to_bfloat16(context, read_vector(cpu, rn, 32U)));
+        return;
     }
 
     if (4U == (opcode & 0x3CU))
@@ -2270,6 +2345,16 @@ bal_float_round_element(const uint64_t fpcr,
     load_control();
     context_t      context = element_context(fpcr, esize);
     const uint64_t result  = round_to_integral(&context, value, rmode, exact);
+    *fpsr |= context.flags;
+    return result;
+}
+
+uint64_t
+bal_float_to_bfloat16_element(const uint64_t fpcr, uint64_t *fpsr, const uint64_t value)
+{
+    load_control();
+    context_t      context = element_context(fpcr, 32U);
+    const uint64_t result  = convert_to_bfloat16(&context, value);
     *fpsr |= context.flags;
     return result;
 }

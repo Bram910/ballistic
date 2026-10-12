@@ -24,20 +24,33 @@ extern "C"
     /// Returns true if bal_execute_integer_helper() implements `instruction`.
     bool bal_is_integer_helper_supported(uint32_t instruction);
 
-    /// Executes CRC32, CRC32C, CFINV, RMIF, SETF8 or SETF16 against `cpu`. Always returns 1.
+    /// Executes one of the instructions bal_is_integer_helper_supported() accepts against `cpu`.
+    /// Always returns 1.
     ///
     /// # Safety
     ///
     /// `instruction` must be accepted by bal_is_integer_helper_supported().
     uint64_t bal_execute_integer_helper(bal_cpu_t *cpu, uint32_t instruction);
 
-    /// Executes DC ZVA: zeroes the BAL_CACHE_ZERO_BLOCK_BYTES-byte block holding the address in
-    /// the instruction's Xt. Returns zero, writing nothing, when the block is not mapped by
-    /// `memory_interface`, and non-zero otherwise.
     /// Executes MRS of CNTFRQ_EL0, CNTPCT_EL0 or CNTVCT_EL0 (`instruction`) against `cpu`, using
     /// bal_cpu_t::counter_frequency and read_counter. Always returns 1.
     uint64_t bal_execute_counter_read(bal_cpu_t *cpu, uint32_t instruction);
 
+    /// Returns true if bal_execute_memory_operation() implements `instruction`: the FEAT_MOPS
+    /// CPY* and SET* instructions other than the tag-setting SETG*.
+    bool bal_is_memory_operation_supported(uint32_t instruction);
+
+    /// Executes a FEAT_MOPS memory copy or memory set instruction with option B: the prologue
+    /// does the whole operation and sets C. Returns zero, changing nothing, when the memory is
+    /// not mapped by `memory_interface` or the registers hold option A parameters, and non-zero
+    /// otherwise.
+    uint64_t bal_execute_memory_operation(bal_cpu_t                    *cpu,
+                                          const bal_memory_interface_t *memory_interface,
+                                          uint32_t                      instruction);
+
+    /// Executes DC ZVA: zeroes the BAL_CACHE_ZERO_BLOCK_BYTES-byte block holding the address in
+    /// the instruction's Xt. Returns zero, writing nothing, when the block is not mapped by
+    /// `memory_interface`, and non-zero otherwise.
     uint64_t bal_execute_cache_zero(bal_cpu_t                    *cpu,
                                     const bal_memory_interface_t *memory_interface,
                                     uint32_t                      instruction);

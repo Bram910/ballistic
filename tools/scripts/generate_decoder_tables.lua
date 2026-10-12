@@ -102,6 +102,12 @@ local function derive_opcode(mnemonic)
         return "OPCODE_POINTER_AUTHENTICATION"
     end
 
+    -- FEAT_MOPS memory copy and memory set, executed by a runtime helper. The tag-setting SETG*
+    -- forms need FEAT_MTE.
+    if m:match("^CPYF?[PME]") or m:match("^SET[PME]") then
+        return "OPCODE_MEMORY_OPERATION"
+    end
+
     -- SYS: the cache maintenance operations EL0 may execute.
     if m == "SYS" then
         return "OPCODE_SYSTEM_REGISTER"

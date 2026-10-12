@@ -291,6 +291,260 @@ bal_execute_counter_read(bal_cpu_t *cpu, const uint32_t instruction)
     return 1U;
 }
 
+/// FEAT_MOPS CPYP, CPYM, CPYE and their CPYF and option forms:
+/// 00 011 F 01 op1 0 Rs op2 01 Rn Rd, with op1 00 (prologue), 01 (main) or 10 (epilogue).
+static bool
+is_memory_copy(const uint32_t instruction)
+{
+    return 0x19000400U == (instruction & 0xFB200C00U) && ((instruction >> 22U) & 0x3U) != 3U;
+}
+
+/// FEAT_MOPS SETP, SETM, SETE and their option forms: 00 011 0 01 11 0 Rs op2 01 Rn Rd, with
+/// op2<3:2> 00 (prologue), 01 (main) or 10 (epilogue). SETGP and the other tag-setting forms
+/// need FEAT_MTE.
+static bool
+is_memory_set(const uint32_t instruction)
+{
+    return 0x19C00400U == (instruction & 0xFFE00C00U) && ((instruction >> 14U) & 0x3U) != 3U;
+}
+
+bool
+bal_is_memory_operation_supported(const uint32_t instruction)
+{
+    const uint32_t d = instruction & 0x1FU;
+    const uint32_t n = (instruction >> 5U) & 0x1FU;
+    const uint32_t s = (instruction >> 16U) & 0x1FU;
+
+    // Overlapping registers and the zero register as an address or size are constrained
+    // unpredictable; they are undefined here. SET may take its data from XZR.
+    const bool is_distinct = s != n && s != d && n != d && d != 31U && n != 31U;
+
+    if (true == is_memory_copy(instruction))
+    {
+        return true == is_distinct && s != 31U;
+    }
+
+    return true == is_memory_set(instruction) && true == is_distinct;
+}
+
+/// Returns true if the `size` bytes from `address` are all mapped by `memory_interface`.
+static bool
+is_range_mapped(const bal_memory_interface_t *memory_interface, uint64_t address, uint64_t size)
+{
+    while (size > 0U)
+    {
+        size_t available_bytes = 0U;
+
+        if (NULL == memory_interface->translate((void *)memory_interface, address, &available_bytes)
+            || 0U == available_bytes)
+        {
+            return false;
+        }
+
+        const uint64_t step = available_bytes < size ? available_bytes : size;
+        address += step;
+        size -= step;
+    }
+
+    return true;
+}
+
+/// The host address of `size` bytes at `address` when they are contiguous in host memory, and
+/// NULL otherwise.
+static uint8_t *
+contiguous(const bal_memory_interface_t *memory_interface,
+           const uint64_t                address,
+           const uint64_t                size)
+{
+    size_t         available_bytes = 0U;
+    const uint8_t *host_address
+        = memory_interface->translate((void *)memory_interface, address, &available_bytes);
+    return NULL != host_address && available_bytes >= size ? (uint8_t *)(uintptr_t)host_address
+                                                           : NULL;
+}
+
+static uint8_t *
+byte_at(const bal_memory_interface_t *memory_interface, const uint64_t address)
+{
+    return contiguous(memory_interface, address, 1U);
+}
+
+/// Copies `size` bytes from `from` to `to` as memmove() does. Copying the whole range as one
+/// block is a valid choice of the IMPLEMENTATION DEFINED block size, and gives the same result
+/// as copying in the direction the prologue picked. Returns false, copying nothing, if either
+/// range is not mapped.
+static bool
+copy_memory(const bal_memory_interface_t *memory_interface,
+            const uint64_t                to,
+            const uint64_t                from,
+            const uint64_t                size)
+{
+    if (0U == size)
+    {
+        return true;
+    }
+
+    if (false == is_range_mapped(memory_interface, from, size)
+        || false == is_range_mapped(memory_interface, to, size))
+    {
+        return false;
+    }
+
+    uint8_t *destination = contiguous(memory_interface, to, size);
+    uint8_t *source      = contiguous(memory_interface, from, size);
+
+    if (NULL != destination && NULL != source)
+    {
+        (void)memmove(destination, source, size);
+        return true;
+    }
+
+    // Byte by byte, in the direction that does not overwrite source bytes before reading them.
+    for (uint64_t i = 0U; i < size; ++i)
+    {
+        const uint64_t offset = to > from ? size - 1U - i : i;
+        uint8_t       *target = byte_at(memory_interface, to + offset);
+        *target               = *byte_at(memory_interface, from + offset);
+    }
+
+    return true;
+}
+
+/// Fills `size` bytes from `to` with `data`. Returns false, writing nothing, if they are not
+/// mapped.
+static bool
+set_memory(const bal_memory_interface_t *memory_interface,
+           const uint64_t                to,
+           const uint64_t                size,
+           const uint8_t                 data)
+{
+    if (false == is_range_mapped(memory_interface, to, size))
+    {
+        return false;
+    }
+
+    uint64_t address   = to;
+    uint64_t remaining = size;
+
+    while (remaining > 0U)
+    {
+        size_t   available_bytes = 0U;
+        uint8_t *host            = (uint8_t *)(uintptr_t)memory_interface->translate(
+            (void *)memory_interface, address, &available_bytes);
+        const uint64_t step = available_bytes < remaining ? available_bytes : remaining;
+        (void)memset(host, data, step);
+        address += step;
+        remaining -= step;
+    }
+
+    return true;
+}
+
+static void
+write_nzcv(bal_cpu_t *cpu, const uint32_t nzcv)
+{
+    cpu->flag_n = (uint8_t)((nzcv >> 3U) & 1U);
+    cpu->flag_z = (uint8_t)((nzcv >> 2U) & 1U);
+    cpu->flag_c = (uint8_t)((nzcv >> 1U) & 1U);
+    cpu->flag_v = (uint8_t)(nzcv & 1U);
+}
+
+uint64_t
+bal_execute_memory_operation(bal_cpu_t                    *cpu,
+                             const bal_memory_interface_t *memory_interface,
+                             const uint32_t                instruction)
+{
+    const uint32_t d       = instruction & 0x1FU;
+    const uint32_t n       = (instruction >> 5U) & 0x1FU;
+    const uint32_t s       = (instruction >> 16U) & 0x1FU;
+    const bool     is_copy = is_memory_copy(instruction);
+    const uint32_t stage
+        = true == is_copy ? (instruction >> 22U) & 0x3U : (instruction >> 14U) & 0x3U;
+    uint64_t to   = cpu->x[d];
+    uint64_t size = cpu->x[n];
+
+    // This implementation uses option B, which the prologue reports with C set: the registers
+    // keep the start of the range, and N gives the direction of a copy. The prologue does the
+    // whole operation, leaving nothing to the main and epilogue instructions; they finish an
+    // operation that was interrupted between the instructions of a sequence.
+    if (0U != stage && 0U != size && 0U == cpu->flag_c)
+    {
+        // Option A parameters, from another implementation: a MismatchedMemCpyException or
+        // MismatchedMemSetException, reported as a data abort.
+        return 0U;
+    }
+
+    if (false == is_copy)
+    {
+        if (0U == stage && 0U != (size >> 63U))
+        {
+            size = 0x7FFFFFFFFFFFFFFFULL;
+        }
+
+        const uint8_t data = (uint8_t)(31U == s ? 0U : cpu->x[s]);
+
+        if (false == set_memory(memory_interface, to, size, data))
+        {
+            return 0U;
+        }
+
+        cpu->x[d] = to + size;
+        cpu->x[n] = 0U;
+
+        if (0U == stage)
+        {
+            write_nzcv(cpu, 0x2U);
+        }
+
+        return 1U;
+    }
+
+    uint64_t from       = cpu->x[s];
+    bool     is_forward = 0U == cpu->flag_n;
+
+    if (0U == stage)
+    {
+        if (0U != (size >> 55U))
+        {
+            size = 0x007FFFFFFFFFFFFFULL;
+        }
+
+        // CPYF copies forwards. CPY copies backwards when the source starts below an
+        // overlapping destination, as memmove() does; the 56-bit addresses decide.
+        const uint64_t mask        = 0x00FFFFFFFFFFFFFFULL;
+        const bool     is_cpyf     = 0U == (instruction & 0x04000000U);
+        const uint64_t source      = from & mask;
+        const uint64_t destination = to & mask;
+        is_forward
+            = true == is_cpyf || false == (source < destination && source + size > destination);
+
+        if (false == is_forward)
+        {
+            to += size;
+            from += size;
+        }
+    }
+
+    const uint64_t start_to   = true == is_forward ? to : to - size;
+    const uint64_t start_from = true == is_forward ? from : from - size;
+
+    // A fault leaves the registers and flags as they were before the instruction.
+    if (false == copy_memory(memory_interface, start_to, start_from, size))
+    {
+        return 0U;
+    }
+
+    if (0U == stage)
+    {
+        write_nzcv(cpu, true == is_forward ? 0x2U : 0xAU);
+    }
+
+    cpu->x[d] = true == is_forward ? to + size : to - size;
+    cpu->x[s] = true == is_forward ? from + size : from - size;
+    cpu->x[n] = 0U;
+    return 1U;
+}
+
 uint64_t
 bal_execute_cache_zero(bal_cpu_t                    *cpu,
                        const bal_memory_interface_t *memory_interface,

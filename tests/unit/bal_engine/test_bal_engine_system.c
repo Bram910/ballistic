@@ -842,6 +842,99 @@ test_Lse128_MisalignedAddressRaisesDataAbort(void)
     TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
 }
 
+static void
+test_Mops_ForwardCopyCopiesTheRange(void)
+{
+    // CPYFP [X0]!, [X1]!, X2!; CPYFM; CPYFE.
+    const uint32_t program[] = { 0x19010440U, 0x19410440U, 0x19810440U };
+    load_program(program, 3U);
+
+    for (uint32_t i = 0U; i < 64U; ++i)
+    {
+        g_memory[0x2000U + i] = (uint8_t)(i + 1U);
+    }
+
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[1] = 0x2000U;
+    g_cpu.x[2] = 37U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_MEMORY(g_memory + 0x2000U, g_memory + 0x3000U, 37U);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_memory[0x3000U + 37U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3025U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2025U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_n);
+}
+
+static void
+test_Mops_OverlappingCopyGoesBackwards(void)
+{
+    // CPYP [X0]!, [X1]!, X2!; CPYM; CPYE, with the destination 8 bytes above the source.
+    const uint32_t program[] = { 0x1D010440U, 0x1D410440U, 0x1D810440U };
+    load_program(program, 3U);
+    uint8_t expected[40];
+
+    for (uint32_t i = 0U; i < 40U; ++i)
+    {
+        g_memory[0x2000U + i] = (uint8_t)(i + 1U);
+        expected[i]           = (uint8_t)(i < 8U ? i + 1U : i - 7U);
+    }
+
+    g_cpu.x[0] = 0x2008U;
+    g_cpu.x[1] = 0x2000U;
+    g_cpu.x[2] = 32U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_MEMORY(expected, g_memory + 0x2000U, sizeof(expected));
+    // A backward copy leaves the registers at the start of the ranges and sets N.
+    TEST_ASSERT_EQUAL_HEX64(0x2008U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2000U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+}
+
+static void
+test_Mops_SetFillsTheRange(void)
+{
+    // SETP [X0]!, X2!, X3; SETM; SETE.
+    const uint32_t program[] = { 0x19C30440U, 0x19C34440U, 0x19C38440U };
+    load_program(program, 3U);
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[2] = 50U;
+    g_cpu.x[3] = 0x12ABU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+
+    for (uint32_t i = 0U; i < 50U; ++i)
+    {
+        TEST_ASSERT_EQUAL_HEX8(0xABU, g_memory[0x3000U + i]);
+    }
+
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3000U + 50U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3032U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+}
+
+static void
+test_Mops_UnmappedSetFaultsWithoutWriting(void)
+{
+    // SETP [X0]!, X2!, X3 running past the end of guest memory.
+    const uint32_t program[] = { 0x19C30440U };
+    load_program(program, 1U);
+    g_cpu.x[0] = GUEST_MEMORY_SIZE - 0x100U;
+    g_cpu.x[2] = 0x200U;
+    g_cpu.x[3] = 0xABU;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[GUEST_MEMORY_SIZE - 0x100U]);
+    TEST_ASSERT_EQUAL_HEX64(GUEST_MEMORY_SIZE - 0x100U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x200U, g_cpu.x[2]);
+}
+
 int
 main(void)
 {
@@ -871,6 +964,10 @@ main(void)
     RUN_TEST(test_Rcpc3_VectorFormsRoundTrip);
     RUN_TEST(test_Lse128_OperationsReturnTheOldPair);
     RUN_TEST(test_Lse128_MisalignedAddressRaisesDataAbort);
+    RUN_TEST(test_Mops_ForwardCopyCopiesTheRange);
+    RUN_TEST(test_Mops_OverlappingCopyGoesBackwards);
+    RUN_TEST(test_Mops_SetFillsTheRange);
+    RUN_TEST(test_Mops_UnmappedSetFaultsWithoutWriting);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

@@ -5514,6 +5514,118 @@ translate_integer_helper(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint
         compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_integer_helper);
 }
 
+/// Signs or authenticates the guest register `target` through the pointer authentication memo
+/// (bal_cpu_t::jit_pac_memo), with the modifier in guest register `modifier` (31 for SP) or zero
+/// when `modifier` is 32, and stores the result at `result_offset` in bal_cpu_t. The guest
+/// registers must be in memory. Leaves the three jumps a miss takes in `misses`; a miss changes
+/// nothing but RAX, RCX, RDX and R11.
+static void
+emit_pac_memo_lookup(bal_x86_assembler_t *BAL_RESTRICT assembler,
+                     const uint32_t                    target,
+                     const uint32_t                    modifier,
+                     const uint32_t                    key,
+                     const bool                        is_authenticate,
+                     const size_t                      result_offset,
+                     size_t                            misses[3])
+{
+    const bal_x86_register_t scratch = BAL_X86_REGISTER_DISCARD_RESULT;
+    const size_t             x       = offsetof(bal_cpu_t, x);
+
+    // RAX = the pointer, RCX = the modifier, RDX = the entry, as BAL_PAC_MEMO_INDEX() picks it.
+    bal_x86_emit_load_r64_rbp_offset(assembler, BAL_X86_RAX, (int32_t)(x + 8U * target));
+
+    if (32U == modifier)
+    {
+        bal_x86_emit_xor_r32_r32(assembler, BAL_X86_RCX, BAL_X86_RCX);
+    }
+    else
+    {
+        bal_x86_emit_load_r64_rbp_offset(assembler, BAL_X86_RCX, (int32_t)(x + 8U * modifier));
+    }
+
+    bal_x86_emit_mov_r64_r64(assembler, BAL_X86_RDX, BAL_X86_RCX);
+    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RDX, 4U);
+    bal_x86_emit_mov_r64_r64(assembler, scratch, BAL_X86_RAX);
+    bal_x86_emit_shr_r64_imm8(assembler, scratch, 2U);
+    bal_x86_emit_xor_r64_r64(assembler, BAL_X86_RDX, scratch);
+    bal_x86_emit_shl_r64_imm8(assembler, BAL_X86_RDX, 56U);
+    bal_x86_emit_shr_r64_imm8(assembler, BAL_X86_RDX, 51U);
+    bal_x86_emit_load_r64_rbp_offset(assembler, scratch, offsetof(bal_cpu_t, jit_pac_memo));
+    bal_x86_emit_add_r64_r64(assembler, BAL_X86_RDX, scratch);
+
+    // The entry must hold this key and modifier, and the pointer as the side it starts from.
+    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RDX);
+    bal_x86_emit_sub_r64_imm32(assembler, scratch, (int32_t)key + 1);
+    misses[0] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    bal_x86_emit_add_r64_imm32(
+        assembler, BAL_X86_RDX, (int32_t)offsetof(bal_pac_memo_entry_t, modifier));
+    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RDX);
+    bal_x86_emit_xor_r64_r64(assembler, scratch, BAL_X86_RCX);
+    misses[1] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+
+    const size_t from = true == is_authenticate ? offsetof(bal_pac_memo_entry_t, signed_pointer)
+                                                : offsetof(bal_pac_memo_entry_t, plain);
+    const size_t to   = true == is_authenticate ? offsetof(bal_pac_memo_entry_t, plain)
+                                                : offsetof(bal_pac_memo_entry_t, signed_pointer);
+    bal_x86_emit_add_r64_imm32(
+        assembler, BAL_X86_RDX, (int32_t)from - (int32_t)offsetof(bal_pac_memo_entry_t, modifier));
+    bal_x86_emit_load_r64_mem64(assembler, scratch, BAL_X86_RDX);
+    bal_x86_emit_xor_r64_r64(assembler, scratch, BAL_X86_RAX);
+    misses[2] = emit_forward_jump(assembler, true, BAL_X86_COND_NE);
+    bal_x86_emit_add_r64_imm32(assembler, BAL_X86_RDX, (int32_t)to - (int32_t)from);
+    bal_x86_emit_load_r64_mem64(assembler, BAL_X86_RAX, BAL_X86_RDX);
+    bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, (int32_t)result_offset);
+}
+
+/// Translates a pointer authentication instruction that the memo can serve: the guest registers
+/// go to memory, a disabled key skips the instruction (`is_skipped_when_disabled`) or takes the
+/// helper, a memo hit stores the result, and a miss calls the helper, which fills the memo.
+static void
+emit_remembered_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                                       const uint32_t                     instruction,
+                                       const uint32_t                     target,
+                                       const uint32_t                     modifier,
+                                       const uint32_t                     key,
+                                       const bool                         is_authenticate,
+                                       const size_t                       result_offset,
+                                       const bool                         is_skipped_when_disabled)
+{
+    flush_dirty_registers(compiler);
+    reset_register_allocator(compiler);
+    bal_sliding_window_flush_all(&compiler->window);
+
+    // The B keys are enabled by SCTLR_EL1.EnIB (bit 30), the A keys by EnIA (31).
+    bal_x86_assembler_t *BAL_RESTRICT assembler = &compiler->assembler;
+    bal_x86_emit_load_r64_rbp_offset(
+        assembler, BAL_X86_REGISTER_DISCARD_RESULT, (int32_t)offsetof(bal_cpu_t, sctlr_el1));
+    bal_x86_emit_bt_r64_imm8(assembler, BAL_X86_REGISTER_DISCARD_RESULT, 1U == key ? 30U : 31U);
+    const size_t is_disabled = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
+
+    size_t misses[3];
+    emit_pac_memo_lookup(assembler, target, modifier, key, is_authenticate, result_offset, misses);
+    const size_t is_hit = emit_forward_jump(assembler, false, BAL_X86_COND_E);
+
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        patch_forward_jump(assembler, misses[i], true);
+    }
+
+    if (false == is_skipped_when_disabled)
+    {
+        patch_forward_jump(assembler, is_disabled, true);
+    }
+
+    emit_register_helper_call(
+        compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
+    bal_sliding_window_flush_all(&compiler->window);
+    patch_forward_jump(assembler, is_hit, false);
+
+    if (true == is_skipped_when_disabled)
+    {
+        patch_forward_jump(assembler, is_disabled, true);
+    }
+}
+
 /// Translates pointer authentication: LDRAA and LDRAB through bal_execute_authenticated_load(),
 /// which raises a data abort for an address that failed authentication, and everything else
 /// through bal_execute_pointer_authentication(). Returns true for the authenticated branches, whose
@@ -5551,23 +5663,35 @@ translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         comp
 
     if (true == is_keyed_hint)
     {
-        flush_dirty_registers(compiler);
-        reset_register_allocator(compiler);
-        bal_sliding_window_flush_all(&compiler->window);
-
-        // op2 bit 1 picks the B key, enabled by SCTLR_EL1.EnIB (bit 30) rather than EnIA (31).
-        bal_x86_assembler_t *BAL_RESTRICT assembler  = &compiler->assembler;
-        const uint8_t                     enable_bit = 0U != ((instruction >> 6U) & 1U) ? 30U : 31U;
-        bal_x86_emit_load_r64_rbp_offset(
-            assembler, BAL_X86_REGISTER_DISCARD_RESULT, (int32_t)offsetof(bal_cpu_t, sctlr_el1));
-        bal_x86_emit_bt_r64_imm8(assembler, BAL_X86_REGISTER_DISCARD_RESULT, enable_bit);
-        const size_t skip = emit_forward_jump(assembler, true, BAL_X86_COND_AE);
-
-        emit_register_helper_call(
-            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_pointer_authentication);
-        bal_sliding_window_flush_all(&compiler->window);
-        patch_forward_jump(assembler, skip, true);
+        // op2 bit 1 picks the B key and bit 2 authentication. CRm = 0001 works on X17 with the
+        // modifier X16; CRm = 0011 on X30 with zero (op2 bit 0 clear) or SP.
+        const uint32_t op2      = (instruction >> 5U) & 0x7U;
+        const bool     is_1716  = 0U == ((instruction >> 9U) & 1U);
+        const uint32_t target   = true == is_1716 ? 17U : 30U;
+        const uint32_t modifier = true == is_1716 ? 16U : (0U != (op2 & 0x1U) ? 31U : 32U);
+        emit_remembered_pointer_authentication(compiler,
+                                               instruction,
+                                               target,
+                                               modifier,
+                                               (op2 >> 1U) & 0x1U,
+                                               0U != (op2 & 0x4U),
+                                               offsetof(bal_cpu_t, x) + 8U * target,
+                                               true);
         return false;
+    }
+
+    // RETAA and RETAB authenticate X30 against SP into the PC.
+    if (0xD65F0BFFU == (instruction & 0xFFFFFBFFU))
+    {
+        emit_remembered_pointer_authentication(compiler,
+                                               instruction,
+                                               30U,
+                                               31U,
+                                               (instruction >> 10U) & 0x1U,
+                                               true,
+                                               offsetof(bal_cpu_t, pc),
+                                               false);
+        return true;
     }
 
     emit_register_helper_call(

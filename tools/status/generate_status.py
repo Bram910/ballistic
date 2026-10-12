@@ -3,11 +3,15 @@
 
 Usage, from the repository root after a debug build with tests (Linux, needs Unicorn):
 
-    python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage
+    python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage [SVE_CSV]
 
 The coverage tool runs random encodings of every decoder table entry through Ballistic and Unicorn
 and reports per entry whether tier 1 translates it and matches. Alias entries that the decoder never
 returns (their encodings resolve to the base instruction) are left out.
+
+Unicorn cannot run SVE. SVE_CSV, the output of tests/sve/run_sve_diff.sh, gives the SVE entries
+their status against qemu-aarch64 instead; entries both Ballistic and qemu reject count as not
+started.
 """
 
 import csv
@@ -82,8 +86,18 @@ def read_coverage(source):
         cls = encoding_class(int(expected, 16))
         if cls == "Reserved":
             continue
-        entries.append({"name": name, "class": cls, "status": status})
+        entries.append({"index": int(index), "name": name, "class": cls, "status": status})
     return entries
+
+
+def apply_sve(entries, path):
+    """Replaces the status of the SVE entries with the qemu comparison in `path`."""
+    statuses = {}
+    for row in csv.reader(line for line in Path(path).read_text().splitlines() if not line.startswith("#")):
+        statuses[int(row[0])] = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
+    for entry in entries:
+        if entry["class"] == "SVE":
+            entry["status"] = statuses.get(entry["index"], TODO)
 
 
 def squarify(items, x, y, w, h):
@@ -231,9 +245,9 @@ def render(entries, commit):
     ly = H - 8
     lx = 0
     for status, text in (
-        (VERIFIED, "translated and matches Unicorn"),
-        (UNVERIFIED, "translated, Unicorn cannot check it"),
-        (WRONG, "translated, differs from Unicorn"),
+        (VERIFIED, "matches Unicorn (qemu for SVE)"),
+        (UNVERIFIED, "translated, not checkable"),
+        (WRONG, "differs from the reference"),
         (TODO, "not started"),
     ):
         svg.append(f'<rect x="{lx}" y="{ly - 9}" width="10" height="10" fill="{COLORS[status]}"/>')
@@ -275,8 +289,8 @@ def update_readme(summary):
 
 {summary}
 
-Regenerate with `python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage`
-after a debug build.
+Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv` and
+`python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv`.
 {MARK_END}"""
     text = README.read_text(encoding="utf-8")
     if MARK_BEGIN in text:
@@ -287,9 +301,11 @@ after a debug build.
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         raise SystemExit(__doc__)
     entries = read_coverage(sys.argv[1])
+    if len(sys.argv) == 3:
+        apply_sve(entries, sys.argv[2])
     commit = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], capture_output=True, text=True
     ).stdout.strip() or "unknown"
@@ -314,9 +330,10 @@ def main():
         if members:
             done = sum(e["status"] == VERIFIED for e in members) / len(members)
             groups.append(f"{name} {100 * done:.1f}%")
+    reference = "Unicorn, and SVE against qemu-aarch64 with 128-bit vectors" if len(sys.argv) == 3 else "Unicorn"
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
-        f"operands against Unicorn: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "
+        f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "
         f"checkable (Unicorn cannot run the random samples or has a known bug for them), "
         f"{counts[WRONG]} wrong and {counts[TODO]} not started. Verified by group: {', '.join(groups)}."
     )

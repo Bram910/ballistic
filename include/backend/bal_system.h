@@ -1,7 +1,8 @@
 //! Runtime support for rarely used integer and system instructions.
 //!
 //! bal_execute_integer_helper() executes CRC32/CRC32C and the flag manipulation instructions
-//! CFINV, RMIF, SETF8, SETF16, AXFLAG and XAFLAG on the guest state; bal_execute_cache_zero()
+//! CFINV, RMIF, SETF8, SETF16, AXFLAG and XAFLAG, and the FEAT_CSSC ABS, CNT, CTZ, SMAX, SMIN,
+//! UMAX and UMIN on the guest state; bal_execute_cache_zero()
 //! executes DC ZVA. Translated code calls them with the guest state flushed to memory.
 #ifndef BALLISTIC_BAL_SYSTEM_H
 #define BALLISTIC_BAL_SYSTEM_H

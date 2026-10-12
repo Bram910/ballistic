@@ -25,6 +25,23 @@ is_crc32(const uint32_t instruction)
            && (instruction >> 31U) == (3U == size ? 1U : 0U);
 }
 
+/// FEAT_CSSC ABS, CNT and CTZ: sf 1 0 11010110 00000 00 opcode Rn Rd, with opcode 000110 (CTZ),
+/// 000111 (CNT) or 001000 (ABS).
+static bool
+is_cssc_one_source(const uint32_t instruction)
+{
+    const uint32_t opcode = (instruction >> 10U) & 0x3FU;
+    return 0x5AC00000U == (instruction & 0x7FFFC000U) && opcode >= 0x6U && opcode <= 0x8U;
+}
+
+/// FEAT_CSSC SMAX, UMAX, SMIN and UMIN: sf 0 0 11010110 Rm 0110 op Rn Rd (register) and
+/// sf 0 0 1000111 00 op imm8 Rn Rd (immediate).
+static bool
+is_cssc_minimum_maximum(const uint32_t instruction)
+{
+    return 0x1AC06000U == (instruction & 0x7FE0F000U) || 0x11C00000U == (instruction & 0x7FF00000U);
+}
+
 static bool
 is_cfinv(const uint32_t instruction)
 {
@@ -57,7 +74,8 @@ bool
 bal_is_integer_helper_supported(const uint32_t instruction)
 {
     return is_crc32(instruction) || is_cfinv(instruction) || is_rmif(instruction)
-           || is_setf(instruction) || is_flag_format(instruction);
+           || is_setf(instruction) || is_flag_format(instruction) || is_cssc_one_source(instruction)
+           || is_cssc_minimum_maximum(instruction);
 }
 
 static uint64_t
@@ -109,6 +127,68 @@ bal_execute_integer_helper(bal_cpu_t *cpu, const uint32_t instruction)
     if (true == is_cfinv(instruction))
     {
         cpu->flag_c ^= 1U;
+        return 1U;
+    }
+
+    if (true == is_cssc_one_source(instruction) || true == is_cssc_minimum_maximum(instruction))
+    {
+        const uint32_t rd       = instruction & 0x1FU;
+        const bool     is_64bit = 0U != (instruction >> 31U);
+        const uint32_t bits     = true == is_64bit ? 64U : 32U;
+        const uint64_t mask     = true == is_64bit ? ~0ULL : 0xFFFFFFFFULL;
+        const uint64_t value    = read_register(cpu, rn) & mask;
+        uint64_t       result   = 0U;
+
+        if (true == is_cssc_one_source(instruction))
+        {
+            switch ((instruction >> 10U) & 0x3FU)
+            {
+                case 0x6U: // CTZ
+                    result = 0U == value ? bits : (uint64_t)__builtin_ctzll(value);
+                    break;
+                case 0x7U: // CNT
+                    result = (uint64_t)__builtin_popcountll(value);
+                    break;
+                default: // ABS
+                {
+                    const bool is_negative = 0U != ((value >> (bits - 1U)) & 1U);
+                    result                 = true == is_negative ? (0U - value) & mask : value;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // The immediate forms take a signed (SMAX, SMIN) or unsigned imm8.
+            const bool     is_immediate = 0x11C00000U == (instruction & 0x7FF00000U);
+            const uint32_t op
+                = true == is_immediate ? (instruction >> 18U) & 0x3U : (instruction >> 10U) & 0x3U;
+            const bool is_unsigned = 0U != (op & 0x1U);
+            const bool is_minimum  = 0U != (op & 0x2U);
+            uint64_t   other       = 0U;
+
+            if (true == is_immediate)
+            {
+                const uint64_t imm8 = (instruction >> 10U) & 0xFFU;
+                other = true == is_unsigned ? imm8 : (uint64_t)(int64_t)(int8_t)imm8 & mask;
+            }
+            else
+            {
+                other = read_register(cpu, (instruction >> 16U) & 0x1FU) & mask;
+            }
+
+            // Compare as unsigned, or as signed by flipping the sign bits.
+            const uint64_t sign      = true == is_unsigned ? 0U : 1ULL << (bits - 1U);
+            const bool     is_larger = (value ^ sign) > (other ^ sign);
+
+            result = is_larger != is_minimum ? value : other;
+        }
+
+        if (rd != 31U)
+        {
+            cpu->x[rd] = result;
+        }
+
         return 1U;
     }
 

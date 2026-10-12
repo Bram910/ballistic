@@ -715,6 +715,46 @@ test_PacMemo_FollowsKeyChangesBetweenRuns(void)
     TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
 }
 
+/// Runs one instruction with X1 and X2 set, returning X0, which starts as all ones.
+static uint64_t
+run_one(const uint32_t instruction, const uint64_t x1, const uint64_t x2)
+{
+    load_program(&instruction, 1U);
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    g_cpu.x[0]  = ~0ULL;
+    g_cpu.x[1]  = x1;
+    g_cpu.x[2]  = x2;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    return g_cpu.x[0];
+}
+
+static void
+test_Cssc_AbsCntCtz(void)
+{
+    TEST_ASSERT_EQUAL_HEX64(5U, run_one(0xDAC02020U, (uint64_t)-5, 0U));             // ABS X0, X1
+    TEST_ASSERT_EQUAL_HEX64(0x80000000U, run_one(0x5AC02020U, 0xFF80000000ULL, 0U)); // ABS W0, W1
+    TEST_ASSERT_EQUAL_HEX64(7U, run_one(0x5AC02020U, 0xFFFFFFF9U, 0U));              // ABS W0, W1
+    TEST_ASSERT_EQUAL_HEX64(9U, run_one(0xDAC01C20U, 0x800000000000F0F0ULL, 0U));    // CNT X0, X1
+    TEST_ASSERT_EQUAL_HEX64(0U, run_one(0x5AC01C20U, 0xFFFFFFFF00000000ULL, 0U));    // CNT W0, W1
+    TEST_ASSERT_EQUAL_HEX64(32U, run_one(0x5AC01820U, 0xFF00000000ULL, 0U));         // CTZ W0, W1
+    TEST_ASSERT_EQUAL_HEX64(8U, run_one(0xDAC01820U, 0x100U, 0U));                   // CTZ X0, X1
+    TEST_ASSERT_EQUAL_HEX64(64U, run_one(0xDAC01820U, 0U, 0U));                      // CTZ X0, X1
+}
+
+static void
+test_Cssc_MinimumMaximum(void)
+{
+    // SMAX X0, X1, #-3 and UMIN W0, W1, #200.
+    TEST_ASSERT_EQUAL_HEX64((uint64_t)-3, run_one(0x91C3F420U, (uint64_t)-10, 0U));
+    TEST_ASSERT_EQUAL_HEX64(200U, run_one(0x11CF2020U, 0xFFFFFFFFU, 0U));
+    // SMAX W0, W1, #-3 on a negative W1 compares the low 32 bits as signed.
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFDU, run_one(0x11C3F420U, 0xFFFFFFF0U, 0U));
+    // SMIN X0, X1, X2 and UMAX W0, W1, W2.
+    TEST_ASSERT_EQUAL_HEX64((uint64_t)-7, run_one(0x9AC26820U, 4U, (uint64_t)-7));
+    TEST_ASSERT_EQUAL_HEX64(0x80000000U, run_one(0x1AC26420U, 0x1234U, 0x7780000000ULL));
+}
+
 int
 main(void)
 {
@@ -738,6 +778,8 @@ main(void)
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
     RUN_TEST(test_PacMemo_SigningAgainGivesTheSameCode);
     RUN_TEST(test_PacMemo_FollowsKeyChangesBetweenRuns);
+    RUN_TEST(test_Cssc_AbsCntCtz);
+    RUN_TEST(test_Cssc_MinimumMaximum);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

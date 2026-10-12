@@ -1238,6 +1238,15 @@ local function main(...)
             inst.opcode_override = "OPCODE_NOP"
         end
 
+        -- The FEAT_CSSC integer instructions, executed by the integer helper; their SIMD and SVE
+        -- namesakes are routed by encoding around this.
+        local cssc = { ABS = true, CNT = true, CTZ = true, SMAX = true, SMIN = true, UMAX = true,
+                       UMIN = true }
+
+        if cssc[inst.mnemonic] and top_bits > 0x3 then
+            inst.opcode_override = "OPCODE_INTEGER_HELPER"
+        end
+
         -- op0 = x111 is the scalar floating-point and Advanced SIMD data processing space, which
         -- the floating-point and SIMD helpers decode themselves. Its mnemonics overlap with
         -- integer ones such as ADD and ORR, so it is routed by encoding.

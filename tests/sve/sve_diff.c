@@ -17,7 +17,8 @@
 //!     index,mnemonic,mask,expected,status,translated,matched,samples
 //!
 //! where status is `verified` (every compared sample matched), `wrong`, `todo` (Ballistic rejects
-//! the encodings qemu runs) or `undefined` (both reject them). Mismatch reports start with `#`.
+//! the encodings qemu runs), `undefined` (both reject them) or `unchecked` (qemu rejects what
+//! Ballistic runs, an extension it lacks). Mismatch reports start with `#`.
 // mkdtemp() and the other POSIX functions.
 #define _DEFAULT_SOURCE
 
@@ -386,6 +387,8 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
 ///   they need.
 /// - Its SME vertical tile slice loads (qemu 11) leave the inactive elements after the last
 ///   active one unchanged instead of zeroing them.
+/// - It raises an undefined instruction exception for LDCLRP, LDSETP and SWPP with Rt equal to
+///   Rt2, which later versions of the architecture make CONSTRAINED UNPREDICTABLE.
 /// - For an instruction qemu lacks, the reference runs an equivalent one without its alignment
 ///   checks, so a fault only Ballistic raises is not compared.
 /// - qemu-user turns a guest address into a host one without checking the guest mapped it, so a
@@ -400,6 +403,14 @@ is_known_qemu_difference(const sve_test_t  *test,
     const uint32_t m             = (instruction >> 16U) & 0x1FU;
     const bool     is_nonfault   = 0xA410A000U == (instruction & 0xFE10E000U);
     const bool     is_firstfault = 0xA4006000U == (instruction & 0xFE00E000U);
+
+    const bool is_lse128_pair = 0x19200000U == (instruction & 0xFF200C00U)
+                                && (instruction & 0x1FU) == ((instruction >> 16U) & 0x1FU);
+
+    if (true == is_lse128_pair && STATUS_SIGILL == reference->status)
+    {
+        return true;
+    }
 
     if (0U != test->substitute && STATUS_SIGSEGV == ballistic->status && 0U == reference->status)
     {
@@ -850,6 +861,13 @@ main(int argc, char **argv)
     {
         const record_t *record = &records[i];
         uint32_t       *t      = tally[record->entry];
+
+        if (NULL != getenv("BAL_SVE_TRACE"))
+        {
+            printf("#T %08X ballistic %u/%llu reference %llu\n", record->test.instruction,
+                   record->ballistic_ok, (unsigned long long)record->ballistic.status,
+                   (unsigned long long)record->reference.status);
+        }
         const uint64_t  status = record->reference.status;
         ++t[2];
         t[3] += STATUS_SIGILL != status && STATUS_CRASHED != status ? 1U : 0U;
@@ -896,7 +914,12 @@ main(int argc, char **argv)
 
         const char *status = "todo";
 
-        if (t[0] > t[1])
+        if (0U == t[3] && t[0] > 0U)
+        {
+            // The reference rejects every sample Ballistic runs: an extension qemu lacks.
+            status = "unchecked";
+        }
+        else if (t[0] > t[1])
         {
             status = "wrong";
         }

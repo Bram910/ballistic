@@ -42,7 +42,9 @@ format of the status tracker's coverage tool. The status is one of:
 - `wrong`;
 - `todo`: Ballistic rejects encodings qemu runs;
 - `undefined`: both reject them; these are mostly SVE2.1 and SME2 instructions newer than the
-  reference's qemu.
+  reference's qemu;
+- `unchecked`: qemu rejects every sample Ballistic runs, an extension qemu lacks (FEAT_LSE128
+  and FEAT_THE in qemu 11.1).
 
 With `$BAL_SVE_SPACE` set to `all`, it tests the decoder entries listed in `MNEMONICS` from any
 encoding space. This checks the loads and stores newer than Unicorn against qemu (10.1 or later):

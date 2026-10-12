@@ -1623,6 +1623,676 @@ write_ffr(sve_t *sve, const uint32_t instruction)
 }
 
 // -----------------------------------------------------------------------------
+// Predicate operations
+// -----------------------------------------------------------------------------
+
+/// AND, BIC, EOR, SEL, ORR, ORN, NOR and NAND on predicates, with the flag-setting forms:
+/// 00100101 op S 00 Pm 01 Pg o2 Pn o3 Pd.
+static sve_result_t
+predicate_logical(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t op = ((instruction >> 23U) & 1U) << 2U | ((instruction >> 9U) & 1U) << 1U
+                        | ((instruction >> 4U) & 1U);
+    const bool     setflags = 0U != (instruction & 0x400000U);
+    const uint16_t m        = read_p(sve, (instruction >> 16U) & 0xFU);
+    const uint16_t g        = read_p(sve, (instruction >> 10U) & 0xFU);
+    const uint16_t n        = read_p(sve, (instruction >> 5U) & 0xFU);
+    uint16_t       result   = 0U;
+
+    switch (op)
+    {
+        case 0U:
+            result = (uint16_t)(n & m & g);
+            break; // AND
+        case 1U:
+            result = (uint16_t)(n & ~m & g);
+            break; // BIC
+        case 2U:
+            result = (uint16_t)((n ^ m) & g);
+            break; // EOR
+        case 3U:   // SEL
+            if (true == setflags)
+            {
+                return SVE_UNDEFINED;
+            }
+            result = (uint16_t)((n & g) | (m & ~g));
+            break;
+        case 4U:
+            result = (uint16_t)((n | m) & g);
+            break; // ORR
+        case 5U:
+            result = (uint16_t)((n | ~m) & g);
+            break; // ORN
+        case 6U:
+            result = (uint16_t)(~(n | m) & g);
+            break; // NOR
+        default:
+            result = (uint16_t)(~(n & m) & g);
+            break; // NAND
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+
+    if (true == setflags)
+    {
+        write_nzcv(sve, predicate_test(g, result, 8U));
+    }
+
+    return SVE_OK;
+}
+
+/// BRKA and BRKB (00100101 B S 010000 01 Pg 0 Pn M Pd) and BRKN (00100101 0 S 011000 01 Pg 0
+/// Pn 0 Pdm).
+static sve_result_t
+predicate_break(sve_t *sve, const uint32_t instruction)
+{
+    const bool     setflags = 0U != (instruction & 0x400000U);
+    const bool     is_next  = 0U != (instruction & 0x80000U);
+    const bool     is_after = 0U == (instruction & 0x800000U);
+    const bool     merging  = 0U != (instruction & 0x10U);
+    const uint16_t g        = read_p(sve, (instruction >> 10U) & 0xFU);
+    const uint16_t n        = read_p(sve, (instruction >> 5U) & 0xFU);
+    const uint16_t d        = read_p(sve, instruction & 0xFU);
+    uint16_t       result   = 0U;
+
+    if (true == is_next)
+    {
+        // BRKN: keep Pdm if the last active element of Pn is true, else clear it.
+        if (false == is_after || true == merging)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        bool last = false;
+
+        for (uint32_t e = 0U; e < 16U; ++e)
+        {
+            if (true == is_active(g, e, 8U))
+            {
+                last = is_active(n, e, 8U);
+            }
+        }
+
+        result                          = true == last ? d : 0U;
+        sve->cpu->p[instruction & 0xFU] = result;
+
+        if (true == setflags)
+        {
+            write_nzcv(sve, predicate_test(0xFFFFU, result, 8U));
+        }
+
+        return SVE_OK;
+    }
+
+    if (true == setflags && true == merging)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    bool brk = false;
+
+    for (uint32_t e = 0U; e < 16U; ++e)
+    {
+        if (true == is_active(g, e, 8U))
+        {
+            const bool element = is_active(n, e, 8U);
+
+            if (false == is_after)
+            {
+                brk = brk || element;
+            }
+
+            result = set_active(result, e, 8U, false == brk);
+
+            if (true == is_after)
+            {
+                brk = brk || element;
+            }
+        }
+        else if (true == merging)
+        {
+            result = set_active(result, e, 8U, is_active(d, e, 8U));
+        }
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+
+    if (true == setflags)
+    {
+        write_nzcv(sve, predicate_test(g, result, 8U));
+    }
+
+    return SVE_OK;
+}
+
+/// BRKPA and BRKPB: 00100101 0 S 00 Pm 11 Pg 0 Pn B Pd.
+static sve_result_t
+predicate_break_propagate(sve_t *sve, const uint32_t instruction)
+{
+    const bool     setflags  = 0U != (instruction & 0x400000U);
+    const bool     is_before = 0U != (instruction & 0x10U);
+    const uint16_t m         = read_p(sve, (instruction >> 16U) & 0xFU);
+    const uint16_t g         = read_p(sve, (instruction >> 10U) & 0xFU);
+    const uint16_t n         = read_p(sve, (instruction >> 5U) & 0xFU);
+    bool           last      = false;
+    uint16_t       result    = 0U;
+
+    for (uint32_t e = 0U; e < 16U; ++e)
+    {
+        if (true == is_active(g, e, 8U))
+        {
+            last = is_active(n, e, 8U);
+        }
+    }
+
+    for (uint32_t e = 0U; e < 16U; ++e)
+    {
+        if (true == is_active(g, e, 8U))
+        {
+            if (true == is_before)
+            {
+                last = last && false == is_active(m, e, 8U);
+            }
+
+            result = set_active(result, e, 8U, last);
+
+            if (false == is_before)
+            {
+                last = last && false == is_active(m, e, 8U);
+            }
+        }
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+
+    if (true == setflags)
+    {
+        write_nzcv(sve, predicate_test(g, result, 8U));
+    }
+
+    return SVE_OK;
+}
+
+/// PTEST: 00100101 01010000 11 Pg 0 Pn 00000.
+static sve_result_t
+predicate_test_instruction(sve_t *sve, const uint32_t instruction)
+{
+    write_nzcv(sve,
+               predicate_test(read_p(sve, (instruction >> 10U) & 0xFU),
+                              read_p(sve, (instruction >> 5U) & 0xFU),
+                              8U));
+    return SVE_OK;
+}
+
+/// PFIRST: 00100101 01011000 1100000 Pg 0 Pdn.
+static sve_result_t
+predicate_first(sve_t *sve, const uint32_t instruction)
+{
+    const uint16_t g      = read_p(sve, (instruction >> 5U) & 0xFU);
+    uint16_t       result = read_p(sve, instruction & 0xFU);
+
+    for (uint32_t e = 0U; e < 16U; ++e)
+    {
+        if (true == is_active(g, e, 8U))
+        {
+            result = set_active(result, e, 8U, true);
+            break;
+        }
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    write_nzcv(sve, predicate_test(g, result, 8U));
+    return SVE_OK;
+}
+
+/// PNEXT: 00100101 size 011001 1100010 Pv 0 Pdn.
+static sve_result_t
+predicate_next(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize    = size_at_22(instruction);
+    const uint16_t mask     = read_p(sve, (instruction >> 5U) & 0xFU);
+    const uint16_t operand  = read_p(sve, instruction & 0xFU);
+    const uint32_t elements = elements_of(esize);
+    uint32_t       next     = 0U;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (true == is_active(operand, e, esize))
+        {
+            next = e + 1U;
+        }
+    }
+
+    while (next < elements && false == is_active(mask, next, esize))
+    {
+        ++next;
+    }
+
+    uint16_t result = 0U;
+
+    if (next < elements)
+    {
+        result = set_active(result, next, esize, true);
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    write_nzcv(sve, predicate_test(mask, result, esize));
+    return SVE_OK;
+}
+
+static uint64_t
+count_active(const uint16_t mask, const uint16_t operand, const uint32_t esize)
+{
+    uint64_t count = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        count
+            += true == is_active(mask, e, esize) && true == is_active(operand, e, esize) ? 1U : 0U;
+    }
+
+    return count;
+}
+
+/// CNTP: 00100101 size 100000 10 Pg 0 Pn Rd.
+static sve_result_t
+count_predicate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+    write_x(sve,
+            instruction & 0x1FU,
+            count_active(read_p(sve, (instruction >> 10U) & 0xFU),
+                         read_p(sve, (instruction >> 5U) & 0xFU),
+                         esize));
+    return SVE_OK;
+}
+
+/// Adds `delta` (any sign) to `value`, saturating to a `bits`-bit signed or unsigned range, and
+/// returns the result sign- or zero-extended to 64 bits.
+static uint64_t
+saturating_offset(const uint64_t value,
+                  const int64_t  delta,
+                  const uint32_t bits,
+                  const bool     is_unsigned)
+{
+    const __int128 start = true == is_unsigned ? (__int128)(value & mask_of(bits))
+                                               : (__int128)sign_extend(value, bits);
+    __int128       sum   = start + delta;
+    const __int128 high
+        = true == is_unsigned ? (__int128)mask_of(bits) : (__int128)(mask_of(bits) >> 1U);
+    const __int128 low = true == is_unsigned ? 0 : -high - 1;
+    sum                = sum > high ? high : (sum < low ? low : sum);
+    return true == is_unsigned ? (uint64_t)sum & mask_of(bits) : (uint64_t)(int64_t)sum;
+}
+
+/// INCP, DECP, SQINCP, UQINCP, SQDECP and UQDECP: 00100101 size 101 op D U 1000 opc Pm Rdn/Zdn,
+/// by the number of active elements of Pm.
+static sve_result_t
+count_predicate_update(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+    // INCP and DECP have D in bit 16; the saturating forms D in bit 17 and U in bit 16.
+    const bool is_plain = 0U != (instruction & 0x40000U);
+    const bool is_decrement
+        = true == is_plain ? 0U != (instruction & 0x10000U) : 0U != (instruction & 0x20000U);
+    const bool     is_unsigned = false == is_plain && 0U != (instruction & 0x10000U);
+    const bool     is_scalar   = 0U != (instruction & 0x800U);
+    const uint32_t opc         = (instruction >> 9U) & 0x3U;
+    const uint64_t count = count_active(0xFFFFU, read_p(sve, (instruction >> 5U) & 0xFU), esize);
+    const int64_t  delta = true == is_decrement ? -(int64_t)count : (int64_t)count;
+    const uint32_t rdn   = instruction & 0x1FU;
+
+    if ((true == is_plain && (0U != (instruction & 0x20000U) || opc != 0U))
+        || (false == is_scalar && opc != 0U)
+        || (false == is_plain && true == is_scalar && opc > 1U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (true == is_scalar)
+    {
+        const uint64_t value = read_x(sve, rdn);
+
+        if (true == is_plain)
+        {
+            write_x(sve, rdn, value + (uint64_t)delta);
+        }
+        else
+        {
+            // opc<0> (bit 10) selects 64-bit saturation; otherwise the 32-bit result is extended.
+            write_x(sve,
+                    rdn,
+                    saturating_offset(value, delta, 0U != (opc & 1U) ? 64U : 32U, is_unsigned));
+        }
+
+        return SVE_OK;
+    }
+
+    if (8U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    vector_t result = read_z(sve, rdn);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a = get_element(&result, e, esize);
+        set_element(&result,
+                    e,
+                    esize,
+                    true == is_plain ? a + (uint64_t)delta
+                                     : saturating_offset(a, delta, esize, is_unsigned));
+    }
+
+    write_z(sve, rdn, result);
+    return SVE_OK;
+}
+
+/// INC and DEC (scalar, 00000100 size 11 imm4 11100 D pattern Rdn, and vector, ... 11 imm4
+/// 11000 D pattern Zdn), and the saturating SQINC, UQINC, SQDEC and UQDEC (scalar, ... 1 sf imm4
+/// 1111 D U pattern Rdn, and vector, ... 10 imm4 1100 D U pattern Zdn).
+static sve_result_t
+count_update(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize     = size_at_22(instruction);
+    const uint32_t pattern   = (instruction >> 5U) & 0x1FU;
+    const uint64_t scale     = ((instruction >> 16U) & 0xFU) + 1U;
+    const int64_t  amount    = (int64_t)(pattern_count(pattern, esize) * scale);
+    const bool     is_scalar = 0U != (instruction & 0x2000U);
+    const bool is_plain = 0x3U == ((instruction >> 20U) & 0x3U) && 0U == (instruction & 0x1000U);
+    const bool is_decrement
+        = true == is_plain ? 0U != (instruction & 0x400U) : 0U != (instruction & 0x800U);
+    const bool     is_unsigned = false == is_plain && 0U != (instruction & 0x400U);
+    const int64_t  delta       = true == is_decrement ? -amount : amount;
+    const uint32_t rdn         = instruction & 0x1FU;
+
+    if (true == is_scalar)
+    {
+        const uint64_t value = read_x(sve, rdn);
+
+        if (true == is_plain)
+        {
+            if (0U != (instruction & 0x800U))
+            {
+                return SVE_UNDEFINED;
+            }
+
+            write_x(sve, rdn, value + (uint64_t)delta);
+        }
+        else
+        {
+            const uint32_t bits = 0U != (instruction & 0x100000U) ? 64U : 32U;
+            write_x(sve, rdn, saturating_offset(value, delta, bits, is_unsigned));
+        }
+
+        return SVE_OK;
+    }
+
+    if (8U == esize || (true == is_plain && 0U != (instruction & 0x800U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    vector_t result = read_z(sve, rdn);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a = get_element(&result, e, esize);
+        set_element(&result,
+                    e,
+                    esize,
+                    true == is_plain ? a + (uint64_t)delta
+                                     : saturating_offset(a, delta, esize, is_unsigned));
+    }
+
+    write_z(sve, rdn, result);
+    return SVE_OK;
+}
+
+/// WHILELT, WHILELE, WHILELO, WHILELS and the decrementing WHILEGE, WHILEGT, WHILEHS and WHILEHI:
+/// 00100101 size 1 Rm 000 sf U lt Rn eq Pd.
+static sve_result_t
+predicate_while(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize       = size_at_22(instruction);
+    const uint32_t rsize       = 0U != (instruction & 0x1000U) ? 64U : 32U;
+    const bool     is_unsigned = 0U != (instruction & 0x800U);
+    const bool     is_less     = 0U != (instruction & 0x400U);
+    // Bit 4 selects LE and LS for the incrementing forms but GT and HI for the decrementing ones.
+    const bool     or_equal = (0U != (instruction & 0x10U)) == is_less;
+    const uint64_t operand2 = read_x(sve, (instruction >> 16U) & 0x1FU) & mask_of(rsize);
+    uint64_t       operand1 = read_x(sve, (instruction >> 5U) & 0x1FU) & mask_of(rsize);
+    const uint32_t elements = elements_of(esize);
+    uint16_t       result   = 0U;
+    bool           last     = true;
+
+    for (uint32_t i = 0U; i < elements; ++i)
+    {
+        const uint32_t e = true == is_less ? i : elements - 1U - i;
+        const int      order
+            = true == is_unsigned
+                  ? (operand1 < operand2 ? -1 : (operand1 > operand2 ? 1 : 0))
+                  : (sign_extend(operand1, rsize) < sign_extend(operand2, rsize)
+                         ? -1
+                         : (sign_extend(operand1, rsize) > sign_extend(operand2, rsize) ? 1 : 0));
+        const bool condition = true == is_less ? (order < 0 || (true == or_equal && 0 == order))
+                                               : (order > 0 || (true == or_equal && 0 == order));
+        last                 = last && condition;
+        result               = set_active(result, e, esize, last);
+        operand1             = (true == is_less ? operand1 + 1U : operand1 - 1U) & mask_of(rsize);
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    write_nzcv(sve, predicate_test(0xFFFFU, result, esize));
+    return SVE_OK;
+}
+
+/// WHILEWR and WHILERW: 00100101 size 1 Rm 001100 Rn rw Pd.
+static sve_result_t
+predicate_while_conflict(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize    = size_at_22(instruction);
+    const bool     is_rw    = 0U != (instruction & 0x10U);
+    const uint64_t operand1 = read_x(sve, (instruction >> 5U) & 0x1FU);
+    const uint64_t operand2 = read_x(sve, (instruction >> 16U) & 0x1FU);
+    __int128       diff     = (__int128)operand2 - (__int128)operand1;
+
+    // WHILEWR stops at a write after read of an earlier element: a negative difference does not
+    // conflict; WHILERW counts both directions.
+    if (true == is_rw && diff < 0)
+    {
+        diff = -diff;
+    }
+
+    const __int128 limit  = diff / (esize / 8U);
+    uint16_t       result = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const bool active = true == is_rw ? (0 == limit || e < limit) : (limit <= 0 || e < limit);
+        result            = set_active(result, e, esize, active);
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    write_nzcv(sve, predicate_test(0xFFFFU, result, esize));
+    return SVE_OK;
+}
+
+/// CTERMEQ and CTERMNE: 00100101 1 sz 1 Rm 001000 Rn ne 0000.
+static sve_result_t
+compare_terminate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t bits = 0U != (instruction & 0x400000U) ? 64U : 32U;
+    const uint64_t a    = read_x(sve, (instruction >> 5U) & 0x1FU) & mask_of(bits);
+    const uint64_t b    = read_x(sve, (instruction >> 16U) & 0x1FU) & mask_of(bits);
+    const bool     term = 0U != (instruction & 0x10U) ? a != b : a == b;
+
+    if (true == term)
+    {
+        sve->cpu->flag_n = 1U;
+        sve->cpu->flag_v = 0U;
+    }
+    else
+    {
+        sve->cpu->flag_n = 0U;
+        sve->cpu->flag_v = (uint8_t)(sve->cpu->flag_c ^ 1U);
+    }
+
+    return SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
+// Integer compares
+// -----------------------------------------------------------------------------
+
+/// Compares `a` with `b` by `kind`: 0 EQ, 1 NE, 2 GE, 3 GT, 4 LT, 5 LE, 6 HS, 7 HI, 8 LO, 9 LS.
+static bool
+compare_integers(
+    const uint32_t kind, const int64_t sa, const int64_t sb, const uint64_t ua, const uint64_t ub)
+{
+    switch (kind)
+    {
+        case 0U:
+            return ua == ub;
+        case 1U:
+            return ua != ub;
+        case 2U:
+            return sa >= sb;
+        case 3U:
+            return sa > sb;
+        case 4U:
+            return sa < sb;
+        case 5U:
+            return sa <= sb;
+        case 6U:
+            return ua >= ub;
+        case 7U:
+            return ua > ub;
+        case 8U:
+            return ua < ub;
+        default:
+            return ua <= ub;
+    }
+}
+
+/// Writes the compare result of every element to Pd and sets the flags.
+static sve_result_t
+finish_compare(sve_t          *sve,
+               const uint32_t  instruction,
+               const uint32_t  esize,
+               const uint32_t  kind,
+               const vector_t *n,
+               const vector_t *m,
+               const bool      is_wide,
+               const bool      is_immediate,
+               const uint64_t  immediate)
+{
+    const uint16_t g      = read_p(sve, (instruction >> 10U) & 0x7U);
+    uint16_t       result = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(g, e, esize))
+        {
+            continue;
+        }
+
+        const uint64_t a  = get_element(n, e, esize);
+        const int64_t  sa = sign_extend(a, esize);
+        int64_t        sb;
+        uint64_t       ub;
+
+        if (true == is_immediate)
+        {
+            sb = (int64_t)immediate;
+            ub = immediate;
+        }
+        else if (true == is_wide)
+        {
+            ub = get_element(m, (e * esize) / 64U, 64U);
+            sb = (int64_t)ub;
+        }
+        else
+        {
+            ub = get_element(m, e, esize);
+            sb = sign_extend(ub, esize);
+        }
+
+        // Unsigned comparisons of a narrow element against a doubleword need the element zero
+        // extended, which `a` is.
+        result = set_active(result, e, esize, compare_integers(kind, sa, sb, a, ub));
+    }
+
+    sve->cpu->p[instruction & 0xFU] = result;
+    write_nzcv(sve, predicate_test(g, result, esize));
+    return SVE_OK;
+}
+
+/// CMP<cc> (vectors and wide elements): 00100100 size 0 Zm op 0 o2 Pg Zn ne Pd.
+static sve_result_t
+compare_vectors(sve_t *sve, const uint32_t instruction)
+{
+    static const uint32_t KINDS[8][2] = {
+        { 6U, 7U }, // 000: HS, HI
+        { 0U, 1U }, // 001: EQ, NE (wide)
+        { 2U, 3U }, // 010: GE, GT (wide)
+        { 4U, 5U }, // 011: LT, LE (wide)
+        { 2U, 3U }, // 100: GE, GT
+        { 0U, 1U }, // 101: EQ, NE
+        { 6U, 7U }, // 110: HS, HI (wide)
+        { 8U, 9U }, // 111: LO, LS (wide)
+    };
+    const uint32_t op      = (instruction >> 13U) & 0x7U;
+    const uint32_t esize   = size_at_22(instruction);
+    const bool     is_wide = op != 0U && op != 4U && op != 5U;
+
+    if (true == is_wide && 64U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m = read_z(sve, (instruction >> 16U) & 0x1FU);
+    return finish_compare(
+        sve, instruction, esize, KINDS[op][(instruction >> 4U) & 1U], &n, &m, is_wide, false, 0U);
+}
+
+/// CMP<cc> (signed immediate, 00100101 size 0 imm5 op 0 o2 Pg Zn ne Pd) and (unsigned
+/// immediate, 00100100 size 1 imm7 lt Pg Zn ne Pd).
+static sve_result_t
+compare_immediate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize       = size_at_22(instruction);
+    const bool     is_unsigned = 0x24000000U == (instruction & 0xFF000000U);
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    uint32_t       kind;
+    uint64_t       immediate;
+
+    if (true == is_unsigned)
+    {
+        kind      = (0U != (instruction & 0x2000U) ? 8U : 6U) + ((instruction >> 4U) & 1U);
+        immediate = (instruction >> 14U) & 0x7FU;
+    }
+    else
+    {
+        static const uint32_t KINDS[8][2] = {
+            { 2U, 3U }, { 4U, 5U },   { 99U, 99U }, { 99U, 99U },
+            { 0U, 1U }, { 99U, 99U }, { 99U, 99U }, { 99U, 99U },
+        };
+        kind      = KINDS[(instruction >> 13U) & 0x7U][(instruction >> 4U) & 1U];
+        immediate = (uint64_t)sign_extend((instruction >> 16U) & 0x1FU, 5U);
+
+        if (99U == kind)
+        {
+            return SVE_UNDEFINED;
+        }
+    }
+
+    return finish_compare(sve, instruction, esize, kind, &n, &n, false, true, immediate);
+}
+
+// -----------------------------------------------------------------------------
 // Element counts
 // -----------------------------------------------------------------------------
 
@@ -1696,6 +2366,24 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFFFF800U, 0x04BF5000U, read_vector_length },
     { 0xFFA0F800U, 0x04205000U, add_vector_length },
     { 0xFF30FC00U, 0x0420E000U, count_elements },
+    { 0xFF30F800U, 0x0430E000U, count_update },
+    { 0xFF30F800U, 0x0430C000U, count_update },
+    { 0xFF20F000U, 0x0420F000U, count_update },
+    { 0xFF30F000U, 0x0420C000U, count_update },
+    { 0xFF30C000U, 0x25004000U, predicate_logical },
+    { 0xFF37C200U, 0x25104000U, predicate_break },
+    { 0xFFB0C200U, 0x2500C000U, predicate_break_propagate },
+    { 0xFFFFC21FU, 0x2550C000U, predicate_test_instruction },
+    { 0xFFFFFE10U, 0x2558C000U, predicate_first },
+    { 0xFF3FFE10U, 0x2519C400U, predicate_next },
+    { 0xFF3FC200U, 0x25208000U, count_predicate },
+    { 0xFF38F000U, 0x25288000U, count_predicate_update },
+    { 0xFF20E000U, 0x25200000U, predicate_while },
+    { 0xFF20FC00U, 0x25203000U, predicate_while_conflict },
+    { 0xFFA0FC0FU, 0x25A02000U, compare_terminate },
+    { 0xFF200000U, 0x24000000U, compare_vectors },
+    { 0xFF204000U, 0x25000000U, compare_immediate },
+    { 0xFF200000U, 0x24200000U, compare_immediate },
 };
 
 static sve_result_t

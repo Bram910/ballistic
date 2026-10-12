@@ -4800,30 +4800,6 @@ sve2_integer_predicated(sve_t *sve, const uint32_t instruction)
     return SVE_OK;
 }
 
-/// The high half of twice `product` plus `rounding`, as (2 * product + rounding) >> esize
-/// without overflowing on 64-bit elements.
-static __int128
-doubled_high(const __int128 product, const uint32_t esize, const bool is_rounding)
-{
-    if (64U == esize)
-    {
-        return (product + (true == is_rounding ? (__int128)1 << 62U : 0)) >> 63U;
-    }
-
-    return (2 * product + (true == is_rounding ? (__int128)1 << (esize - 1U) : 0)) >> esize;
-}
-
-/// SQDMULH and SQRDMULH on one element: the high half of twice the product, saturated.
-static uint64_t
-doubling_multiply_high(const uint64_t a,
-                       const uint64_t b,
-                       const uint32_t esize,
-                       const bool     is_rounding)
-{
-    const __int128 product = wide(a, esize, true) * wide(b, esize, true);
-    return narrow_to(doubled_high(product, esize, is_rounding), esize, SATURATE_SIGNED);
-}
-
 /// SQRDMLAH and SQRDMLSH on one element: the accumulator plus or minus the rounded high half of
 /// twice the product, saturated. The accumulator is a multiple of 2^esize in the sum, so it adds
 /// after the shift.

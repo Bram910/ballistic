@@ -17,6 +17,8 @@ typedef enum
     SVE_UNDEFINED,
     /// An access was not mapped.
     SVE_FAULT,
+    /// An SME instruction needs streaming mode or ZA storage, which is off.
+    SVE_ILLEGAL,
 } sve_result_t;
 
 /// A Z register: d[0] holds bits 63:0 and d[1] bits 127:64.
@@ -354,6 +356,13 @@ shift_wide(__int128 value, const int64_t amount, const uint32_t esize, const boo
 
     return value >> shift;
 }
+
+/// PSTATE.SM and PSTATE.ZA in bal_cpu_t::svcr.
+#define SVCR_SM 1U
+#define SVCR_ZA 2U
+
+/// Executes an instruction of the SME encoding space (bal_sme.c).
+sve_result_t sme_execute(sve_t *sve, uint32_t instruction);
 
 #endif /* BALLISTIC_BAL_SVE_SHARED_H */
 

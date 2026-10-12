@@ -6382,6 +6382,12 @@ static const sve_pattern_t PATTERNS[] = {
 static sve_result_t
 execute(sve_t *sve, const uint32_t instruction)
 {
+    // op0 = 0000 with bit 31 set is the SME encoding space.
+    if (0x80000000U == (instruction & 0x9E000000U))
+    {
+        return sme_execute(sve, instruction);
+    }
+
     for (size_t i = 0U; i < sizeof(PATTERNS) / sizeof(PATTERNS[0]); ++i)
     {
         if (PATTERNS[i].value == (instruction & PATTERNS[i].mask))
@@ -6412,7 +6418,9 @@ bal_is_sve_supported(const uint32_t instruction)
     bal_memory_interface_t memory;
     (void)memset(&memory, 0, sizeof(memory));
     memory.translate = scratch_translate;
-    sve_t sve        = { .cpu = &cpu, .memory = &memory, .flags = 0U };
+    // With streaming mode and ZA on, so that SME instructions run instead of being illegal.
+    cpu.svcr  = SVCR_SM | SVCR_ZA;
+    sve_t sve = { .cpu = &cpu, .memory = &memory, .flags = 0U };
     return execute(&sve, instruction) != SVE_UNDEFINED;
 }
 
@@ -6424,7 +6432,21 @@ bal_execute_sve(bal_cpu_t                    *cpu,
     sve_t              sve    = { .cpu = cpu, .memory = memory_interface, .flags = 0U };
     const sve_result_t result = execute(&sve, instruction);
     cpu->fpsr |= sve.flags;
-    return SVE_FAULT == result ? 0U : 1U;
+
+    if (SVE_FAULT == result)
+    {
+        cpu->exception = BAL_EXCEPTION_DATA_ABORT;
+        return 0U;
+    }
+
+    if (SVE_ILLEGAL == result)
+    {
+        cpu->exception           = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
+        cpu->exception_immediate = 0U;
+        return 0U;
+    }
+
+    return 1U;
 }
 
 /*** end of file ***/

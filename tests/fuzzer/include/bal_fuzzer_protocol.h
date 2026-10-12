@@ -19,7 +19,7 @@ BAL_ALIGNED(64) typedef struct
     uint32_t exception;
     uint64_t instruction_count;
     uint64_t v[32][2];
-    uint64_t pad1[45];
+    uint64_t pad1[93];
 } bal_fuzzer_cpu_snapshot_t;
 
 static_assert(sizeof(bal_fuzzer_cpu_snapshot_t) == sizeof(bal_cpu_t), "Struct size mismatch");

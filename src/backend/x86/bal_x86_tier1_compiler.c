@@ -4145,6 +4145,8 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define SYSTEM_REGISTER_CNTVCT_EL0  SYSTEM_REGISTER(3U, 3U, 14U, 0U, 2U)
 #define SYSTEM_REGISTER_DIT         SYSTEM_REGISTER(3U, 3U, 4U, 2U, 5U)
 #define SYSTEM_REGISTER_SSBS        SYSTEM_REGISTER(3U, 3U, 4U, 2U, 6U)
+#define SYSTEM_REGISTER_SVCR        SYSTEM_REGISTER(3U, 3U, 4U, 2U, 2U)
+#define SYSTEM_REGISTER_TPIDR2_EL0  SYSTEM_REGISTER(3U, 3U, 13U, 0U, 5U)
 
 #define SYSTEM_REGISTER_TCO SYSTEM_REGISTER(3U, 3U, 4U, 2U, 7U)
 #define PSTATE_TCO          (1ULL << 25U)
@@ -4190,6 +4192,14 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         return;
     }
 
+    // Writing SVCR can reset the vector state, which bal_execute_svcr_write() does.
+    if (false == is_read && SYSTEM_REGISTER_SVCR == system_register)
+    {
+        emit_register_helper_call(
+            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_svcr_write);
+        return;
+    }
+
     // FPSR includes the flags inline floating point has raised into MXCSR, in this block or the
     // ones before it. They go to FPSR first, and MXCSR is cleared so that a write replaces them.
     if (SYSTEM_REGISTER_FPSR == system_register)
@@ -4220,6 +4230,12 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
             break;
         case SYSTEM_REGISTER_TPIDR_EL0:
             offset = offsetof(bal_cpu_t, tpidr_el0);
+            break;
+        case SYSTEM_REGISTER_TPIDR2_EL0:
+            offset = offsetof(bal_cpu_t, tpidr2_el0);
+            break;
+        case SYSTEM_REGISTER_SVCR:
+            offset = offsetof(bal_cpu_t, svcr);
             break;
         case SYSTEM_REGISTER_DIT:
             offset = offsetof(bal_cpu_t, dit);
@@ -4435,6 +4451,13 @@ translate_pstate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
         offset = offsetof(bal_cpu_t, tco);
         bit    = PSTATE_TCO;
     }
+    else if (3U == op1 && 3U == op2 && 0U == (instruction & 0x800U) && 0U != (instruction & 0x600U))
+    {
+        // SMSTART and SMSTOP: MSR SVCRSM, SVCRZA and SVCRSMZA, with CRm = 0 ZA SM imm.
+        emit_register_helper_call(
+            compiler, instruction, (uint64_t)(uintptr_t)&bal_execute_svcr_write);
+        return;
+    }
     else
     {
         BAL_LOG_ERROR(
@@ -4528,7 +4551,8 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
     // the call. The other helpers do no floating point.
     const bool is_float_helper = (uint64_t)(uintptr_t)&bal_execute_float == function
                                  || (uint64_t)(uintptr_t)&bal_execute_simd == function
-                                 || (uint64_t)(uintptr_t)&bal_execute_sve == function;
+                                 || (uint64_t)(uintptr_t)&bal_execute_sve == function
+                                 || (uint64_t)(uintptr_t)&bal_execute_svcr_write == function;
 
     if (true == is_float_helper)
     {
@@ -4572,13 +4596,14 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
     }
 }
 
-/// Stops the block with a data abort when `result` is zero: the guest PC is set to this
-/// instruction, the exception field to BAL_EXCEPTION_DATA_ABORT, and the block returns. The jump
-/// over that exit is patched once its size is known.
+/// Stops the block when `result` is zero: the guest PC is set to this instruction, the exception
+/// field to `exception` unless that is BAL_EXCEPTION_NONE (a helper that recorded the exception
+/// itself), and the block returns. The jump over that exit is patched once its size is known.
 static void
-emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
-                        const bal_x86_register_t           result,
-                        const bal_guest_address_t          guest_address)
+emit_exit_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
+                  const bal_x86_register_t           result,
+                  const bal_guest_address_t          guest_address,
+                  const bal_exception_t              exception)
 {
     push_macro(compiler, BAL_X86_MACRO_TEST_REGISTER_REGISTER, result, result);
     bal_sliding_window_flush_all(&compiler->window);
@@ -4590,8 +4615,13 @@ emit_data_abort_if_zero(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 
     bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, guest_address);
     bal_x86_emit_store_r64_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, pc));
-    bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, BAL_EXCEPTION_DATA_ABORT);
-    bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+
+    if (BAL_EXCEPTION_NONE != exception)
+    {
+        bal_x86_emit_mov_r64_imm64(assembler, BAL_X86_RAX, (uint64_t)exception);
+        bal_x86_emit_store_r32_rbp_offset(assembler, BAL_X86_RAX, offsetof(bal_cpu_t, exception));
+    }
+
     emit_block_exit(compiler);
 
     if (BAL_SUCCESS == assembler->status)
@@ -4629,16 +4659,18 @@ emit_register_helper_call(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 }
 
 /// Calls a runtime helper `function(cpu, memory_interface, instruction)` that executes one
-/// memory instruction on the guest state, and raises a data abort when it returns zero.
+/// memory instruction on the guest state, and ends the block when it returns zero, with
+/// `exception` as emit_exit_if_zero() takes it.
 ///
 /// The guest registers are flushed to the cpu structure first, since the helper reads and writes
 /// them there.
 static void
-emit_memory_helper_call(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
-                        const bal_memory_interface_t *BAL_RESTRICT memory_interface,
-                        const uint32_t                             instruction,
-                        const bal_guest_address_t                  guest_address,
-                        const uint64_t                             function)
+emit_memory_helper_call_raising(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                                const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                                const uint32_t                             instruction,
+                                const bal_guest_address_t                  guest_address,
+                                const uint64_t                             function,
+                                const bal_exception_t                      exception)
 {
     flush_dirty_registers(compiler);
     reset_register_allocator(compiler);
@@ -4660,7 +4692,20 @@ emit_memory_helper_call(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
     bal_sliding_window_push(&compiler->window, instruction_macro);
 
     emit_runtime_call(compiler, function);
-    emit_data_abort_if_zero(compiler, BAL_X86_RAX, guest_address);
+    emit_exit_if_zero(compiler, BAL_X86_RAX, guest_address, exception);
+}
+
+/// Calls a runtime helper `function(cpu, memory_interface, instruction)` that executes one
+/// memory instruction on the guest state, and raises a data abort when it returns zero.
+static void
+emit_memory_helper_call(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                        const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                        const uint32_t                             instruction,
+                        const bal_guest_address_t                  guest_address,
+                        const uint64_t                             function)
+{
+    emit_memory_helper_call_raising(
+        compiler, memory_interface, instruction, guest_address, function, BAL_EXCEPTION_DATA_ABORT);
 }
 
 /// Emits the TLB miss handler every block shares, at the start of the code buffer. It takes the
@@ -5611,8 +5656,8 @@ translate_memory_operation(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                             (uint64_t)(uintptr_t)&bal_execute_memory_operation);
 }
 
-/// Translates the SVE instructions through bal_execute_sve(), which raises a data abort for
-/// unmapped memory.
+/// Translates the SVE and SME instructions through bal_execute_sve(), which records a data abort
+/// for unmapped memory, or an undefined instruction for SME with its mode off, itself.
 static void
 translate_sve(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
               const bal_memory_interface_t *BAL_RESTRICT memory_interface,
@@ -5627,11 +5672,12 @@ translate_sve(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
         return;
     }
 
-    emit_memory_helper_call(compiler,
-                            memory_interface,
-                            instruction,
-                            guest_address,
-                            (uint64_t)(uintptr_t)&bal_execute_sve);
+    emit_memory_helper_call_raising(compiler,
+                                    memory_interface,
+                                    instruction,
+                                    guest_address,
+                                    (uint64_t)(uintptr_t)&bal_execute_sve,
+                                    BAL_EXCEPTION_NONE);
 }
 
 /// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8, SETF16,

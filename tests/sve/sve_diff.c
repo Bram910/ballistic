@@ -361,14 +361,16 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
     return 31U == index ? (true == is_sp ? state->sp : 0U) : state->x[index];
 }
 
-/// Where qemu 6.2 departs from the architecture, in ways the architecture allows or by bugs.
-/// Those tests are not compared:
+/// Where qemu departs from the architecture, in ways the architecture allows or by bugs. Those
+/// tests are not compared:
 ///
 /// - Its contiguous LDFF1 and LDNF1 read the governing predicate at byte reg_off / 8 instead of
 ///   at its 64-bit word, dropping elements when the loop starts in the upper half of the vector.
 /// - Its first-fault loads give up on the elements on the page after the first one.
 /// - Its WHILERW treats only equal addresses as conflict free, where the architecture (and later
 ///   qemu) divides the distance by the element size first.
+/// - Its SME vertical tile slice loads (qemu 11) leave the inactive elements after the last
+///   active one unchanged instead of zeroing them.
 /// - qemu-user turns a guest address into a host one without checking the guest mapped it, so a
 ///   gather from a random address can read qemu's own memory where Ballistic faults.
 static bool
@@ -381,6 +383,26 @@ is_known_qemu_difference(const sve_test_t  *test,
     const uint32_t m             = (instruction >> 16U) & 0x1FU;
     const bool     is_nonfault   = 0xA410A000U == (instruction & 0xFE10E000U);
     const bool     is_firstfault = 0xA4006000U == (instruction & 0xFE00E000U);
+
+    const bool is_tile_load
+        = 0xE0000000U == (instruction & 0xFF200010U) || 0xE1C00000U == (instruction & 0xFFE00010U);
+
+    if (true == is_tile_load && 0U != (instruction & 0x8000U))
+    {
+        const uint32_t bytes = 0xE1C00000U == (instruction & 0xFFE00010U)
+                                   ? 16U
+                                   : 1U << ((instruction >> 22U) & 0x3U);
+        const uint16_t pg    = test->state.p[(instruction >> 10U) & 0x7U];
+        uint16_t       lanes = 0U;
+
+        for (uint32_t offset = 0U; offset < 16U; offset += bytes)
+        {
+            lanes |= (uint16_t)(1U << offset);
+        }
+
+        const uint16_t active = pg & lanes;
+        return 0U != active && 0U == (active & (1U << (16U - bytes)));
+    }
 
     if (true == is_nonfault || true == is_firstfault)
     {

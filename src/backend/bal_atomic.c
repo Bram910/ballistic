@@ -24,6 +24,16 @@ typedef enum
     ATOMIC_ORDERED_UNSCALED,
     /// CLREX.
     ATOMIC_CLEAR_EXCLUSIVE,
+    /// FEAT_LRCPC3: LDAPR with a post-index and STLR with a pre-index writeback.
+    ATOMIC_ORDERED_WRITEBACK,
+    /// FEAT_LRCPC3: LDIAPP and STILP.
+    ATOMIC_ORDERED_PAIR,
+    /// FEAT_LRCPC3: LDAPUR and STLUR on SIMD&FP registers.
+    ATOMIC_ORDERED_UNSCALED_VECTOR,
+    /// FEAT_LRCPC3: LDAP1 and STL1, one 64-bit lane.
+    ATOMIC_ORDERED_LANE,
+    /// FEAT_LSE128: LDCLRP, LDSETP and SWPP, in every ordering.
+    ATOMIC_MEMORY_OPERATION_PAIR,
 } atomic_class_t;
 
 static atomic_class_t
@@ -83,6 +93,43 @@ classify(const uint32_t instruction)
         }
 
         return ATOMIC_UNSUPPORTED;
+    }
+
+    // FEAT_LSE128 LDCLRP (o3 = 0, opc = 001), LDSETP (0, 011) and SWPP (1, 000):
+    // 0 0 011001 A R 1 Rt2 o3 opc 00 Rn Rt, with neither Rt nor Rt2 the zero register.
+    if (0x19200000U == (instruction & 0xFF208C00U) || 0x19208000U == (instruction & 0xFF20FC00U))
+    {
+        const uint32_t operation = (instruction >> 12U) & 0xFU;
+        const bool     is_valid  = 0x1U == operation || 0x3U == operation || 0x8U == operation;
+        return true == is_valid && rt != 31U && rs != 31U ? ATOMIC_MEMORY_OPERATION_PAIR
+                                                          : ATOMIC_UNSUPPORTED;
+    }
+
+    // FEAT_LRCPC3 LDAPR (post-index) and STLR (pre-index): 1 x 011001 1 L 0 00000 100010 Rn Rt.
+    if (0x99800800U == (instruction & 0xBFBFFC00U))
+    {
+        return ATOMIC_ORDERED_WRITEBACK;
+    }
+
+    // FEAT_LRCPC3 LDIAPP and STILP: 1 x 011001 0 L 0 Rt2 000 o 10 Rn Rt, with o = 0 for the
+    // writeback forms.
+    if (0x99000800U == (instruction & 0xBFA0EC00U))
+    {
+        return ATOMIC_ORDERED_PAIR;
+    }
+
+    // FEAT_LRCPC3 LDAPUR and STLUR (SIMD&FP): size 011101 opc 0 imm9 10 Rn Rt; opc 1x is the
+    // 128-bit form, which only size 00 has.
+    if (0x1D000800U == (instruction & 0x3F200C00U))
+    {
+        return 0U == size || 0U == (instruction & 0x00800000U) ? ATOMIC_ORDERED_UNSCALED_VECTOR
+                                                               : ATOMIC_UNSUPPORTED;
+    }
+
+    // FEAT_LRCPC3 LDAP1 and STL1: 0 Q 001101 0 L 0 00001 100001 Rn Rt.
+    if (0x0D018400U == (instruction & 0xBFBFFC00U))
+    {
+        return ATOMIC_ORDERED_LANE;
     }
 
     // LDAPR/STLR (unscaled immediate): size 011001 opc 0 imm9 00 Rn Rt.
@@ -608,6 +655,168 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
             }
 
             write_register(cpu, rt, old);
+            return 1U;
+        }
+
+        case ATOMIC_ORDERED_WRITEBACK: {
+            // LDAPR loads from Xn and then adds the size to it; STLR subtracts the size first and
+            // stores there.
+            const bool     is_store = 0U == (instruction & 0x00400000U);
+            const uint64_t target   = true == is_store ? address - bytes : address;
+            uint8_t       *pointer  = translate(memory_interface, target, bytes);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            if (true == is_store)
+            {
+                store(pointer, bytes, read_register(cpu, rt));
+                cpu->x[rn] = target;
+            }
+            else
+            {
+                const uint64_t value = load(pointer, bytes);
+                cpu->x[rn]           = address + bytes;
+                write_register(cpu, rt, value);
+            }
+
+            return 1U;
+        }
+
+        case ATOMIC_ORDERED_PAIR: {
+            // LDIAPP loads from Xn and, in its writeback form, then adds the pair size; STILP
+            // subtracts it first in its writeback form.
+            const uint32_t register_bytes = 4U << (size & 1U);
+            const bool     is_load_pair   = 0U != (instruction & 0x00400000U);
+            const bool     has_writeback  = 0U == (instruction & 0x00001000U);
+            const uint64_t pair_bytes     = 2U * register_bytes;
+            const uint64_t target
+                = false == is_load_pair && true == has_writeback ? address - pair_bytes : address;
+            uint8_t *pointer = translate(memory_interface, target, pair_bytes);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            const uint64_t mask = size_mask(register_bytes);
+
+            if (true == is_load_pair)
+            {
+                const uint64_t first  = load(pointer, register_bytes);
+                const uint64_t second = load(pointer + register_bytes, register_bytes);
+
+                if (true == has_writeback)
+                {
+                    cpu->x[rn] = address + pair_bytes;
+                }
+
+                write_register(cpu, rt, first & mask);
+                write_register(cpu, rs, second & mask);
+            }
+            else
+            {
+                const uint64_t first  = read_register(cpu, rt);
+                const uint64_t second = read_register(cpu, rs);
+                store(pointer, register_bytes, first);
+                store(pointer + register_bytes, register_bytes, second);
+
+                if (true == has_writeback)
+                {
+                    cpu->x[rn] = target;
+                }
+            }
+
+            return 1U;
+        }
+
+        case ATOMIC_ORDERED_UNSCALED_VECTOR: {
+            const uint32_t opc  = (instruction >> 22U) & 0x3U;
+            const uint32_t imm9 = (instruction >> 12U) & 0x1FFU;
+
+            // WARNING: Shifting the 9-bit field to the top and back sign-extends it.
+            const uint64_t target = address + (uint64_t)(int64_t)((int32_t)(imm9 << 23U) >> 23U);
+            bytes                 = opc >= 2U ? 16U : bytes;
+            uint8_t *pointer      = translate(memory_interface, target, bytes);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            if (0U == (opc & 1U))
+            {
+                if (16U == bytes)
+                {
+                    store(pointer, 8U, cpu->v[rt][0]);
+                    store(pointer + 8U, 8U, cpu->v[rt][1]);
+                }
+                else
+                {
+                    store(pointer, bytes, cpu->v[rt][0]);
+                }
+
+                return 1U;
+            }
+
+            // A load clears the register above the element.
+            cpu->v[rt][1] = 16U == bytes ? load(pointer + 8U, 8U) : 0U;
+            cpu->v[rt][0] = load(pointer, 16U == bytes ? 8U : bytes);
+            return 1U;
+        }
+
+        case ATOMIC_ORDERED_LANE: {
+            const uint32_t lane    = (instruction >> 30U) & 1U;
+            uint8_t       *pointer = translate(memory_interface, address, 8U);
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            if (0U != (instruction & 0x00400000U))
+            {
+                cpu->v[rt][lane] = load(pointer, 8U);
+            }
+            else
+            {
+                store(pointer, 8U, cpu->v[rt][lane]);
+            }
+
+            return 1U;
+        }
+
+        case ATOMIC_MEMORY_OPERATION_PAIR: {
+            // One 16-byte atomic access, which must be aligned. Rt holds the low half of the
+            // operand and receives the low half of the old value; Rt2 the high halves.
+            uint8_t *pointer
+                = 0U == (address & 0xFU) ? translate(memory_interface, address, 16U) : NULL;
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            const uint32_t operation  = (instruction >> 12U) & 0xFU;
+            const uint64_t operand[2] = { read_register(cpu, rt), read_register(cpu, rs) };
+            uint64_t       old[2];
+            uint64_t       desired[2];
+            load_16(pointer, old);
+
+            do
+            {
+                for (uint32_t half = 0U; half < 2U; ++half)
+                {
+                    desired[half] = 0x1U == operation   ? old[half] & ~operand[half] // LDCLRP
+                                    : 0x3U == operation ? old[half] | operand[half]  // LDSETP
+                                                        : operand[half];             // SWPP
+                }
+            } while (false == compare_swap_16(pointer, old, desired));
+
+            write_register(cpu, rt, old[0]);
+            write_register(cpu, rs, old[1]);
             return 1U;
         }
 

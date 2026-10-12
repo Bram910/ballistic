@@ -6,6 +6,38 @@
 
 static void fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, uint64_t seed_index);
 
+/// Returns true for the instructions of extensions the Unicorn reference is too old to run, which
+/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128 and FEAT_MOPS. Ballistic's unit
+/// tests check them instead.
+static bool
+is_newer_than_unicorn(const uint32_t instruction)
+{
+    static const uint32_t MASKS[][2] = {
+        { 0x7FFFF800U, 0x5AC01800U }, // CTZ, CNT
+        { 0x7FFFFC00U, 0x5AC02000U }, // ABS
+        { 0x7FE0F000U, 0x1AC06000U }, // SMAX, UMAX, SMIN, UMIN (register)
+        { 0x7FF00000U, 0x11C00000U }, // SMAX, UMAX, SMIN, UMIN (immediate)
+        { 0xBFBFFC00U, 0x99800800U }, // LDAPR (post-index), STLR (pre-index)
+        { 0xBFA0EC00U, 0x99000800U }, // LDIAPP, STILP
+        { 0x3F200C00U, 0x1D000800U }, // LDAPUR, STLUR (SIMD&FP)
+        { 0xBFBFFC00U, 0x0D018400U }, // LDAP1, STL1
+        { 0xFF208C00U, 0x19200000U }, // LDCLRP, LDSETP
+        { 0xFF20FC00U, 0x19208000U }, // SWPP
+        { 0xFB200C00U, 0x19000400U }, // CPY*
+        { 0xFFE00C00U, 0x19C00400U }, // SET*
+    };
+
+    for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)
+    {
+        if (MASKS[i][1] == (instruction & MASKS[i][0]))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int
 main(const int argc, const char **argv)
 {
@@ -91,7 +123,8 @@ main(const int argc, const char **argv)
         // With every pointer authentication key disabled, as here, Unicorn leaves the pointer of
         // XPACI, XPACD and XPACLRI alone, where the architecture strips it.
         if (0xD53BE000U == (*seed_cursor & 0xFFFFFF80U)
-            || 0xDAC143E0U == (*seed_cursor & 0xFFFFFBE0U) || 0xD50320FFU == *seed_cursor)
+            || 0xDAC143E0U == (*seed_cursor & 0xFFFFFBE0U) || 0xD50320FFU == *seed_cursor
+            || true == is_newer_than_unicorn(*seed_cursor))
         {
             ++seeds_skipped;
             ++seed_cursor;

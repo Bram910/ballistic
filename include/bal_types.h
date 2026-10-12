@@ -72,6 +72,7 @@ extern "C"
         OPCODE_EXCEPTION,
         OPCODE_INTEGER_HELPER,
         OPCODE_POINTER_AUTHENTICATION,
+        OPCODE_MEMORY_OPERATION,
         OPCODE_ENUM_END = 0x7FF
     } bal_opcode_t;
 

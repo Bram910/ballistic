@@ -78,8 +78,7 @@ local function derive_opcode(mnemonic)
     end
 
     -- Synchronisation instructions, executed by the runtime atomic helper. CLREX clears its
-    -- exclusive monitor. The 128-bit LSE forms (LDCLRP, LDSETP, SWPP) and the SIMD LDAP1/STL1 are
-    -- not implemented.
+    -- exclusive monitor.
     if m == "CLREX" then
         return "OPCODE_ATOMIC"
     end
@@ -103,13 +102,20 @@ local function derive_opcode(mnemonic)
         return "OPCODE_POINTER_AUTHENTICATION"
     end
 
+    -- FEAT_MOPS memory copy and memory set, executed by a runtime helper. The tag-setting SETG*
+    -- forms need FEAT_MTE.
+    if m:match("^CPYF?[PME]") or m:match("^SET[PME]") then
+        return "OPCODE_MEMORY_OPERATION"
+    end
+
     -- SYS: the cache maintenance operations EL0 may execute.
     if m == "SYS" then
         return "OPCODE_SYSTEM_REGISTER"
     end
 
     for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
-                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
+                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS",
+                              "LDIAPP", "STILP", "LDAP1", "STL1" }) do
         if m:sub(1, #prefix) == prefix then
             return "OPCODE_ATOMIC"
         end
@@ -119,7 +125,7 @@ local function derive_opcode(mnemonic)
                                  "LDUMIN", "SWP" }) do
         local suffix = m:sub(#operation + 1)
 
-        if m:sub(1, #operation) == operation and suffix:sub(1, 1) ~= "P" then
+        if m:sub(1, #operation) == operation then
             return "OPCODE_ATOMIC"
         end
     end
@@ -1236,6 +1242,15 @@ local function main(...)
 
         if is_hint and derive_opcode(inst.mnemonic) == "OPCODE_TRAP" then
             inst.opcode_override = "OPCODE_NOP"
+        end
+
+        -- The FEAT_CSSC integer instructions, executed by the integer helper; their SIMD and SVE
+        -- namesakes are routed by encoding around this.
+        local cssc = { ABS = true, CNT = true, CTZ = true, SMAX = true, SMIN = true, UMAX = true,
+                       UMIN = true }
+
+        if cssc[inst.mnemonic] and top_bits > 0x3 then
+            inst.opcode_override = "OPCODE_INTEGER_HELPER"
         end
 
         -- op0 = x111 is the scalar floating-point and Advanced SIMD data processing space, which

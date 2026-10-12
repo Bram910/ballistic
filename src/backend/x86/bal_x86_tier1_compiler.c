@@ -185,6 +185,11 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_memory_operation(bal_tier1_compiler_t         *compiler,
+                                       const bal_memory_interface_t *memory_interface,
+                                       uint32_t                      instruction,
+                                       bal_guest_address_t           guest_address);
 static void emit_memory_thunk(bal_tier1_compiler_t *compiler);
 static void translate_pstate(bal_tier1_compiler_t *compiler, uint32_t instruction);
 static void emit_store_cpu_word(bal_tier1_compiler_t *compiler, int32_t offset, uint32_t value);
@@ -543,11 +548,11 @@ translate_block(bal_tier1_compiler_t         *compiler,
                 break;
             }
 
-            // The SIMD&FP helpers and the load/store translator check the encodings they
-            // accept themselves; other translators do not know 128-bit operands.
-            const bool is_checked_by_translator = OPCODE_FLOAT == metadata->ir_opcode
-                                                  || OPCODE_LOAD == metadata->ir_opcode
-                                                  || OPCODE_STORE == metadata->ir_opcode;
+            // The SIMD&FP helpers, the load/store translator and the atomic helper check the
+            // encodings they accept themselves; other translators do not know 128-bit operands.
+            const bool is_checked_by_translator
+                = OPCODE_FLOAT == metadata->ir_opcode || OPCODE_LOAD == metadata->ir_opcode
+                  || OPCODE_STORE == metadata->ir_opcode || OPCODE_ATOMIC == metadata->ir_opcode;
 
             if (BAL_OPERAND_TYPE_REGISTER_128 == metadata->operands[0].type
                 && false == is_checked_by_translator)
@@ -790,6 +795,10 @@ translate_block(bal_tier1_compiler_t         *compiler,
                     break;
                 case OPCODE_INTEGER_HELPER:
                     translate_integer_helper(compiler, instruction);
+                    break;
+                case OPCODE_MEMORY_OPERATION:
+                    translate_memory_operation(
+                        compiler, memory_interface, instruction, guest_address);
                     break;
                 case OPCODE_POINTER_AUTHENTICATION:
                     // The authenticated branches leave their target in the guest PC.
@@ -5547,6 +5556,29 @@ translate_float(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t inst
     }
 
     emit_register_helper_call(compiler, instruction, helper);
+}
+
+/// Translates the FEAT_MOPS memory copy and memory set instructions through
+/// bal_execute_memory_operation(), which raises a data abort for unmapped memory.
+static void
+translate_memory_operation(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+                           const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                           const uint32_t                             instruction,
+                           const bal_guest_address_t                  guest_address)
+{
+    if (BAL_UNLIKELY(false == bal_is_memory_operation_supported(instruction)))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: unsupported encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    emit_memory_helper_call(compiler,
+                            memory_interface,
+                            instruction,
+                            guest_address,
+                            (uint64_t)(uintptr_t)&bal_execute_memory_operation);
 }
 
 /// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8, SETF16,

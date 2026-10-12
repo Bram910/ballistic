@@ -715,6 +715,226 @@ test_PacMemo_FollowsKeyChangesBetweenRuns(void)
     TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
 }
 
+/// Runs one instruction with X1 and X2 set, returning X0, which starts as all ones.
+static uint64_t
+run_one(const uint32_t instruction, const uint64_t x1, const uint64_t x2)
+{
+    load_program(&instruction, 1U);
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    g_cpu.x[0]  = ~0ULL;
+    g_cpu.x[1]  = x1;
+    g_cpu.x[2]  = x2;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    return g_cpu.x[0];
+}
+
+static void
+test_Cssc_AbsCntCtz(void)
+{
+    TEST_ASSERT_EQUAL_HEX64(5U, run_one(0xDAC02020U, (uint64_t)-5, 0U));             // ABS X0, X1
+    TEST_ASSERT_EQUAL_HEX64(0x80000000U, run_one(0x5AC02020U, 0xFF80000000ULL, 0U)); // ABS W0, W1
+    TEST_ASSERT_EQUAL_HEX64(7U, run_one(0x5AC02020U, 0xFFFFFFF9U, 0U));              // ABS W0, W1
+    TEST_ASSERT_EQUAL_HEX64(9U, run_one(0xDAC01C20U, 0x800000000000F0F0ULL, 0U));    // CNT X0, X1
+    TEST_ASSERT_EQUAL_HEX64(0U, run_one(0x5AC01C20U, 0xFFFFFFFF00000000ULL, 0U));    // CNT W0, W1
+    TEST_ASSERT_EQUAL_HEX64(32U, run_one(0x5AC01820U, 0xFF00000000ULL, 0U));         // CTZ W0, W1
+    TEST_ASSERT_EQUAL_HEX64(8U, run_one(0xDAC01820U, 0x100U, 0U));                   // CTZ X0, X1
+    TEST_ASSERT_EQUAL_HEX64(64U, run_one(0xDAC01820U, 0U, 0U));                      // CTZ X0, X1
+}
+
+static void
+test_Cssc_MinimumMaximum(void)
+{
+    // SMAX X0, X1, #-3 and UMIN W0, W1, #200.
+    TEST_ASSERT_EQUAL_HEX64((uint64_t)-3, run_one(0x91C3F420U, (uint64_t)-10, 0U));
+    TEST_ASSERT_EQUAL_HEX64(200U, run_one(0x11CF2020U, 0xFFFFFFFFU, 0U));
+    // SMAX W0, W1, #-3 on a negative W1 compares the low 32 bits as signed.
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFDU, run_one(0x11C3F420U, 0xFFFFFFF0U, 0U));
+    // SMIN X0, X1, X2 and UMAX W0, W1, W2.
+    TEST_ASSERT_EQUAL_HEX64((uint64_t)-7, run_one(0x9AC26820U, 4U, (uint64_t)-7));
+    TEST_ASSERT_EQUAL_HEX64(0x80000000U, run_one(0x1AC26420U, 0x1234U, 0x7780000000ULL));
+}
+
+static void
+test_Rcpc3_WritebackFormsRoundTrip(void)
+{
+    // STLR W1, [X2, #-4]!; LDAPR W3, [X2], #4; STILP X1, X4, [X2, #-16]!;
+    // LDIAPP X5, X6, [X2], #16.
+    const uint32_t program[] = { 0x99800841U, 0x99C00843U, 0xD9040841U, 0xD9460845U };
+    load_program(program, 4U);
+    g_cpu.x[1] = 0x1122334455667788ULL;
+    g_cpu.x[2] = 0x2010U;
+    g_cpu.x[4] = 0x99AABBCCDDEEFF00ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x55667788U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x1122334455667788ULL, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_HEX64(0x99AABBCCDDEEFF00ULL, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_HEX64(0x2010U, g_cpu.x[2]);
+
+    uint64_t pair[2];
+    (void)memcpy(pair, g_memory + 0x2000U, sizeof(pair));
+    TEST_ASSERT_EQUAL_HEX64(0x1122334455667788ULL, pair[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x99AABBCCDDEEFF00ULL, pair[1]);
+}
+
+static void
+test_Rcpc3_VectorFormsRoundTrip(void)
+{
+    // STLUR Q0, [X2, #-16]; LDAPUR Q1, [X2, #-16]; LDAPUR S2, [X2, #-16];
+    // STL1 {V0.D}[1], [X2]; LDAP1 {V3.D}[0], [X2].
+    const uint32_t program[] = { 0x1D9F0840U, 0x1DDF0841U, 0x9D5F0842U, 0x4D018440U, 0x0D418443U };
+    load_program(program, 5U);
+    g_cpu.x[2]    = 0x2010U;
+    g_cpu.v[0][0] = 0x0123456789ABCDEFULL;
+    g_cpu.v[0][1] = 0xFEDCBA9876543210ULL;
+    g_cpu.v[2][1] = ~0ULL;
+    g_cpu.v[3][1] = 0x5555U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x0123456789ABCDEFULL, g_cpu.v[1][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFEDCBA9876543210ULL, g_cpu.v[1][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x89ABCDEFU, g_cpu.v[2][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[2][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFEDCBA9876543210ULL, g_cpu.v[3][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x5555U, g_cpu.v[3][1]);
+}
+
+static void
+test_Lse128_OperationsReturnTheOldPair(void)
+{
+    // SWPP X1, X2, [X10]; LDSETP X3, X4, [X10]; LDCLRPAL X5, X6, [X10].
+    const uint32_t program[] = { 0x19228141U, 0x19243143U, 0x19E61145U };
+    load_program(program, 3U);
+    const uint64_t initial[2] = { 0x1111111111111111ULL, 0x2222222222222222ULL };
+    (void)memcpy(g_memory + 0x2000U, initial, sizeof(initial));
+    g_cpu.x[10] = 0x2000U;
+    g_cpu.x[1]  = 0x00000000000000F0ULL;
+    g_cpu.x[2]  = 0x0F00000000000000ULL;
+    g_cpu.x[3]  = 0x000000000000000FULL;
+    g_cpu.x[4]  = 0x00F0000000000000ULL;
+    g_cpu.x[5]  = 0x00000000000000F0ULL;
+    g_cpu.x[6]  = 0x0F00000000000000ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x1111111111111111ULL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0x2222222222222222ULL, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0xF0U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x0F00000000000000ULL, g_cpu.x[4]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFU, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_HEX64(0x0FF0000000000000ULL, g_cpu.x[6]);
+
+    uint64_t final[2];
+    (void)memcpy(final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x0FU, final[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x00F0000000000000ULL, final[1]);
+}
+
+static void
+test_Lse128_MisalignedAddressRaisesDataAbort(void)
+{
+    // SWPP X1, X2, [X10] at an address that is only 8-byte aligned.
+    const uint32_t program[] = { 0x19228141U };
+    load_program(program, 1U);
+    g_cpu.x[10] = 0x2008U;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+}
+
+static void
+test_Mops_ForwardCopyCopiesTheRange(void)
+{
+    // CPYFP [X0]!, [X1]!, X2!; CPYFM; CPYFE.
+    const uint32_t program[] = { 0x19010440U, 0x19410440U, 0x19810440U };
+    load_program(program, 3U);
+
+    for (uint32_t i = 0U; i < 64U; ++i)
+    {
+        g_memory[0x2000U + i] = (uint8_t)(i + 1U);
+    }
+
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[1] = 0x2000U;
+    g_cpu.x[2] = 37U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_MEMORY(g_memory + 0x2000U, g_memory + 0x3000U, 37U);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_memory[0x3000U + 37U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3025U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2025U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_n);
+}
+
+static void
+test_Mops_OverlappingCopyGoesBackwards(void)
+{
+    // CPYP [X0]!, [X1]!, X2!; CPYM; CPYE, with the destination 8 bytes above the source.
+    const uint32_t program[] = { 0x1D010440U, 0x1D410440U, 0x1D810440U };
+    load_program(program, 3U);
+    uint8_t expected[40];
+
+    for (uint32_t i = 0U; i < 40U; ++i)
+    {
+        g_memory[0x2000U + i] = (uint8_t)(i + 1U);
+        expected[i]           = (uint8_t)(i < 8U ? i + 1U : i - 7U);
+    }
+
+    g_cpu.x[0] = 0x2008U;
+    g_cpu.x[1] = 0x2000U;
+    g_cpu.x[2] = 32U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_MEMORY(expected, g_memory + 0x2000U, sizeof(expected));
+    // A backward copy leaves the registers at the start of the ranges and sets N.
+    TEST_ASSERT_EQUAL_HEX64(0x2008U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2000U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+}
+
+static void
+test_Mops_SetFillsTheRange(void)
+{
+    // SETP [X0]!, X2!, X3; SETM; SETE.
+    const uint32_t program[] = { 0x19C30440U, 0x19C34440U, 0x19C38440U };
+    load_program(program, 3U);
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[2] = 50U;
+    g_cpu.x[3] = 0x12ABU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+
+    for (uint32_t i = 0U; i < 50U; ++i)
+    {
+        TEST_ASSERT_EQUAL_HEX8(0xABU, g_memory[0x3000U + i]);
+    }
+
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3000U + 50U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3032U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+}
+
+static void
+test_Mops_UnmappedSetFaultsWithoutWriting(void)
+{
+    // SETP [X0]!, X2!, X3 running past the end of guest memory.
+    const uint32_t program[] = { 0x19C30440U };
+    load_program(program, 1U);
+    g_cpu.x[0] = GUEST_MEMORY_SIZE - 0x100U;
+    g_cpu.x[2] = 0x200U;
+    g_cpu.x[3] = 0xABU;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[GUEST_MEMORY_SIZE - 0x100U]);
+    TEST_ASSERT_EQUAL_HEX64(GUEST_MEMORY_SIZE - 0x100U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x200U, g_cpu.x[2]);
+}
+
 int
 main(void)
 {
@@ -738,6 +958,16 @@ main(void)
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
     RUN_TEST(test_PacMemo_SigningAgainGivesTheSameCode);
     RUN_TEST(test_PacMemo_FollowsKeyChangesBetweenRuns);
+    RUN_TEST(test_Cssc_AbsCntCtz);
+    RUN_TEST(test_Cssc_MinimumMaximum);
+    RUN_TEST(test_Rcpc3_WritebackFormsRoundTrip);
+    RUN_TEST(test_Rcpc3_VectorFormsRoundTrip);
+    RUN_TEST(test_Lse128_OperationsReturnTheOldPair);
+    RUN_TEST(test_Lse128_MisalignedAddressRaisesDataAbort);
+    RUN_TEST(test_Mops_ForwardCopyCopiesTheRange);
+    RUN_TEST(test_Mops_OverlappingCopyGoesBackwards);
+    RUN_TEST(test_Mops_SetFillsTheRange);
+    RUN_TEST(test_Mops_UnmappedSetFaultsWithoutWriting);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

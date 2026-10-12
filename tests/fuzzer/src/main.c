@@ -47,6 +47,26 @@ is_newer_than_unicorn(const uint32_t instruction)
         { 0xBFE0FC00U, 0x0E809C00U }, // USDOT (vector)
         { 0xBFC0F400U, 0x0F80F000U }, // USDOT (by element)
         { 0xBFC0F400U, 0x0F00F000U }, // SUDOT (by element)
+        { 0xFF000010U, 0x54000010U }, // BC.cond
+        { 0xFFFFFFC0U, 0xD5031000U }, // WFET, WFIT
+        { 0xFFFFFEE0U, 0xD5233060U }, // TSTART, TTEST
+        { 0xFFE0001FU, 0xD4600000U }, // TCANCEL
+        { 0xFFFFFFA0U, 0xD52B7720U }, // GCSPOPM, GCSSS2
+        { 0xFFFFFFA0U, 0xD50B7700U }, // GCSPUSHM, GCSSS1
+        { 0xFFFFFFE0U, 0xD50B7460U }, // DC GVA
+        { 0xFFFFFFE0U, 0xD50B7480U }, // DC GZVA
+        { 0xFFFFFFE0U, 0xD50B7A60U }, // DC CGVAC
+        { 0xFFFFFFE0U, 0xD50B7AA0U }, // DC CGDVAC
+        { 0xFFFFFFE0U, 0xD50B7C60U }, // DC CGVAP
+        { 0xFFFFFFE0U, 0xD50B7CA0U }, // DC CGDVAP
+        { 0xFFFFFFE0U, 0xD50B7D60U }, // DC CGVADP
+        { 0xFFFFFFE0U, 0xD50B7DA0U }, // DC CGDVADP
+        { 0xFFFFFFE0U, 0xD50B7E60U }, // DC CIGVAC
+        { 0xFFFFFFE0U, 0xD50B7EA0U }, // DC CIGDVAC
+        { 0xFFFFF0FFU, 0xD503409FU }, // MSR TCO, #imm
+        { 0xFFDFFFE0U, 0xD51B42E0U }, // MRS and MSR TCO
+        { 0xFFFFFFE0U, 0xD50B73C0U }, // COSP RCTX (FEAT_SPECRES2)
+        { 0xFFFFFFE0U, 0xD50B72E0U }, // TRCIT (FEAT_ITE)
     };
 
     for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)

@@ -1153,6 +1153,59 @@ test_Bf16_ArithmeticAndConversions(void)
     TEST_ASSERT_EQUAL_HEX64(0x10U, g_cpu.fpsr & 0x9FU); // Inexact only.
 }
 
+static void
+test_Tme_TransactionsFailTrivially(void)
+{
+    // TSTART X1; TTEST X2; TCANCEL #5.
+    const uint32_t program[] = { 0xD5233061U, 0xD5233162U, 0xD46000A0U };
+    load_program(program, 3U);
+    g_cpu.x[2] = ~0ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 24U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[2]);
+}
+
+static void
+test_Hints_BcWaitsGcsAndPredictionRestrictions(void)
+{
+    // BC.EQ over MOVZ X3, #1; MOVZ X4, #2; WFIT X5; WFET X5; GCSPUSHM X11; GCSSS1 X12;
+    // GCSPOPM X10; GCSSS2 X13; CFP RCTX, X14; TRCIT X15.
+    const uint32_t program[]
+        = { 0x54000050U, 0xD2800023U, 0xD2800044U, 0xD5031025U, 0xD5031005U, 0xD50B770BU,
+            0xD50B774CU, 0xD52B772AU, 0xD52B776DU, 0xD50B738EU, 0xD50B72EFU };
+    load_program(program, 11U);
+    g_cpu.flag_z = 1U;
+    g_cpu.x[3]   = 0x33U;
+    g_cpu.x[10]  = 0xAAU;
+    g_cpu.x[13]  = 0xDDU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x33U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(2U, g_cpu.x[4]);
+    TEST_ASSERT_EQUAL_HEX64(0xAAU, g_cpu.x[10]);
+    TEST_ASSERT_EQUAL_HEX64(0xDDU, g_cpu.x[13]);
+}
+
+static void
+test_Mte_TagCheckOverrideAndTaggedZeroing(void)
+{
+    // MSR TCO, #1; MRS X6, TCO; MSR TCO, X7; MRS X8, TCO; DC GZVA, X9.
+    const uint32_t program[] = { 0xD503419FU, 0xD53B42E6U, 0xD51B42E7U, 0xD53B42E8U, 0xD50B7489U };
+    load_program(program, 5U);
+    (void)memset(g_memory + 0x2000U, 0xFF, 0x80U);
+    g_cpu.x[7] = 0U;
+    g_cpu.x[8] = ~0ULL;
+    g_cpu.x[9] = 0x2010U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(1ULL << 25U, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.x[8]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x2000U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x203FU]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x2040U]);
+}
+
 int
 main(void)
 {
@@ -1194,6 +1247,9 @@ main(void)
     RUN_TEST(test_Mte_SetgFillsWholeGranules);
     RUN_TEST(test_I8mm_MatrixAndMixedSignDotProducts);
     RUN_TEST(test_Bf16_ArithmeticAndConversions);
+    RUN_TEST(test_Tme_TransactionsFailTrivially);
+    RUN_TEST(test_Hints_BcWaitsGcsAndPredictionRestrictions);
+    RUN_TEST(test_Mte_TagCheckOverrideAndTaggedZeroing);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

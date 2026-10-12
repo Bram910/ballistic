@@ -1370,7 +1370,7 @@ const bal_decoder_instruction_metadata_t
         { "BC",
           0xFF000010,
           0x54000010,
-          OPCODE_TRAP,
+          OPCODE_BRANCH_CONDITIONAL,
           {
               { BAL_OPERAND_TYPE_CONDITION, 0, 4 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 19 },
@@ -15062,7 +15062,7 @@ const bal_decoder_instruction_metadata_t
         { "SYSL",
           0xFFFFFFE0,
           0xD52B7720,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -15122,7 +15122,7 @@ const bal_decoder_instruction_metadata_t
         { "SYSL",
           0xFFFFFFE0,
           0xD52B7760,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -40802,7 +40802,7 @@ const bal_decoder_instruction_metadata_t
         { "SYSL",
           0xFFF80000,
           0xD5280000,
-          OPCODE_TRAP,
+          OPCODE_SYSTEM_REGISTER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 3 },
@@ -41006,7 +41006,7 @@ const bal_decoder_instruction_metadata_t
         { "TCANCEL",
           0xFFE0001F,
           0xD4600000,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_IMMEDIATE, 5, 16 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -41222,7 +41222,7 @@ const bal_decoder_instruction_metadata_t
         { "TSTART",
           0xFFFFFFE0,
           0xD5233060,
-          OPCODE_TRAP,
+          OPCODE_INTEGER_HELPER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -41234,7 +41234,7 @@ const bal_decoder_instruction_metadata_t
         { "TTEST",
           0xFFFFFFE0,
           0xD5233160,
-          OPCODE_TRAP,
+          OPCODE_INTEGER_HELPER,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45578,7 +45578,7 @@ const bal_decoder_instruction_metadata_t
         { "WFET",
           0xFFFFFFE0,
           0xD5031000,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },
@@ -45602,7 +45602,7 @@ const bal_decoder_instruction_metadata_t
         { "WFIT",
           0xFFFFFFE0,
           0xD5031020,
-          OPCODE_TRAP,
+          OPCODE_NOP,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_NONE, 0, 0 },

@@ -909,6 +909,14 @@ translate_block(bal_tier1_compiler_t         *compiler,
                         break;
                     }
 
+                    // SYSL: bits 31:19 = 1101010100101. GCSPOPM and GCSSS2 leave Xt alone while
+                    // the guarded control stack is disabled, as it always is here.
+                    if (0xD52B7720U == (instruction & 0xFFFFFFE0U)
+                        || 0xD52B7760U == (instruction & 0xFFFFFFE0U))
+                    {
+                        break;
+                    }
+
                     BAL_LOG_ERROR(&bal_thread_logger,
                                   "Aborting function: Tier 1 unsupported system instruction at "
                                   "%08x : %s",
@@ -4128,8 +4136,10 @@ translate_data_processing_1_source(bal_tier1_compiler_t *BAL_RESTRICT compiler,
 #define SYSTEM_REGISTER_DIT         SYSTEM_REGISTER(3U, 3U, 4U, 2U, 5U)
 #define SYSTEM_REGISTER_SSBS        SYSTEM_REGISTER(3U, 3U, 4U, 2U, 6U)
 
-#define PSTATE_DIT  (1ULL << 24U)
-#define PSTATE_SSBS (1ULL << 12U)
+#define SYSTEM_REGISTER_TCO SYSTEM_REGISTER(3U, 3U, 4U, 2U, 7U)
+#define PSTATE_TCO          (1ULL << 25U)
+#define PSTATE_DIT          (1ULL << 24U)
+#define PSTATE_SSBS         (1ULL << 12U)
 
 /// The writable bits of FPCR (AHP, DN, FZ, RMode, Stride, FZ16, Len) and FPSR (N, Z, C, V, QC and
 /// the cumulative exception flags), as implemented by Unicorn's reference model. FZ16 is writable
@@ -4208,6 +4218,10 @@ translate_system_register(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uin
         case SYSTEM_REGISTER_SSBS:
             offset = offsetof(bal_cpu_t, ssbs);
             mask   = PSTATE_SSBS;
+            break;
+        case SYSTEM_REGISTER_TCO:
+            offset = offsetof(bal_cpu_t, tco);
+            mask   = PSTATE_TCO;
             break;
         case SYSTEM_REGISTER_TPIDRRO_EL0:
             offset = offsetof(bal_cpu_t, tpidrro_el0);
@@ -4405,6 +4419,11 @@ translate_pstate(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint32_t ins
     {
         offset = offsetof(bal_cpu_t, ssbs);
         bit    = PSTATE_SSBS;
+    }
+    else if (3U == op1 && 4U == op2)
+    {
+        offset = offsetof(bal_cpu_t, tco);
+        bit    = PSTATE_TCO;
     }
     else
     {
@@ -5904,6 +5923,33 @@ translate_system(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                                     guest_address,
                                     (uint64_t)(uintptr_t)&bal_execute_cache_zero);
             return;
+        case (3U << 11U) | (7U << 7U) | (4U << 3U) | 4U: // DC GZVA: DC ZVA, without tags
+            emit_memory_helper_call(compiler,
+                                    memory_interface,
+                                    instruction,
+                                    guest_address,
+                                    (uint64_t)(uintptr_t)&bal_execute_cache_zero);
+            return;
+        // Allocation tag access is disabled, so the MTE forms that set or clean tags only keep
+        // what they do to data, which is nothing here.
+        case (3U << 11U) | (7U << 7U) | (4U << 3U) | 3U:  // DC GVA
+        case (3U << 11U) | (7U << 7U) | (10U << 3U) | 3U: // DC CGVAC
+        case (3U << 11U) | (7U << 7U) | (10U << 3U) | 5U: // DC CGDVAC
+        case (3U << 11U) | (7U << 7U) | (12U << 3U) | 3U: // DC CGVAP
+        case (3U << 11U) | (7U << 7U) | (12U << 3U) | 5U: // DC CGDVAP
+        case (3U << 11U) | (7U << 7U) | (13U << 3U) | 3U: // DC CGVADP
+        case (3U << 11U) | (7U << 7U) | (13U << 3U) | 5U: // DC CGDVADP
+        case (3U << 11U) | (7U << 7U) | (14U << 3U) | 3U: // DC CIGVAC
+        case (3U << 11U) | (7U << 7U) | (14U << 3U) | 5U: // DC CIGDVAC
+        // The FEAT_SPECRES prediction restrictions and the FEAT_ITE TRCIT have nothing to act on,
+        // and GCSPUSHM and GCSSS1 do nothing while the guarded control stack is disabled.
+        case (3U << 11U) | (7U << 7U) | (3U << 3U) | 4U:  // CFP RCTX
+        case (3U << 11U) | (7U << 7U) | (3U << 3U) | 5U:  // DVP RCTX
+        case (3U << 11U) | (7U << 7U) | (3U << 3U) | 6U:  // COSP RCTX
+        case (3U << 11U) | (7U << 7U) | (3U << 3U) | 7U:  // CPP RCTX
+        case (3U << 11U) | (7U << 7U) | (2U << 3U) | 7U:  // TRCIT
+        case (3U << 11U) | (7U << 7U) | (7U << 3U) | 0U:  // GCSPUSHM
+        case (3U << 11U) | (7U << 7U) | (7U << 3U) | 2U:  // GCSSS1
         case (3U << 11U) | (7U << 7U) | (10U << 3U) | 1U: // DC CVAC
         case (3U << 11U) | (7U << 7U) | (11U << 3U) | 1U: // DC CVAU
         case (3U << 11U) | (7U << 7U) | (12U << 3U) | 1U: // DC CVAP

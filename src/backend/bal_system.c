@@ -57,6 +57,13 @@ is_cssc_minimum_maximum(const uint32_t instruction)
     return 0x1AC06000U == (instruction & 0x7FE0F000U) || 0x11C00000U == (instruction & 0x7FF00000U);
 }
 
+/// FEAT_TME TSTART (1101010100 1 00 011 0011 0000 011 Rt) and TTEST (... 0001 011 Rt).
+static bool
+is_transaction(const uint32_t instruction)
+{
+    return 0xD5233060U == (instruction & 0xFFFFFEE0U);
+}
+
 static bool
 is_cfinv(const uint32_t instruction)
 {
@@ -91,7 +98,7 @@ bal_is_integer_helper_supported(const uint32_t instruction)
     return is_crc32(instruction) || is_cfinv(instruction) || is_rmif(instruction)
            || is_setf(instruction) || is_flag_format(instruction) || is_cssc_one_source(instruction)
            || is_cssc_minimum_maximum(instruction) || is_tag_arithmetic(instruction)
-           || is_tag_register(instruction);
+           || is_tag_register(instruction) || is_transaction(instruction);
 }
 
 static uint64_t
@@ -143,6 +150,20 @@ bal_execute_integer_helper(bal_cpu_t *cpu, const uint32_t instruction)
     if (true == is_cfinv(instruction))
     {
         cpu->flag_c ^= 1U;
+        return 1U;
+    }
+
+    if (true == is_transaction(instruction))
+    {
+        // Transactions are trivial, as SCTLR_EL1.TMT0 = 1 allows: TSTART fails at once with the
+        // TRIVIAL cause (bit 24) and execution goes on after it, and TTEST reads depth 0.
+        const uint32_t rt = instruction & 0x1FU;
+
+        if (rt != 31U)
+        {
+            cpu->x[rt] = 0U == (instruction & 0x100U) ? 1ULL << 24U : 0U;
+        }
+
         return 1U;
     }
 

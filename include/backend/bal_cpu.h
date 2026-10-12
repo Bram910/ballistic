@@ -176,8 +176,9 @@ extern "C"
         /// bit 0 is set. Bit 17 also stands for bits 49:18, as the architecture replicates it.
         uint64_t rcwsmask_el1;
 
-        /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[8];
+        /// PSTATE.TCO (bit 25), the MTE tag check override, as MSR TCO writes it and MRS TCO
+        /// reads it. Tag checks are not performed, so it has no other effect.
+        uint64_t tco;
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

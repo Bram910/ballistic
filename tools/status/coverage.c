@@ -525,6 +525,38 @@ randomize_pac_state(const uint32_t instruction, state_t *state)
     }
 }
 
+/// Returns true for the instructions of extensions the Unicorn reference is too old to run, which
+/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128 and FEAT_MOPS. Ballistic's unit
+/// tests check them instead.
+static bool
+is_newer_than_unicorn(const uint32_t instruction)
+{
+    static const uint32_t MASKS[][2] = {
+        { 0x7FFFF800U, 0x5AC01800U }, // CTZ, CNT
+        { 0x7FFFFC00U, 0x5AC02000U }, // ABS
+        { 0x7FE0F000U, 0x1AC06000U }, // SMAX, UMAX, SMIN, UMIN (register)
+        { 0x7FF00000U, 0x11C00000U }, // SMAX, UMAX, SMIN, UMIN (immediate)
+        { 0xBFBFFC00U, 0x99800800U }, // LDAPR (post-index), STLR (pre-index)
+        { 0xBFA0EC00U, 0x99000800U }, // LDIAPP, STILP
+        { 0x3F200C00U, 0x1D000800U }, // LDAPUR, STLUR (SIMD&FP)
+        { 0xBFBFFC00U, 0x0D018400U }, // LDAP1, STL1
+        { 0xFF208C00U, 0x19200000U }, // LDCLRP, LDSETP
+        { 0xFF20FC00U, 0x19208000U }, // SWPP
+        { 0xFB200C00U, 0x19000400U }, // CPY*
+        { 0xFFE00C00U, 0x19C00400U }, // SET*
+    };
+
+    for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)
+    {
+        if (MASKS[i][1] == (instruction & MASKS[i][0]))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int
 main(void)
 {
@@ -596,7 +628,8 @@ main(void)
                   || 0x2F401000U == (instruction & 0xFFC09400U)
                   || (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode
                       && true == is_unverifiable_pac(instruction, &initial))
-                  || true == is_dit_or_ssbs(instruction);
+                  || true == is_dit_or_ssbs(instruction)
+                  || true == is_newer_than_unicorn(instruction);
 
             if (true == is_known_unicorn_bug)
             {

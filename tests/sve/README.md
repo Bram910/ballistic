@@ -44,6 +44,18 @@ format of the status tracker's coverage tool. The status is one of:
 - `undefined`: both reject them; these are mostly SVE2.1 and SME2 instructions newer than the
   reference's qemu.
 
+With `$BAL_SVE_SPACE` set to `all`, it tests the decoder entries listed in `MNEMONICS` from any
+encoding space. This checks the loads and stores newer than Unicorn against qemu (10.1 or later):
+- The FEAT_MOPS CPY* and SET* instructions run as whole prologue, main and epilogue sequences,
+  with distinct registers, small sizes and addresses inside the data area. NZCV is not compared:
+  the prologue reports in it which of the algorithms the architecture allows is used, and
+  Ballistic's and qemu's differ.
+- qemu lacks FEAT_LRCPC3, so for LDAPUR and STLUR (SIMD&FP), LDAP1, STL1, the writeback LDAPR and
+  STLR, LDIAPP and STILP, the reference runs the equivalent LDUR, STUR, LD1, ST1, LDR, STR, LDP
+  or STP. Those have no alignment checks, so faults only Ballistic raises are not compared.
+- qemu also lacks FEAT_LSE128 and FEAT_THE, so LDCLRP, LDSETP, SWPP and the RCW* instructions
+  cannot be checked this way.
+
 # Known qemu differences
 
 The reference is qemu 6.2, as packaged by Ubuntu 22.04. A few of its behaviours differ from

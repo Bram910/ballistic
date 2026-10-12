@@ -1,3 +1,4 @@
+#include "backend/bal_simd.h"
 #include "backend/bal_sve.h"
 #include "backend/bal_sve_shared.h"
 
@@ -455,6 +456,338 @@ integer_outer_product(sve_t *sve, const uint32_t instruction)
     return SVE_OK;
 }
 
+/// The operand pair of a widening outer product at `pair`: its two narrow elements, each zero
+/// when its predicate element is inactive. Returns a bit per active element.
+static uint32_t
+outer_pair(const vector_t *vector,
+           const uint16_t  predicate,
+           const uint32_t  pair,
+           const uint32_t  narrow,
+           uint64_t        halves[2])
+{
+    uint32_t active = 0U;
+
+    for (uint32_t k = 0U; k < 2U; ++k)
+    {
+        const bool is_on = is_active(predicate, 2U * pair + k, narrow);
+        halves[k]        = true == is_on ? get_element(vector, 2U * pair + k, narrow) : 0U;
+        active |= true == is_on ? 1U << k : 0U;
+    }
+
+    return active;
+}
+
+/// A single precision value as a double, exactly.
+static double
+single_to_double(const uint64_t bits)
+{
+    float          value;
+    const uint32_t word = (uint32_t)bits;
+    (void)memcpy(&value, &word, sizeof(value));
+    return (double)value;
+}
+
+/// Rounds the exact value `scaled` * 2^-48 to single precision in rounding mode `rmode` (FPCR
+/// RMode). Its magnitude is below 2^82, so the result is a normal number or zero.
+static uint64_t
+round_fixed_to_single(const __int128 scaled, const uint32_t rmode)
+{
+    const uint64_t    sign = scaled < 0 ? 0x80000000U : 0U;
+    unsigned __int128 magnitude
+        = scaled < 0 ? (unsigned __int128)(-scaled) : (unsigned __int128)scaled;
+    int32_t msb = 127;
+
+    while (0U == ((magnitude >> msb) & 1U))
+    {
+        --msb;
+    }
+
+    // Keep 24 significant bits; the rest decides the rounding.
+    const int32_t           shift    = msb - 23;
+    unsigned __int128       mantissa = shift > 0 ? magnitude >> shift : magnitude << -shift;
+    const unsigned __int128 remainder
+        = shift > 0 ? magnitude & (((unsigned __int128)1 << shift) - 1U) : 0U;
+    const unsigned __int128 half     = shift > 0 ? (unsigned __int128)1 << (shift - 1) : 0U;
+    bool                    round_up = false;
+
+    if (0U != remainder)
+    {
+        switch (rmode)
+        {
+            case 0U: // to nearest, ties to even
+                round_up = remainder > half || (remainder == half && 0U != (mantissa & 1U));
+                break;
+            case 1U: // towards plus infinity
+                round_up = 0U == sign;
+                break;
+            case 2U: // towards minus infinity
+                round_up = 0U != sign;
+                break;
+            default: // towards zero
+                break;
+        }
+    }
+
+    int32_t exponent = msb - 48;
+    mantissa += true == round_up ? 1U : 0U;
+
+    if (0U != (mantissa >> 24U))
+    {
+        mantissa >>= 1U;
+        ++exponent;
+    }
+
+    return sign | ((uint64_t)(exponent + 127) << 23U) | ((uint64_t)mantissa & 0x7FFFFFU);
+}
+
+/// The dot product of two half precision pairs, a0 * b0 + a1 * b1, rounded once to single
+/// precision, with default NaNs. Denormal inputs flush to zero under FPCR.FZ16.
+static uint64_t
+half_dot(const uint64_t fpcr, const uint64_t a[2], const uint64_t b[2])
+{
+    double   products[2];
+    bool     is_nan               = false;
+    bool     is_infinite          = false;
+    bool     infinity_negative[2] = { false, false };
+    uint32_t infinities           = 0U;
+
+    for (uint32_t k = 0U; k < 2U; ++k)
+    {
+        const double x = single_to_double(bal_simd_half_to_single(fpcr, a[k]));
+        const double y = single_to_double(bal_simd_half_to_single(fpcr, b[k]));
+
+        if (x != x || y != y
+            || ((x == 0.0 || y == 0.0) && (__builtin_isinf(x) || __builtin_isinf(y))))
+        {
+            is_nan = true;
+        }
+        else if (__builtin_isinf(x) || __builtin_isinf(y))
+        {
+            infinity_negative[infinities++] = (x < 0.0) != (y < 0.0);
+            is_infinite                     = true;
+        }
+
+        products[k] = x * y;
+    }
+
+    if (true == is_nan || (2U == infinities && infinity_negative[0] != infinity_negative[1]))
+    {
+        return 0x7FC00000U;
+    }
+
+    if (true == is_infinite)
+    {
+        return (true == infinity_negative[0] ? 0x80000000U : 0U) | 0x7F800000U;
+    }
+
+    const __int128 sum
+        = (__int128)__builtin_ldexp(products[0], 48) + (__int128)__builtin_ldexp(products[1], 48);
+    const uint32_t rmode = (uint32_t)(fpcr >> 22U) & 0x3U;
+
+    if (0 == sum)
+    {
+        // Two zero products keep their common sign; anything else that cancels is +0, or -0
+        // when rounding towards minus infinity.
+        const bool negative0 = __builtin_signbit(products[0]) != 0;
+        const bool negative1 = __builtin_signbit(products[1]) != 0;
+        const bool both_zero = 0.0 == products[0] && 0.0 == products[1];
+        const bool negative  = true == both_zero ? (negative0 && negative1)
+                                                      || (negative0 != negative1 && 2U == rmode)
+                                                 : 2U == rmode;
+        return true == negative ? 0x80000000U : 0U;
+    }
+
+    return round_fixed_to_single(sum, rmode);
+}
+
+/// The widening outer products into single precision tiles: FMOPA and FMOPS on half precision
+/// (10000001 101 Zm Pm Pn Zn S 00 ZAda) and BFMOPA and BFMOPS on BFloat16 (10000001 100 ...).
+/// Each tile element gets the dot product of a pair of its row's Zn elements and its column's
+/// Zm elements, with inactive elements zero.
+static sve_result_t
+widening_float_outer_product(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_half     = 0U != (instruction & 0x200000U);
+    const bool is_subtract = 0U != (instruction & 0x10U);
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t tile  = instruction & 0x3U;
+    const uint16_t pn    = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint16_t pm    = read_p(sve, (instruction >> 13U) & 0x7U);
+    const vector_t n     = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m     = read_z(sve, (instruction >> 16U) & 0x1FU);
+    const uint64_t fpcr  = sve->cpu->fpcr | FPCR_DN;
+    uint64_t       flags = 0U;
+
+    for (uint32_t row = 0U; row < 4U; ++row)
+    {
+        for (uint32_t column = 0U; column < 4U; ++column)
+        {
+            uint64_t a[2];
+            uint64_t b[2];
+
+            // An element changes when a pair of row and column elements are both active.
+            if (0U == (outer_pair(&n, pn, row, 16U, a) & outer_pair(&m, pm, column, 16U, b)))
+            {
+                continue;
+            }
+
+            a[0] ^= true == is_subtract ? 0x8000U : 0U;
+            a[1] ^= true == is_subtract ? 0x8000U : 0U;
+            uint8_t       *element = tile_element(sve, 4U, tile, row, false, column);
+            const uint64_t sum     = read_za(element, 4U);
+            uint64_t       result;
+
+            if (true == is_half)
+            {
+                result = bal_float_element(
+                    fpcr, &flags, 32U, BAL_FLOAT_ADD, sum, half_dot(fpcr, a, b), 0U);
+            }
+            else
+            {
+                result = bal_simd_bfloat_dot_add(
+                    (uint32_t)sum, (uint16_t)a[0], (uint16_t)a[1], (uint16_t)b[0], (uint16_t)b[1]);
+            }
+
+            write_za(element, 4U, result);
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// FMOPA and FMOPS on half precision tiles (10000001 100 Zm Pm Pn Zn S 100 ZAda): a fused
+/// multiply-add per element, where Pn allows the row and Pm the column.
+static sve_result_t
+half_outer_product(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_subtract = 0U != (instruction & 0x10U);
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t tile  = instruction & 0x1U;
+    const uint16_t pn    = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint16_t pm    = read_p(sve, (instruction >> 13U) & 0x7U);
+    const vector_t n     = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m     = read_z(sve, (instruction >> 16U) & 0x1FU);
+    const uint64_t fpcr  = sve->cpu->fpcr | FPCR_DN;
+    uint64_t       flags = 0U;
+
+    for (uint32_t row = 0U; row < 8U; ++row)
+    {
+        for (uint32_t column = 0U; column < 8U; ++column)
+        {
+            if (true == is_active(pn, row, 16U) && true == is_active(pm, column, 16U))
+            {
+                uint8_t *element = tile_element(sve, 2U, tile, row, false, column);
+                uint64_t a       = get_element(&n, row, 16U);
+                a                = true == is_subtract ? a ^ 0x8000U : a;
+                write_za(element,
+                         2U,
+                         bal_float_element(fpcr,
+                                           &flags,
+                                           16U,
+                                           BAL_FLOAT_MULTIPLY_ADD,
+                                           a,
+                                           get_element(&m, column, 16U),
+                                           read_za(element, 2U)));
+            }
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// BMOPA and BMOPS (10000000 100 Zm Pm Pn Zn S 10 ZAda): adds to or subtracts from each word of
+/// a tile the number of equal bits of its row's Zn word and its column's Zm word.
+static sve_result_t
+bit_outer_product(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_subtract = 0U != (instruction & 0x10U);
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t tile = instruction & 0x3U;
+    const uint16_t pn   = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint16_t pm   = read_p(sve, (instruction >> 13U) & 0x7U);
+    const vector_t n    = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m    = read_z(sve, (instruction >> 16U) & 0x1FU);
+
+    for (uint32_t row = 0U; row < 4U; ++row)
+    {
+        for (uint32_t column = 0U; column < 4U; ++column)
+        {
+            if (true == is_active(pn, row, 32U) && true == is_active(pm, column, 32U))
+            {
+                uint8_t       *element = tile_element(sve, 4U, tile, row, false, column);
+                const uint32_t same
+                    = ~(uint32_t)(get_element(&n, row, 32U) ^ get_element(&m, column, 32U));
+                const uint64_t count = (uint64_t)__builtin_popcount(same);
+                const uint64_t sum   = read_za(element, 4U);
+                write_za(element, 4U, true == is_subtract ? sum - count : sum + count);
+            }
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// The two-way SMOPA, SMOPS, UMOPA and UMOPS on halfwords into words (1010000 U 100 Zm Pm Pn Zn
+/// S 10 ZAda): each word of a tile gets the sum of two products of its row's Zn halfwords and
+/// its column's Zm halfwords, where Pn and Pm allow each halfword.
+static sve_result_t
+integer_outer_product_pairs(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_unsigned = 0U != (instruction & 0x1000000U);
+    const bool is_subtract = 0U != (instruction & 0x10U);
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t tile = instruction & 0x3U;
+    const uint16_t pn   = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint16_t pm   = read_p(sve, (instruction >> 13U) & 0x7U);
+    const vector_t n    = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m    = read_z(sve, (instruction >> 16U) & 0x1FU);
+
+    for (uint32_t row = 0U; row < 4U; ++row)
+    {
+        for (uint32_t column = 0U; column < 4U; ++column)
+        {
+            uint8_t *element = tile_element(sve, 4U, tile, row, false, column);
+            uint64_t sum     = read_za(element, 4U);
+
+            for (uint32_t k = 0U; k < 2U; ++k)
+            {
+                if (true == is_active(pn, 2U * row + k, 16U)
+                    && true == is_active(pm, 2U * column + k, 16U))
+                {
+                    const __int128 product
+                        = wide(get_element(&n, 2U * row + k, 16U), 16U, false == is_unsigned)
+                          * wide(get_element(&m, 2U * column + k, 16U), 16U, false == is_unsigned);
+                    sum = true == is_subtract ? sum - (uint64_t)product : sum + (uint64_t)product;
+                }
+            }
+
+            write_za(element, 4U, sum);
+        }
+    }
+
+    return SVE_OK;
+}
+
 // -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
@@ -473,6 +806,10 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFE00008U, 0x80C00000U, float_outer_product },
     { 0xFEC0000CU, 0xA0800000U, integer_outer_product },
     { 0xFEC00008U, 0xA0C00000U, integer_outer_product },
+    { 0xFFC0000CU, 0x81800000U, widening_float_outer_product },
+    { 0xFFE0000EU, 0x81800008U, half_outer_product },
+    { 0xFFE0000CU, 0x80800008U, bit_outer_product },
+    { 0xFEE0000CU, 0xA0800008U, integer_outer_product_pairs },
 };
 
 sve_result_t

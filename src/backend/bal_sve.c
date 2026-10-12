@@ -2413,7 +2413,7 @@ count_predicate_update(sve_t *sve, const uint32_t instruction)
 
     if ((true == is_plain && (0U != (instruction & 0x20000U) || opc != 0U))
         || (false == is_scalar && opc != 0U)
-        || (false == is_plain && true == is_scalar && opc > 1U))
+        || (false == is_plain && true == is_scalar && 0U != (opc & 1U)))
     {
         return SVE_UNDEFINED;
     }
@@ -2428,10 +2428,10 @@ count_predicate_update(sve_t *sve, const uint32_t instruction)
         }
         else
         {
-            // opc<0> (bit 10) selects 64-bit saturation; otherwise the 32-bit result is extended.
+            // sf (bit 10) selects 64-bit saturation; otherwise the 32-bit result is extended.
             write_x(sve,
                     rdn,
-                    saturating_offset(value, delta, 0U != (opc & 1U) ? 64U : 32U, is_unsigned));
+                    saturating_offset(value, delta, 0U != (opc & 2U) ? 64U : 32U, is_unsigned));
         }
 
         return SVE_OK;
@@ -4880,10 +4880,1693 @@ matrix_multiply_add_float(sve_t *sve, const uint32_t instruction)
 }
 
 // -----------------------------------------------------------------------------
+// SVE2 integer
+// -----------------------------------------------------------------------------
+
+/// How a wide intermediate result returns to an element.
+typedef enum
+{
+    SATURATE_NONE,
+    SATURATE_SIGNED,
+    SATURATE_UNSIGNED,
+} saturate_t;
+
+/// An element as a wide integer.
+static __int128
+wide(const uint64_t value, const uint32_t esize, const bool is_signed)
+{
+    return true == is_signed ? (__int128)sign_extend(value, esize)
+                             : (__int128)(value & mask_of(esize));
+}
+
+/// A wide result as an `esize`-bit element, truncated or saturated.
+static uint64_t
+narrow_to(const __int128 value, const uint32_t esize, const saturate_t mode)
+{
+    if (SATURATE_UNSIGNED == mode)
+    {
+        return value < 0 ? 0U
+                         : (value > (__int128)mask_of(esize) ? mask_of(esize) : (uint64_t)value);
+    }
+
+    if (SATURATE_SIGNED == mode)
+    {
+        const __int128 maximum = (__int128)(mask_of(esize) >> 1U);
+        const __int128 minimum = -maximum - 1;
+        const __int128 clamped = value > maximum ? maximum : (value < minimum ? minimum : value);
+        return (uint64_t)clamped & mask_of(esize);
+    }
+
+    return (uint64_t)value & mask_of(esize);
+}
+
+/// `value`, an element of `esize` bits widened, shifted left by `amount` (right when negative),
+/// rounding right shifts when `is_rounding`. Left shifts past the element keep only the sign.
+static __int128
+shift_wide(__int128 value, const int64_t amount, const uint32_t esize, const bool is_rounding)
+{
+    if (amount >= 0)
+    {
+        if (amount >= (int64_t)esize)
+        {
+            const __int128 big = (__int128)1 << 100U;
+            return 0 == value ? 0 : (value > 0 ? big : -big);
+        }
+
+        return value * ((__int128)1 << amount);
+    }
+
+    int64_t shift = -amount;
+    shift         = shift > (int64_t)esize + 1 ? (int64_t)esize + 1 : shift;
+
+    if (true == is_rounding)
+    {
+        value += (__int128)1 << (shift - 1);
+    }
+
+    return value >> shift;
+}
+
+/// SRSHL, URSHL, SQSHL, UQSHL, SQRSHL and UQRSHL on one element, by the whole signed element `b`
+/// (unlike the Advanced SIMD forms, which take its low byte).
+static uint64_t
+shift_by_vector(const uint64_t a,
+                const uint64_t b,
+                const uint32_t esize,
+                const bool     is_signed,
+                const bool     is_rounding,
+                const bool     is_saturating)
+{
+    const int64_t    amount = sign_extend(b, esize);
+    const __int128   result = shift_wide(wide(a, esize, is_signed), amount, esize, is_rounding);
+    const saturate_t mode   = false == is_saturating
+                                  ? SATURATE_NONE
+                                  : (true == is_signed ? SATURATE_SIGNED : SATURATE_UNSIGNED);
+    return narrow_to(result, esize, mode);
+}
+
+/// The SVE2 predicated integer group: 01000100 size 0 opc 10 x Pg Zm Zdn, with the unary forms
+/// (URECPE, URSQRTE, SQABS, SQNEG) taking Zn and Zd and the pairwise ones Zm and Zdn.
+static sve_result_t
+sve2_integer_predicated(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize  = size_at_22(instruction);
+    const uint32_t opc    = (instruction >> 16U) & 0x1FU;
+    const bool     is_b   = 0U != (instruction & 0x2000U);
+    const uint32_t rd     = instruction & 0x1FU;
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       d      = read_z(sve, rd);
+    vector_t       result = d;
+
+    if (true == is_b)
+    {
+        const bool is_estimate         = opc <= 1U;
+        const bool is_pairwise         = 0x11U == opc || (opc >= 0x14U && opc <= 0x17U);
+        const bool is_accumulate_pairs = 0x4U == opc || 0x5U == opc;
+
+        if ((true == is_estimate && 32U != esize) || (true == is_accumulate_pairs && 8U == esize)
+            || (false == is_estimate && false == is_pairwise && false == is_accumulate_pairs
+                && 0x8U != opc && 0x9U != opc))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        for (uint32_t e = 0U; e < elements_of(esize); ++e)
+        {
+            if (false == is_active(pg, e, esize))
+            {
+                continue;
+            }
+
+            uint64_t value;
+
+            if (true == is_pairwise)
+            {
+                const vector_t *source    = 0U == (e & 1U) ? &d : &m;
+                const uint64_t  x         = get_element(source, e & ~1U, esize);
+                const uint64_t  y         = get_element(source, (e & ~1U) + 1U, esize);
+                const bool      is_signed = 0U == (opc & 1U);
+
+                if (0x11U == opc)
+                {
+                    value = x + y;
+                }
+                else if (opc <= 0x15U)
+                {
+                    value = true == is_greater(x, y, esize, is_signed) ? x : y;
+                }
+                else
+                {
+                    value = true == is_greater(x, y, esize, is_signed) ? y : x;
+                }
+            }
+            else if (true == is_accumulate_pairs)
+            {
+                const bool     is_signed = 0x4U == opc;
+                const uint32_t half      = esize / 2U;
+                value                    = get_element(&d, e, esize)
+                        + (uint64_t)(wide(get_element(&m, 2U * e, half), half, is_signed)
+                                     + wide(get_element(&m, 2U * e + 1U, half), half, is_signed));
+            }
+            else if (true == is_estimate)
+            {
+                value = bal_unsigned_estimate_element((uint32_t)get_element(&m, e, 32U), 1U == opc);
+            }
+            else
+            {
+                // SQABS and SQNEG.
+                const __int128 x = wide(get_element(&m, e, esize), esize, true);
+                value = narrow_to(0x8U == opc ? (x < 0 ? -x : x) : -x, esize, SATURATE_SIGNED);
+            }
+
+            set_element(&result, e, esize, value);
+        }
+
+        write_z(sve, rd, result);
+        return SVE_OK;
+    }
+
+    if (opc < 2U || 4U == opc || 5U == opc)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        uint64_t   a         = get_element(&d, e, esize);
+        uint64_t   b         = get_element(&m, e, esize);
+        const bool is_signed = 0U == (opc & 1U);
+        uint64_t   value;
+
+        if (opc < 0x10U)
+        {
+            // The shifts: opc<3> saturates, opc<2> reverses the operands and opc<1> rounds.
+            const bool is_reversed = 0U != (opc & 0x4U);
+
+            if (true == is_reversed)
+            {
+                const uint64_t t = a;
+                a                = b;
+                b                = t;
+            }
+
+            const bool is_saturating = opc >= 0x8U;
+            const bool is_rounding   = 0U != (opc & 0x2U);
+            value = shift_by_vector(a, b, esize, is_signed, is_rounding, is_saturating);
+        }
+        else if (opc < 0x18U)
+        {
+            // SHADD, UHADD, SHSUB, UHSUB, SRHADD, URHADD, SHSUBR and UHSUBR.
+            const __int128 x = wide(a, esize, is_signed);
+            const __int128 y = wide(b, esize, is_signed);
+            __int128       r;
+
+            switch (opc & 0x6U)
+            {
+                case 0x0U:
+                    r = x + y;
+                    break;
+                case 0x2U:
+                    r = x - y;
+                    break;
+                case 0x4U:
+                    r = x + y + 1;
+                    break;
+                default:
+                    r = y - x;
+                    break;
+            }
+
+            value = (uint64_t)(r >> 1) & mask_of(esize);
+        }
+        else
+        {
+            // SQADD, UQADD, SQSUB, UQSUB, SUQADD, USQADD, SQSUBR and UQSUBR.
+            const __int128 x = wide(a, esize, is_signed);
+            __int128       r;
+
+            switch (opc)
+            {
+                case 0x1CU:
+                    r = x + wide(b, esize, false);
+                    break;
+                case 0x1DU:
+                    r = x + wide(b, esize, true);
+                    break;
+                case 0x1AU:
+                case 0x1BU:
+                    r = x - wide(b, esize, is_signed);
+                    break;
+                case 0x1EU:
+                case 0x1FU:
+                    r = wide(b, esize, is_signed) - x;
+                    break;
+                default:
+                    r = x + wide(b, esize, is_signed);
+                    break;
+            }
+
+            value = narrow_to(r, esize, true == is_signed ? SATURATE_SIGNED : SATURATE_UNSIGNED);
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_z(sve, rd, result);
+    return SVE_OK;
+}
+
+/// The high half of twice `product` plus `rounding`, as (2 * product + rounding) >> esize
+/// without overflowing on 64-bit elements.
+static __int128
+doubled_high(const __int128 product, const uint32_t esize, const bool is_rounding)
+{
+    if (64U == esize)
+    {
+        return (product + (true == is_rounding ? (__int128)1 << 62U : 0)) >> 63U;
+    }
+
+    return (2 * product + (true == is_rounding ? (__int128)1 << (esize - 1U) : 0)) >> esize;
+}
+
+/// SQDMULH and SQRDMULH on one element: the high half of twice the product, saturated.
+static uint64_t
+doubling_multiply_high(const uint64_t a,
+                       const uint64_t b,
+                       const uint32_t esize,
+                       const bool     is_rounding)
+{
+    const __int128 product = wide(a, esize, true) * wide(b, esize, true);
+    return narrow_to(doubled_high(product, esize, is_rounding), esize, SATURATE_SIGNED);
+}
+
+/// SQRDMLAH and SQRDMLSH on one element: the accumulator plus or minus the rounded high half of
+/// twice the product, saturated. The accumulator is a multiple of 2^esize in the sum, so it adds
+/// after the shift.
+static uint64_t
+rounding_doubling_multiply_add(const uint64_t acc,
+                               const uint64_t a,
+                               const uint64_t b,
+                               const uint32_t esize,
+                               const bool     is_subtract)
+{
+    const __int128 product = wide(a, esize, true) * wide(b, esize, true);
+    const __int128 high    = doubled_high(true == is_subtract ? -product : product, esize, true);
+    return narrow_to(wide(acc, esize, true) + high, esize, SATURATE_SIGNED);
+}
+
+/// SQDMULH and SQRDMULH (vectors, unpredicated): 00000100 size 1 Zm 01110 R Zn Zd.
+static sve_result_t
+doubling_multiply_high_vectors(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize       = size_at_22(instruction);
+    const bool     is_rounding = 0U != (instruction & 0x400U);
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m           = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result      = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        set_element(&result,
+                    e,
+                    esize,
+                    doubling_multiply_high(
+                        get_element(&n, e, esize), get_element(&m, e, esize), esize, is_rounding));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// EOR3, BCAX (00000100 0 op 1 Zm 001110 Zk Zdn) and BSL, BSL1N, BSL2N and NBSL (00000100 opc 1
+/// Zm 001111 Zk Zdn), on the whole vector.
+static sve_result_t
+bitwise_ternary(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t opc    = (instruction >> 22U) & 0x3U;
+    const bool     is_bsl = 0U != (instruction & 0x400U);
+
+    if (false == is_bsl && opc >= 2U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t dn     = read_z(sve, instruction & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    const vector_t k      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        const uint64_t a = dn.d[i];
+        const uint64_t b = m.d[i];
+        const uint64_t c = k.d[i];
+
+        if (false == is_bsl)
+        {
+            result.d[i] = 0U == opc ? a ^ b ^ c : a ^ (b & ~c);
+        }
+        else
+        {
+            switch (opc)
+            {
+                case 0U:
+                    result.d[i] = (a & c) | (b & ~c);
+                    break;
+                case 1U:
+                    result.d[i] = (~a & c) | (b & ~c);
+                    break;
+                case 2U:
+                    result.d[i] = (a & c) | (~b & ~c);
+                    break;
+                default:
+                    result.d[i] = ~((a & c) | (b & ~c));
+                    break;
+            }
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The element size and shift of a right shift by immediate encoded as tsz:imm3, with tsz of
+/// `bits` bits; 0 for a reserved tsz.
+static uint32_t
+right_shift_immediate(const uint32_t tsz, const uint32_t imm3, uint32_t *shift)
+{
+    if (0U == tsz)
+    {
+        return 0U;
+    }
+
+    const uint32_t esize = 8U << (31U - (uint32_t)__builtin_clz(tsz));
+    *shift               = 2U * esize - ((tsz << 3U) | imm3);
+    return esize;
+}
+
+/// XAR: 00000100 tszh 1 tszl imm3 001101 Zm Zdn, exclusive or and rotate right.
+static sve_result_t
+exclusive_or_rotate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t tsz   = (((instruction >> 22U) & 0x3U) << 2U) | ((instruction >> 19U) & 0x3U);
+    uint32_t       shift = 0U;
+    const uint32_t esize = right_shift_immediate(tsz, (instruction >> 16U) & 0x7U, &shift);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t dn     = read_z(sve, instruction & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t value = get_element(&dn, e, esize) ^ get_element(&m, e, esize);
+        set_element(&result,
+                    e,
+                    esize,
+                    shift == esize
+                        ? value
+                        : ((value >> shift) | (value << (esize - shift))) & mask_of(esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The element size, index and Zm of a by-element form whose size is in bits 23:22: halfwords
+/// take i3h:i3l (bits 22, 20:19) and Zm in bits 18:16, words i2 (bits 20:19) and Zm in bits
+/// 18:16, doublewords i1 (bit 20) and Zm in bits 19:16.
+static uint32_t
+indexed_operand(const uint32_t instruction, uint32_t *index, uint32_t *zm)
+{
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (size < 2U)
+    {
+        *index = (((instruction >> 22U) & 1U) << 2U) | ((instruction >> 19U) & 0x3U);
+        *zm    = (instruction >> 16U) & 0x7U;
+        return 16U;
+    }
+
+    if (2U == size)
+    {
+        *index = (instruction >> 19U) & 0x3U;
+        *zm    = (instruction >> 16U) & 0x7U;
+        return 32U;
+    }
+
+    *index = (instruction >> 20U) & 0x1U;
+    *zm    = (instruction >> 16U) & 0xFU;
+    return 64U;
+}
+
+/// MLA, MLS (01000100 1 size 1 ... 00001 S Zn Zda), SQRDMLAH, SQRDMLSH (... 00010 S ...),
+/// SQDMULH, SQRDMULH (... 11110 R ...) and MUL (... 111110 ...) by element.
+static sve_result_t
+integer_multiply_indexed(sve_t *sve, const uint32_t instruction)
+{
+    uint32_t       index;
+    uint32_t       zm;
+    const uint32_t esize  = indexed_operand(instruction, &index, &zm);
+    const uint32_t op     = (instruction >> 10U) & 0x3FU;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    const vector_t d      = read_z(sve, instruction & 0x1FU);
+    vector_t       result = d;
+
+    // Within each 128-bit segment, here the whole vector.
+    const uint64_t b = get_element(&m, index, esize);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a   = get_element(&n, e, esize);
+        const uint64_t acc = get_element(&d, e, esize);
+        uint64_t       value;
+
+        switch (op)
+        {
+            case 0x02U:
+                value = acc + a * b;
+                break;
+            case 0x03U:
+                value = acc - a * b;
+                break;
+            case 0x04U:
+            case 0x05U:
+                value = rounding_doubling_multiply_add(acc, a, b, esize, 0x05U == op);
+                break;
+            case 0x3CU:
+            case 0x3DU:
+                value = doubling_multiply_high(a, b, esize, 0x3DU == op);
+                break;
+            default:
+                value = a * b;
+                break;
+        }
+
+        set_element(&result, e, esize, value);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The dot product of the four `esize / 4`-bit elements of `a` and `b` at element `e`, added to
+/// `acc`; `a_signed` and `b_signed` pick the signedness of each.
+static uint64_t
+dot_four(const uint64_t  acc,
+         const vector_t *a,
+         const vector_t *b,
+         const uint32_t  e,
+         const uint32_t  be,
+         const uint32_t  esize,
+         const bool      a_signed,
+         const bool      b_signed)
+{
+    const uint32_t small = esize / 4U;
+    __int128       sum   = 0;
+
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+        sum += wide(get_element(a, 4U * e + i, small), small, a_signed)
+               * wide(get_element(b, 4U * be + i, small), small, b_signed);
+    }
+
+    return (acc + (uint64_t)sum) & mask_of(esize);
+}
+
+/// SDOT and UDOT (vectors, 01000100 size 0 Zm 00000 U Zn Zda, and indexed, 01000100 1 size 1 ...
+/// 00000 U ...), USDOT (vectors, 01000100 100 Zm 011110 ..., and indexed, 01000100 101 ... 00011
+/// 0 ...) and SUDOT (indexed, ... 000111 ...).
+static sve_result_t
+integer_dot_product(sve_t *sve, const uint32_t instruction)
+{
+    const bool is_indexed = 0U != (instruction & 0x200000U);
+    const bool is_mixed
+        = 0x44807800U == (instruction & 0xFFE0FC00U) || 0U != (instruction & 0x1000U);
+    uint32_t esize = 8U << ((instruction >> 22U) & 0x3U);
+    uint32_t index = 0U;
+    uint32_t zm    = (instruction >> 16U) & 0x1FU;
+
+    if (true == is_indexed)
+    {
+        esize = indexed_operand(instruction, &index, &zm);
+    }
+
+    if (esize < 32U || (true == is_mixed && 32U != esize))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    bool a_signed = 0U == (instruction & 0x400U);
+    bool b_signed = a_signed;
+
+    if (true == is_mixed)
+    {
+        // USDOT takes unsigned Zn and signed Zm; SUDOT the reverse.
+        const bool is_sudot = true == is_indexed && 0U != (instruction & 0x400U);
+        a_signed            = is_sudot;
+        b_signed            = !is_sudot;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        set_element(&result,
+                    e,
+                    esize,
+                    dot_four(get_element(&result, e, esize),
+                             &n,
+                             &m,
+                             e,
+                             true == is_indexed ? index : e,
+                             esize,
+                             a_signed,
+                             b_signed));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// One widening multiply-add kind of the SVE2 integer multiply-add group.
+typedef enum
+{
+    WIDEN_MULTIPLY_ADD,
+    WIDEN_MULTIPLY_SUBTRACT,
+    WIDEN_MULTIPLY,
+    WIDEN_DOUBLING_ADD,
+    WIDEN_DOUBLING_SUBTRACT,
+    WIDEN_DOUBLING,
+} widen_kind_t;
+
+/// The widening products of the even (`top` 0) or odd elements of Zn and either the same elements
+/// of Zm or element `index` of each segment of Zm (when non-negative), into `esize`-bit elements.
+static void
+widening_multiply(vector_t          *result,
+                  const vector_t    *n,
+                  const vector_t    *m,
+                  const uint32_t     esize,
+                  const uint32_t     top_n,
+                  const uint32_t     top_m,
+                  const int32_t      index,
+                  const bool         is_signed,
+                  const widen_kind_t kind)
+{
+    const uint32_t half = esize / 2U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const __int128 a = wide(get_element(n, 2U * e + top_n, half), half, is_signed);
+        const __int128 b = wide(
+            get_element(m, index < 0 ? 2U * e + top_m : (uint32_t)index, half), half, is_signed);
+        const __int128 product = a * b;
+        const __int128 acc = wide(get_element(result, e, esize), esize, kind >= WIDEN_DOUBLING_ADD);
+        // The doubled product saturates before it is accumulated, and the sum again.
+        const __int128 doubled = wide(narrow_to(2 * product, esize, SATURATE_SIGNED), esize, true);
+        uint64_t       value;
+
+        switch (kind)
+        {
+            case WIDEN_MULTIPLY_ADD:
+                value = narrow_to(acc + product, esize, SATURATE_NONE);
+                break;
+            case WIDEN_MULTIPLY_SUBTRACT:
+                value = narrow_to(acc - product, esize, SATURATE_NONE);
+                break;
+            case WIDEN_MULTIPLY:
+                value = narrow_to(product, esize, SATURATE_NONE);
+                break;
+            case WIDEN_DOUBLING_ADD:
+                value = narrow_to(acc + doubled, esize, SATURATE_SIGNED);
+                break;
+            case WIDEN_DOUBLING_SUBTRACT:
+                value = narrow_to(acc - doubled, esize, SATURATE_SIGNED);
+                break;
+            default:
+                value = (uint64_t)doubled & mask_of(esize);
+                break;
+        }
+
+        set_element(result, e, esize, value);
+    }
+}
+
+/// The SVE2 integer multiply-add group on vectors: 01000100 size 0 Zm 0 op Zn Zda with SQDMLALBT,
+/// SQDMLSLBT (00001 S), CDOT (0001 rot), CMLA (0010 rot), SQRDCMLAH (0011 rot), SMLALB to
+/// UMLSLT (010 S U T), SQDMLALB to SQDMLSLT (0110 S T) and SQRDMLAH, SQRDMLSH (01110 S).
+static sve_result_t
+integer_multiply_add_vectors(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize  = size_at_22(instruction);
+    const uint32_t op     = (instruction >> 10U) & 0x1FU;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    if (op >= 0x10U && op < 0x1CU)
+    {
+        // The widening forms need a wider destination.
+        if (8U == esize)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        if (op < 0x18U)
+        {
+            const bool is_signed = 0U == (op & 0x2U);
+            widening_multiply(&result,
+                              &n,
+                              &m,
+                              esize,
+                              op & 1U,
+                              op & 1U,
+                              -1,
+                              is_signed,
+                              0U != (op & 0x4U) ? WIDEN_MULTIPLY_SUBTRACT : WIDEN_MULTIPLY_ADD);
+        }
+        else
+        {
+            widening_multiply(&result,
+                              &n,
+                              &m,
+                              esize,
+                              op & 1U,
+                              op & 1U,
+                              -1,
+                              true,
+                              0U != (op & 0x2U) ? WIDEN_DOUBLING_SUBTRACT : WIDEN_DOUBLING_ADD);
+        }
+    }
+    else if (0x2U == op || 0x3U == op)
+    {
+        // SQDMLALBT and SQDMLSLBT: the even elements of Zn and the odd ones of Zm.
+        if (8U == esize)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        widening_multiply(&result,
+                          &n,
+                          &m,
+                          esize,
+                          0U,
+                          1U,
+                          -1,
+                          true,
+                          0x3U == op ? WIDEN_DOUBLING_SUBTRACT : WIDEN_DOUBLING_ADD);
+    }
+    else if (0x1CU == op || 0x1DU == op)
+    {
+        for (uint32_t e = 0U; e < elements_of(esize); ++e)
+        {
+            set_element(&result,
+                        e,
+                        esize,
+                        rounding_doubling_multiply_add(get_element(&result, e, esize),
+                                                       get_element(&n, e, esize),
+                                                       get_element(&m, e, esize),
+                                                       esize,
+                                                       0x1DU == op));
+        }
+    }
+    else
+    {
+        return SVE_UNDEFINED;
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The widening forms by element: 01000100 1 size 1 ... op Zn Zda with SQDMLALB to SQDMLSLT
+/// (001 S i T), SMLALB to UMLSLT (10 S U i T), SMULLB to UMULLT (110 U i T) and SQDMULLB,
+/// SQDMULLT (1110 i T); halfwords take index i3h:i3l:i, words i2h:i2l.
+static sve_result_t
+integer_multiply_long_indexed(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_words = 0U != (instruction & 0x400000U);
+    const uint32_t esize    = true == is_words ? 64U : 32U;
+    const uint32_t zm       = (instruction >> 16U) & (true == is_words ? 0xFU : 0x7U);
+    const uint32_t index
+        = ((true == is_words ? (instruction >> 20U) & 0x1U : (instruction >> 19U) & 0x3U) << 1U)
+          | ((instruction >> 11U) & 1U);
+    const uint32_t op     = (instruction >> 12U) & 0xFU;
+    const uint32_t top    = (instruction >> 10U) & 1U;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+    widen_kind_t   kind;
+    bool           is_signed = true;
+
+    switch (op)
+    {
+        case 0x2U:
+            kind = WIDEN_DOUBLING_ADD;
+            break;
+        case 0x3U:
+            kind = WIDEN_DOUBLING_SUBTRACT;
+            break;
+        case 0x8U:
+        case 0x9U:
+            kind      = WIDEN_MULTIPLY_ADD;
+            is_signed = 0x8U == op;
+            break;
+        case 0xAU:
+        case 0xBU:
+            kind      = WIDEN_MULTIPLY_SUBTRACT;
+            is_signed = 0xAU == op;
+            break;
+        case 0xCU:
+        case 0xDU:
+            kind      = WIDEN_MULTIPLY;
+            is_signed = 0xCU == op;
+            result    = (vector_t) { { 0U, 0U } };
+            break;
+        case 0xEU:
+            kind   = WIDEN_DOUBLING;
+            result = (vector_t) { { 0U, 0U } };
+            break;
+        default:
+            return SVE_UNDEFINED;
+    }
+
+    widening_multiply(&result, &n, &m, esize, top, 0U, (int32_t)index, is_signed, kind);
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The real and imaginary parts of CMLA and SQRDCMLAH on the pair at `pair`: rotation 0 adds
+/// re*re and re*im, 90 subtracts im*im and adds im*re, and so on.
+static void
+complex_integer_pair(const vector_t *n,
+                     const vector_t *m,
+                     const uint32_t  pair,
+                     const uint32_t  mpair,
+                     const uint32_t  esize,
+                     const uint32_t  rotation,
+                     uint64_t       *a_r,
+                     uint64_t       *b_r,
+                     bool           *neg_r,
+                     uint64_t       *a_i,
+                     uint64_t       *b_i,
+                     bool           *neg_i)
+{
+    const uint32_t sel_a = rotation & 1U;
+    *a_r                 = get_element(n, 2U * pair + sel_a, esize);
+    *a_i                 = *a_r;
+    *b_r                 = get_element(m, 2U * mpair + sel_a, esize);
+    *b_i                 = get_element(m, 2U * mpair + (sel_a ^ 1U), esize);
+    *neg_r               = 1U == rotation || 2U == rotation;
+    *neg_i               = rotation >= 2U;
+}
+
+/// CMLA and SQRDCMLAH, vectors (01000100 size 0 Zm 001 S rot Zn Zda) and by element (01000100 1
+/// size 1 ... 011 S rot ...: halfwords with i2 and Zm in bits 18:16, words with i1 and Zm in bits
+/// 19:16).
+static sve_result_t
+complex_integer_multiply_add(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_indexed  = 0U != (instruction & 0x200000U);
+    const bool     is_rounding = 0U != (instruction & 0x1000U);
+    const uint32_t rotation    = (instruction >> 10U) & 0x3U;
+    uint32_t       esize       = size_at_22(instruction);
+    uint32_t       zm          = (instruction >> 16U) & 0x1FU;
+    int32_t        index       = -1;
+
+    if (true == is_indexed)
+    {
+        const bool is_words = 0U != (instruction & 0x400000U);
+        esize               = true == is_words ? 32U : 16U;
+        zm                  = (instruction >> 16U) & (true == is_words ? 0xFU : 0x7U);
+        index               = (int32_t)((instruction >> (true == is_words ? 20U : 19U))
+                          & (true == is_words ? 0x1U : 0x3U));
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        uint64_t a_r, b_r, a_i, b_i;
+        bool     neg_r, neg_i;
+        complex_integer_pair(&n,
+                             &m,
+                             pair,
+                             index < 0 ? pair : (uint32_t)index,
+                             esize,
+                             rotation,
+                             &a_r,
+                             &b_r,
+                             &neg_r,
+                             &a_i,
+                             &b_i,
+                             &neg_i);
+
+        for (uint32_t part = 0U; part < 2U; ++part)
+        {
+            const uint32_t e   = 2U * pair + part;
+            const uint64_t acc = get_element(&result, e, esize);
+            const uint64_t a   = 0U == part ? a_r : a_i;
+            const uint64_t b   = 0U == part ? b_r : b_i;
+            const bool     neg = 0U == part ? neg_r : neg_i;
+            uint64_t       value;
+
+            if (true == is_rounding)
+            {
+                value = rounding_doubling_multiply_add(acc, a, b, esize, neg);
+            }
+            else
+            {
+                const uint64_t product = a * b;
+                value                  = true == neg ? acc - product : acc + product;
+            }
+
+            set_element(&result, e, esize, value);
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// CDOT, vectors (01000100 size 0 Zm 0001 rot Zn Zda) and by element (01000100 1 size 1 ... 0100
+/// rot ...): the complex dot product of four 8-bit or 16-bit pairs per element.
+static sve_result_t
+complex_dot_product(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_indexed = 0U != (instruction & 0x200000U);
+    const uint32_t rotation   = (instruction >> 10U) & 0x3U;
+    uint32_t       esize      = size_at_22(instruction);
+    uint32_t       zm         = (instruction >> 16U) & 0x1FU;
+    int32_t        index      = -1;
+
+    if (true == is_indexed)
+    {
+        const bool is_words = 0U != (instruction & 0x400000U);
+        esize               = true == is_words ? 64U : 32U;
+        zm                  = (instruction >> 16U) & (true == is_words ? 0xFU : 0x7U);
+        index               = (int32_t)((instruction >> (true == is_words ? 20U : 19U))
+                          & (true == is_words ? 0x1U : 0x3U));
+    }
+
+    if (esize < 32U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t small = esize / 4U;
+    const uint32_t sel_a = rotation & 1U;
+    // Rotations 0 and 270 subtract the imaginary products.
+    const bool     neg_i  = 0U == rotation || 3U == rotation;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint32_t source = index < 0 ? e : (uint32_t)index;
+        __int128       sum    = wide(get_element(&result, e, esize), esize, true);
+
+        for (uint32_t pair = 0U; pair < 2U; ++pair)
+        {
+            const __int128 n_r = wide(get_element(&n, 4U * e + 2U * pair, small), small, true);
+            const __int128 n_i = wide(get_element(&n, 4U * e + 2U * pair + 1U, small), small, true);
+            const __int128 m_a
+                = wide(get_element(&m, 4U * source + 2U * pair + sel_a, small), small, true);
+            const __int128 m_b
+                = wide(get_element(&m, 4U * source + 2U * pair + (sel_a ^ 1U), small), small, true);
+            sum += n_r * m_a;
+            sum += (true == neg_i ? -n_i : n_i) * m_b;
+        }
+
+        set_element(&result, e, esize, narrow_to(sum, esize, SATURATE_NONE));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SQSHL, UQSHL, SRSHR, URSHR and SQSHLU by immediate, predicated: 00000100 tszh 00 opc 100 Pg
+/// tszl imm3 Zdn.
+static sve_result_t
+shift_immediate_saturating(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t opc     = (instruction >> 16U) & 0xFU;
+    const uint32_t tsize   = (((instruction >> 22U) & 0x3U) << 2U) | ((instruction >> 8U) & 0x3U);
+    const bool     is_left = 0x6U == opc || 0x7U == opc || 0xFU == opc;
+    uint32_t       shift   = 0U;
+
+    if (opc != 0x6U && opc != 0x7U && opc != 0xCU && opc != 0xDU && opc != 0xFU)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t esize = shift_immediate_size(tsize, (instruction >> 5U) & 0x7U, is_left, &shift);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool       is_signed = 0x7U != opc && 0xDU != opc;
+    const saturate_t mode      = 0x6U == opc
+                                     ? SATURATE_SIGNED
+                                     : (0x7U == opc || 0xFU == opc ? SATURATE_UNSIGNED : SATURATE_NONE);
+    const uint16_t   pg        = read_p(sve, (instruction >> 10U) & 0x7U);
+    vector_t         result    = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            const __int128 value  = wide(get_element(&result, e, esize), esize, is_signed);
+            const int64_t  amount = true == is_left ? (int64_t)shift : -(int64_t)shift;
+            set_element(&result,
+                        e,
+                        esize,
+                        narrow_to(shift_wide(value, amount, esize, false == is_left), esize, mode));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The SVE2 widening group: 01000101 size 0 Zm op Zn Zd with the long add, subtract and absolute
+/// difference (00 op U T), the wide add and subtract (010 S U T), SQDMULLB/T (01100 T), PMULLB/T
+/// (01101 T), SMULLB to UMULLT (0111 U T), SADDLBT, SSUBLBT and SSUBLTB (1000 S T) and the
+/// absolute difference and accumulate long (1100 U T).
+static sve_result_t
+integer_widening(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t size      = (instruction >> 22U) & 0x3U;
+    const uint32_t esize     = 8U << size;
+    const uint32_t half      = esize / 2U;
+    const uint32_t op        = (instruction >> 10U) & 0x3FU;
+    const uint32_t top       = op & 1U;
+    const bool     is_signed = 0U == (op & 0x2U);
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m         = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result
+        = 0x30U == (op & 0x3CU) ? read_z(sve, instruction & 0x1FU) : (vector_t) { { 0U, 0U } };
+
+    // PMULLB and PMULLT on doublewords produce a quadword (FEAT_SVE_PMULL128).
+    if (0U == size && 0x1AU == (op & 0x3EU))
+    {
+        const uint64_t    a       = n.d[top];
+        const uint64_t    b       = m.d[top];
+        unsigned __int128 product = 0U;
+
+        for (uint32_t bit = 0U; bit < 64U; ++bit)
+        {
+            product ^= 0U != ((b >> bit) & 1U) ? (unsigned __int128)a << bit : 0U;
+        }
+
+        result.d[0] = (uint64_t)product;
+        result.d[1] = (uint64_t)(product >> 64U);
+        write_z(sve, instruction & 0x1FU, result);
+        return SVE_OK;
+    }
+
+    if (0U == size || (0x1AU == (op & 0x3EU) && 2U == size))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool is_supported = op < 0x08U || (op >= 0x0CU && op < 0x20U) || 0x20U == op
+                              || 0x22U == op || 0x23U == op || 0x30U == (op & 0x3CU);
+
+    if (false == is_supported)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t na = get_element(&n, 2U * e + top, half);
+        const uint64_t mb = get_element(&m, 2U * e + top, half);
+        __int128       value;
+
+        if (op < 0x10U)
+        {
+            // SADDL, UADDL (000), SSUBL, USUBL (001) and SABDL, UABDL (011).
+            const __int128 a    = wide(na, half, is_signed);
+            const __int128 b    = wide(mb, half, is_signed);
+            const uint32_t kind = op >> 2U;
+            value = 0U == kind ? a + b : (1U == kind ? a - b : (a > b ? a - b : b - a));
+        }
+        else if (op < 0x18U)
+        {
+            // SADDW, UADDW, SSUBW and USUBW: the wide Zn element and a narrow Zm one.
+            const __int128 a = wide(get_element(&n, e, esize), esize, is_signed);
+            const __int128 b = wide(mb, half, is_signed);
+            value            = 0U == (op & 0x4U) ? a + b : a - b;
+        }
+        else if (op < 0x1AU)
+        {
+            const __int128 product = wide(na, half, true) * wide(mb, half, true);
+            value = wide(narrow_to(2 * product, esize, SATURATE_SIGNED), esize, true);
+        }
+        else if (op < 0x1CU)
+        {
+            uint64_t product = 0U;
+
+            for (uint32_t bit = 0U; bit < half; ++bit)
+            {
+                product ^= 0U != ((mb >> bit) & 1U) ? na << bit : 0U;
+            }
+
+            value = (__int128)product;
+        }
+        else if (op < 0x20U)
+        {
+            value = wide(na, half, is_signed) * wide(mb, half, is_signed);
+        }
+        else if (op < 0x24U)
+        {
+            // SADDLBT (100000), SSUBLBT (100010) and SSUBLTB (100011): even Zn with odd Zm, or
+            // odd Zn with even Zm.
+            const uint32_t n_top = 0x23U == op ? 1U : 0U;
+            const __int128 a     = wide(get_element(&n, 2U * e + n_top, half), half, true);
+            const __int128 b     = wide(get_element(&m, 2U * e + (n_top ^ 1U), half), half, true);
+            value                = 0x20U == op ? a + b : a - b;
+        }
+        else
+        {
+            // SABALB, SABALT, UABALB and UABALT.
+            const __int128 a = wide(na, half, is_signed);
+            const __int128 b = wide(mb, half, is_signed);
+            value            = (__int128)get_element(&result, e, esize) + (a > b ? a - b : b - a);
+        }
+
+        set_element(&result, e, esize, narrow_to(value, esize, SATURATE_NONE));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// EORBT and EORTB: 01000101 size 0 Zm 10010 tb Zn Zd, exclusive or into the even or odd elements.
+static sve_result_t
+exclusive_or_interleaved(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize  = size_at_22(instruction);
+    const uint32_t tb     = (instruction >> 10U) & 1U;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        set_element(&result,
+                    2U * pair + tb,
+                    esize,
+                    get_element(&n, 2U * pair + tb, esize)
+                        ^ get_element(&m, 2U * pair + (tb ^ 1U), esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SMMLA, USMMLA and UMMLA: 01000101 uns 0 Zm 100110 Zn Zda, a 2x8 by 8x2 byte matrix product.
+static sve_result_t
+matrix_multiply_add_integer(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t uns = (instruction >> 22U) & 0x3U;
+
+    if (1U == uns)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool     n_signed = 0U == uns;
+    const bool     m_signed = 0U == uns || 2U == uns;
+    const vector_t n        = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m        = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result   = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        for (uint32_t j = 0U; j < 2U; ++j)
+        {
+            int64_t sum = 0;
+
+            for (uint32_t k = 0U; k < 8U; ++k)
+            {
+                sum += (int64_t)wide(get_element(&n, 8U * i + k, 8U), 8U, n_signed)
+                       * (int64_t)wide(get_element(&m, 8U * j + k, 8U), 8U, m_signed);
+            }
+
+            set_element(
+                &result, 2U * i + j, 32U, get_element(&result, 2U * i + j, 32U) + (uint64_t)sum);
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SSHLLB, SSHLLT, USHLLB and USHLLT: 01000101 0 tszh 0 tszl imm3 1010 U T Zn Zd.
+static sve_result_t
+shift_left_long(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t tsz = (((instruction >> 22U) & 1U) << 2U) | ((instruction >> 19U) & 0x3U);
+
+    if (0U == tsz)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t half      = 8U << (31U - (uint32_t)__builtin_clz(tsz));
+    const uint32_t esize     = 2U * half;
+    const uint32_t shift     = ((tsz << 3U) | ((instruction >> 16U) & 0x7U)) - half;
+    const uint32_t top       = (instruction >> 10U) & 1U;
+    const bool     is_signed = 0U == (instruction & 0x800U);
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result    = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const __int128 value = wide(get_element(&n, 2U * e + top, half), half, is_signed);
+        set_element(
+            &result, e, esize, narrow_to(value * ((__int128)1 << shift), esize, SATURATE_NONE));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// BEXT, BDEP and BGRP: 01000101 size 0 Zm 1011 opc Zn Zd.
+static sve_result_t
+bit_permute(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+    const uint32_t opc   = (instruction >> 10U) & 0x3U;
+
+    if (3U == opc)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t data       = get_element(&n, e, esize);
+        const uint64_t mask       = get_element(&m, e, esize);
+        uint64_t       low        = 0U;
+        uint64_t       high       = 0U;
+        uint32_t       low_count  = 0U;
+        uint32_t       high_count = 0U;
+
+        for (uint32_t bit = 0U; bit < esize; ++bit)
+        {
+            if (0U != ((mask >> bit) & 1U))
+            {
+                // BEXT and BGRP gather the selected bits, BDEP scatters the low bits to them.
+                const bool is_deposit = 1U == opc;
+                low |= (false == is_deposit ? (data >> bit) & 1U : (data >> low_count) & 1U)
+                       << (false == is_deposit ? low_count : bit);
+                ++low_count;
+            }
+            else
+            {
+                high |= ((data >> bit) & 1U) << high_count;
+                ++high_count;
+            }
+        }
+
+        uint64_t value = low;
+
+        if (2U == opc)
+        {
+            // BGRP: the selected bits, then the others above them.
+            value = low | (low_count < 64U ? high << low_count : 0U);
+        }
+
+        set_element(&result, e, esize, value & mask_of(esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SABA and UABA: 01000101 size 0 Zm 11111 U Zn Zda.
+static sve_result_t
+absolute_difference_accumulate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize     = size_at_22(instruction);
+    const bool     is_signed = 0U == (instruction & 0x400U);
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m         = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result    = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        set_element(
+            &result,
+            e,
+            esize,
+            get_element(&result, e, esize)
+                + absolute_difference(
+                    get_element(&n, e, esize), get_element(&m, e, esize), esize, is_signed));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SSRA, USRA, SRSRA and URSRA (01000101 tszh 0 tszl imm3 1110 R U Zn Zda) and SRI and SLI
+/// (... 11110 op ...).
+static sve_result_t
+shift_accumulate_insert(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t tsz = (((instruction >> 22U) & 0x3U) << 2U) | ((instruction >> 19U) & 0x3U);
+    const uint32_t imm = (tsz << 3U) | ((instruction >> 16U) & 0x7U);
+    const bool     is_insert = 0xF000U == (instruction & 0xF800U);
+    const bool     is_left   = true == is_insert && 0U != (instruction & 0x400U);
+    uint32_t       shift     = 0U;
+    uint32_t       esize     = right_shift_immediate(tsz, (instruction >> 16U) & 0x7U, &shift);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (true == is_left)
+    {
+        shift = imm - esize;
+    }
+
+    const bool     is_unsigned = false == is_insert && 0U != (instruction & 0x400U);
+    const bool     is_rounding = false == is_insert && 0U != (instruction & 0x800U);
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result      = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a   = get_element(&n, e, esize);
+        const uint64_t acc = get_element(&result, e, esize);
+        uint64_t       value;
+
+        if (true == is_insert)
+        {
+            // SRI keeps the top `shift` bits of the destination; SLI the bottom ones.
+            const uint64_t keep
+                = true == is_left ? mask_of(shift)
+                                  : (shift >= esize ? mask_of(esize) : ~(mask_of(esize) >> shift));
+            const uint64_t moved
+                = true == is_left ? a << shift : (shift >= esize ? 0U : a >> shift);
+            value = (acc & keep) | (moved & ~keep);
+        }
+        else
+        {
+            const __int128 shifted = shift_wide(
+                wide(a, esize, false == is_unsigned), -(int64_t)shift, esize, is_rounding);
+            value = acc + (uint64_t)shifted;
+        }
+
+        set_element(&result, e, esize, value & mask_of(esize));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// ADCLB, ADCLT (01000101 0 sz 0 Zm 11010 T Zn Zda) and SBCLB, SBCLT (01000101 1 sz ...): add
+/// with the carry in bit 0 of the odd elements of Zm, the carry out going there in the result.
+static sve_result_t
+add_carry_long(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize       = 0U != (instruction & 0x400000U) ? 64U : 32U;
+    const bool     is_subtract = 0U != (instruction & 0x800000U);
+    const uint32_t top         = (instruction >> 10U) & 1U;
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m           = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result      = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        uint64_t       a            = get_element(&n, 2U * pair + top, esize);
+        const uint64_t acc          = get_element(&result, 2U * pair, esize);
+        const uint64_t carry        = get_element(&m, 2U * pair + 1U, esize) & 1U;
+        a                           = true == is_subtract ? ~a & mask_of(esize) : a;
+        const unsigned __int128 sum = (unsigned __int128)acc + a + carry;
+        set_element(&result, 2U * pair, esize, (uint64_t)sum & mask_of(esize));
+        set_element(&result, 2U * pair + 1U, esize, (uint64_t)(sum >> esize) & 1U);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// CADD and SQCADD: 01000101 size 0000 op 11011 rot Zm Zdn, adding Zm rotated by 90 or 270
+/// degrees.
+static sve_result_t
+complex_integer_add(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t   esize  = size_at_22(instruction);
+    const bool       is_270 = 0U != (instruction & 0x400U);
+    const saturate_t mode   = 0U != (instruction & 0x10000U) ? SATURATE_SIGNED : SATURATE_NONE;
+    const vector_t   m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t         result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        const __int128 real      = wide(get_element(&result, 2U * pair, esize), esize, true);
+        const __int128 imaginary = wide(get_element(&result, 2U * pair + 1U, esize), esize, true);
+        const __int128 m_real    = wide(get_element(&m, 2U * pair, esize), esize, true);
+        const __int128 m_imag    = wide(get_element(&m, 2U * pair + 1U, esize), esize, true);
+        set_element(&result,
+                    2U * pair,
+                    esize,
+                    narrow_to(true == is_270 ? real + m_imag : real - m_imag, esize, mode));
+        set_element(
+            &result,
+            2U * pair + 1U,
+            esize,
+            narrow_to(true == is_270 ? imaginary - m_real : imaginary + m_real, esize, mode));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// Writes `value` to the narrow element `e` of `result`: the bottom form (`top` 0) also clears
+/// the odd elements, the top form leaves the even ones.
+static void
+set_narrow(vector_t      *result,
+           const uint32_t e,
+           const uint32_t half,
+           const uint32_t top,
+           const uint64_t value)
+{
+    set_element(result, 2U * e + top, half, value);
+
+    if (0U == top)
+    {
+        set_element(result, 2U * e + 1U, half, 0U);
+    }
+}
+
+/// The shift right narrow group: 01000101 0 tszh 1 tszl imm3 00 op U R T Zn Zd, with SQSHRUN,
+/// SQRSHRUN (000 R), SHRN, RSHRN (001 R), SQSHRN, SQRSHRN (010 R) and UQSHRN, UQRSHRN (011 R).
+static sve_result_t
+shift_right_narrow(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t tsz   = (((instruction >> 22U) & 1U) << 2U) | ((instruction >> 19U) & 0x3U);
+    uint32_t       shift = 0U;
+    const uint32_t half  = right_shift_immediate(tsz, (instruction >> 16U) & 0x7U, &shift);
+
+    if (0U == half)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t   esize       = 2U * half;
+    const uint32_t   op          = (instruction >> 11U) & 0x7U;
+    const uint32_t   top         = (instruction >> 10U) & 1U;
+    const bool       is_rounding = 0U != (op & 1U);
+    const uint32_t   kind        = op >> 1U;
+    const bool       is_signed   = 1U != kind && 3U != kind;
+    const saturate_t mode
+        = 0U == kind
+              ? SATURATE_UNSIGNED
+              : (1U == kind ? SATURATE_NONE : (2U == kind ? SATURATE_SIGNED : SATURATE_UNSIGNED));
+    const vector_t n = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t result  = 0U == top ? (vector_t) { { 0U, 0U } } : read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const __int128 value = shift_wide(
+            wide(get_element(&n, e, esize), esize, is_signed), -(int64_t)shift, esize, is_rounding);
+        set_narrow(&result, e, half, top, narrow_to(value, half, mode));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// SQXTNB, SQXTNT, UQXTNB, UQXTNT, SQXTUNB and SQXTUNT: 01000101 0 tszh 1 tszl 000 010 opc T Zn Zd.
+static sve_result_t
+extract_narrow(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t tsz = (((instruction >> 22U) & 1U) << 2U) | ((instruction >> 19U) & 0x3U);
+    const uint32_t opc = (instruction >> 11U) & 0x3U;
+
+    // Exactly one size bit is set.
+    if (0U == tsz || 0U != (tsz & (tsz - 1U)) || 3U == opc)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t   half      = 8U << (31U - (uint32_t)__builtin_clz(tsz));
+    const uint32_t   esize     = 2U * half;
+    const uint32_t   top       = (instruction >> 10U) & 1U;
+    const bool       is_signed = 1U != opc;
+    const saturate_t mode      = 0U == opc ? SATURATE_SIGNED : SATURATE_UNSIGNED;
+    const vector_t   n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t result = 0U == top ? (vector_t) { { 0U, 0U } } : read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        set_narrow(&result,
+                   e,
+                   half,
+                   top,
+                   narrow_to(wide(get_element(&n, e, esize), esize, is_signed), half, mode));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// ADDHNB, ADDHNT, RADDHNB, RADDHNT, SUBHNB, SUBHNT, RSUBHNB and RSUBHNT: 01000101 size 1 Zm 011
+/// S R T Zn Zd, the high halves of the wide sums or differences.
+static sve_result_t
+add_high_narrow(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+
+    if (0U == size)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t esize       = 8U << size;
+    const uint32_t half        = esize / 2U;
+    const bool     is_subtract = 0U != (instruction & 0x1000U);
+    const bool     is_rounding = 0U != (instruction & 0x800U);
+    const uint32_t top         = (instruction >> 10U) & 1U;
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m           = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t result = 0U == top ? (vector_t) { { 0U, 0U } } : read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const __int128 a   = wide(get_element(&n, e, esize), esize, false);
+        const __int128 b   = wide(get_element(&m, e, esize), esize, false);
+        __int128       sum = true == is_subtract ? a - b : a + b;
+        sum += true == is_rounding ? (__int128)1 << (half - 1U) : 0;
+        set_narrow(&result, e, half, top, narrow_to(sum >> half, half, SATURATE_NONE));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// MATCH and NMATCH: 01000101 size 1 Zm 100 Pg Zn op Pd, whether each active element of Zn is
+/// in its segment of Zm, setting the flags.
+static sve_result_t
+match_elements(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+
+    if (esize > 16U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool     is_negated = 0U != (instruction & 0x10U);
+    const uint16_t pg         = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n          = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m          = read_z(sve, (instruction >> 16U) & 0x1FU);
+    uint16_t       pd         = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        bool found = false;
+
+        for (uint32_t j = 0U; j < elements_of(esize); ++j)
+        {
+            found = found || get_element(&n, e, esize) == get_element(&m, j, esize);
+        }
+
+        pd = set_active(pd, e, esize, found != is_negated);
+    }
+
+    sve->cpu->p[instruction & 0xFU] = pd;
+    write_nzcv(sve, predicate_test(pg, pd, esize));
+    return SVE_OK;
+}
+
+/// HISTSEG (01000101 001 Zm 101000 Zn Zd): for each byte, how many bytes of its segment of Zm
+/// equal it.
+static sve_result_t
+histogram_segment(sve_t *sve, const uint32_t instruction)
+{
+    if (0U != (instruction & 0xC00000U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < 16U; ++e)
+    {
+        uint64_t count = 0U;
+
+        for (uint32_t j = 0U; j < 16U; ++j)
+        {
+            count += get_element(&n, e, 8U) == get_element(&m, j, 8U) ? 1U : 0U;
+        }
+
+        set_element(&result, e, 8U, count);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// HISTCNT (01000101 size 1 Zm 110 Pg Zn Zd): for each active element, how many active elements
+/// of Zm up to it equal it; inactive elements are zero.
+static sve_result_t
+histogram_count(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = size_at_22(instruction);
+
+    if (esize < 32U)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        uint64_t count = 0U;
+
+        for (uint32_t j = 0U; j <= e; ++j)
+        {
+            count += true == is_active(pg, j, esize)
+                             && get_element(&n, e, esize) == get_element(&m, j, esize)
+                         ? 1U
+                         : 0U;
+        }
+
+        set_element(&result, e, esize, count);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// AESE, AESD, AESMC, AESIMC, SM4E, SM4EKEY and RAX1: with 128-bit vectors these are their
+/// Advanced SIMD forms on the same registers.
+static sve_result_t
+crypto(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t d = instruction & 0x1FU;
+    const uint32_t n = (instruction >> 5U) & 0x1FU;
+    const uint32_t m = (instruction >> 16U) & 0x1FU;
+    uint32_t       simd;
+
+    switch (instruction & 0xFFFFFC00U)
+    {
+        case 0x4522E000U: // AESE Zdn, Zdn, Zm
+            simd = 0x4E284800U | (n << 5U) | d;
+            break;
+        case 0x4522E400U: // AESD
+            simd = 0x4E285800U | (n << 5U) | d;
+            break;
+        case 0x4523E000U: // SM4E
+            simd = 0xCEC08400U | (n << 5U) | d;
+            break;
+        default:
+            switch (instruction & 0xFFE0FC00U)
+            {
+                case 0x4520E000U: // AESMC Zdn
+                case 0x4520E400U: // AESIMC
+                    if (0U != (instruction & 0x1F03E0U))
+                    {
+                        return SVE_UNDEFINED;
+                    }
+
+                    simd = (0x4520E000U == (instruction & 0xFFE0FC00U) ? 0x4E286800U : 0x4E287800U)
+                           | (d << 5U) | d;
+                    break;
+                case 0x4520F000U: // SM4EKEY
+                    simd = 0xCE60C800U | (m << 16U) | (n << 5U) | d;
+                    break;
+                case 0x4520F400U: // RAX1
+                    simd = 0xCE608C00U | (m << 16U) | (n << 5U) | d;
+                    break;
+                default:
+                    return SVE_UNDEFINED;
+            }
+            break;
+    }
+
+    (void)bal_execute_simd(sve->cpu, simd);
+    return SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
 
 static const sve_pattern_t PATTERNS[] = {
+    { 0xFF3EE000U, 0x04068000U, shift_immediate_saturating },
+    { 0xFF3EE000U, 0x040C8000U, shift_immediate_saturating },
+    { 0xFF3FE000U, 0x040F8000U, shift_immediate_saturating },
+    { 0xFF20F800U, 0x04207000U, doubling_multiply_high_vectors },
+    { 0xFF20FC00U, 0x04203400U, exclusive_or_rotate },
+    { 0xFF20FC00U, 0x04203800U, bitwise_ternary },
+    { 0xFF20FC00U, 0x04203C00U, bitwise_ternary },
+    { 0xFF20FC00U, 0x05203000U, table_lookup },
     { 0xFF20E000U, 0x04200000U, integer_add_sub_vectors },
     { 0xFF20E000U, 0x04000000U, integer_binary_predicated },
     { 0xFF20E000U, 0x04002000U, integer_reduction },
@@ -4998,6 +6681,44 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFE0FC00U, 0x64604000U, bfloat_dot },
     { 0xFFE0FC00U, 0x6460E400U, matrix_multiply_add_float },
     { 0xFFE0FC00U, 0x64A0E400U, matrix_multiply_add_float },
+    { 0xFF20C000U, 0x44008000U, sve2_integer_predicated },
+    { 0xFF20F800U, 0x44000000U, integer_dot_product },
+    { 0xFFE0FC00U, 0x44807800U, integer_dot_product },
+    { 0xFF20F000U, 0x44001000U, complex_dot_product },
+    { 0xFF20E000U, 0x44002000U, complex_integer_multiply_add },
+    { 0xFF208000U, 0x44000000U, integer_multiply_add_vectors },
+    { 0xFFA0F800U, 0x44A00000U, integer_dot_product },
+    { 0xFFE0F800U, 0x44A01800U, integer_dot_product },
+    { 0xFFA0F800U, 0x44200800U, integer_multiply_indexed },
+    { 0xFFA0F800U, 0x44A00800U, integer_multiply_indexed },
+    { 0xFFA0F800U, 0x44201000U, integer_multiply_indexed },
+    { 0xFFA0F800U, 0x44A01000U, integer_multiply_indexed },
+    { 0xFFA0F800U, 0x4420F000U, integer_multiply_indexed },
+    { 0xFFA0F800U, 0x44A0F000U, integer_multiply_indexed },
+    { 0xFFA0FC00U, 0x4420F800U, integer_multiply_indexed },
+    { 0xFFA0FC00U, 0x44A0F800U, integer_multiply_indexed },
+    { 0xFFA0F000U, 0x44A04000U, complex_dot_product },
+    { 0xFFA0E000U, 0x44A06000U, complex_integer_multiply_add },
+    { 0xFFA00000U, 0x44A00000U, integer_multiply_long_indexed },
+    { 0xFF20F800U, 0x45009000U, exclusive_or_interleaved },
+    { 0xFF20FC00U, 0x45009800U, matrix_multiply_add_integer },
+    { 0xFFA0F000U, 0x4500A000U, shift_left_long },
+    { 0xFF20F000U, 0x4500B000U, bit_permute },
+    { 0xFF20F000U, 0x4500C000U, integer_widening },
+    { 0xFF20F800U, 0x4500D000U, add_carry_long },
+    { 0xFF3EF800U, 0x4500D800U, complex_integer_add },
+    { 0xFF20F000U, 0x4500E000U, shift_accumulate_insert },
+    { 0xFF20F800U, 0x4500F000U, shift_accumulate_insert },
+    { 0xFF20F800U, 0x4500F800U, absolute_difference_accumulate },
+    { 0xFF208000U, 0x45000000U, integer_widening },
+    { 0xFF20F000U, 0x45008000U, integer_widening },
+    { 0xFFA0C000U, 0x45200000U, shift_right_narrow },
+    { 0xFFA7E000U, 0x45204000U, extract_narrow },
+    { 0xFF20E000U, 0x45206000U, add_high_narrow },
+    { 0xFF20E000U, 0x45208000U, match_elements },
+    { 0xFF20FC00U, 0x4520A000U, histogram_segment },
+    { 0xFF20E000U, 0x4520C000U, histogram_count },
+    { 0xFFE0E000U, 0x4520E000U, crypto },
 };
 
 static sve_result_t

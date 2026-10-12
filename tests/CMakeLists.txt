@@ -115,4 +115,12 @@ if (UNIX)
     message(STATUS "[Ballistic-Tests] Found Unicorn at ${UNICORN_ROOT_LINUX}.")
     message(STATUS "[Ballistic-Tests] Configuring Fuzzer...")
     add_subdirectory(fuzzer)
+
+    # Compares SVE against qemu-aarch64; run it with tests/sve/run_sve_diff.sh, which builds the
+    # AArch64 reference it needs.
+    add_executable(bal_sve_diff sve/sve_diff.c)
+    target_include_directories(bal_sve_diff PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(bal_sve_diff PRIVATE ${PROJECT_NAME})
+    add_strict_compiler_flags(bal_sve_diff)
+    add_sanitizers(bal_sve_diff)
 endif ()

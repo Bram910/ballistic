@@ -83,14 +83,14 @@ sve_hash_data(const uint8_t *data)
 }
 
 /// The general register the reference may use as its base: one the instruction's register
-/// fields (bits 4:0, 9:5, 14:10 and 20:16) do not name, and not W12-W15, which SME instructions
+/// fields (bits 4:0, 9:5, 14:10 and 20:16) do not name, and not W8-W15, which SME instructions
 /// name with two-bit fields.
 static inline uint32_t
 sve_base_register(const uint32_t instruction)
 {
     for (uint32_t r = 30U; r > 0U; --r)
     {
-        if ((r < 12U || r > 15U) && r != (instruction & 0x1FU) && r != ((instruction >> 5U) & 0x1FU)
+        if ((r < 8U || r > 15U) && r != (instruction & 0x1FU) && r != ((instruction >> 5U) & 0x1FU)
             && r != ((instruction >> 10U) & 0x1FU) && r != ((instruction >> 16U) & 0x1FU))
         {
             return r;

@@ -935,6 +935,60 @@ test_Mops_UnmappedSetFaultsWithoutWriting(void)
     TEST_ASSERT_EQUAL_HEX64(0x200U, g_cpu.x[2]);
 }
 
+static void
+test_Rcw_OperationsSetTheFlags(void)
+{
+    // RCWSET X1, X2, [X10]; RCWCAS X3, X4, [X10] with a matching then a stale X3.
+    const uint32_t program[] = { 0x3821B142U, 0x19230944U, 0x19250946U };
+    load_program(program, 3U);
+    const uint64_t initial = 0x10U;
+    (void)memcpy(g_memory + 0x2000U, &initial, sizeof(initial));
+    g_cpu.x[10] = 0x2000U;
+    g_cpu.x[1]  = 0x0FU;
+    g_cpu.x[3]  = 0x1FU;
+    g_cpu.x[4]  = 0x77U;
+    g_cpu.x[5]  = 0x1FU;
+    g_cpu.x[6]  = 0x99U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x10U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x1FU, g_cpu.x[3]);
+    // The second compare-and-swap sees 0x77 and fails, setting N and leaving memory alone.
+    TEST_ASSERT_EQUAL_HEX64(0x77U, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_z);
+
+    uint64_t final = 0U;
+    (void)memcpy(&final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x77U, final);
+}
+
+static void
+test_Rcw_SoftChecksProtectBitZeroAndTheMask(void)
+{
+    // RCWSSET X1, X2, [X10]; RCWSSWP X3, X4, [X10]; RCWSCLR X5, X6, [X10].
+    const uint32_t program[] = { 0x7821B142U, 0x7823A144U, 0x78259146U };
+    load_program(program, 3U);
+    const uint64_t initial = 0x101U;
+    (void)memcpy(g_memory + 0x2000U, &initial, sizeof(initial));
+    g_cpu.x[10]        = 0x2000U;
+    g_cpu.rcwsmask_el1 = 0xF0U;
+    g_cpu.x[1]         = 0x30U;   // Inside the mask: allowed.
+    g_cpu.x[3]         = 0x1331U; // Changes bit 12, outside the mask: refused.
+    g_cpu.x[5]         = 0x1U;    // Clears bit 0: refused.
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x101U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x131U, g_cpu.x[4]);
+    TEST_ASSERT_EQUAL_HEX64(0x131U, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_c);
+
+    uint64_t final = 0U;
+    (void)memcpy(&final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x131U, final);
+}
+
 int
 main(void)
 {
@@ -968,6 +1022,8 @@ main(void)
     RUN_TEST(test_Mops_OverlappingCopyGoesBackwards);
     RUN_TEST(test_Mops_SetFillsTheRange);
     RUN_TEST(test_Mops_UnmappedSetFaultsWithoutWriting);
+    RUN_TEST(test_Rcw_OperationsSetTheFlags);
+    RUN_TEST(test_Rcw_SoftChecksProtectBitZeroAndTheMask);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

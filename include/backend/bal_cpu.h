@@ -172,8 +172,12 @@ extern "C"
         /// authenticates through, the entries of a bal_pac_memo_t.
         uint64_t jit_pac_memo;
 
+        /// RCWSMASK_EL1: the bits RCWSCAS, RCWSCLR, RCWSSET and RCWSSWP may change in a value whose
+        /// bit 0 is set. Bit 17 also stands for bits 49:18, as the architecture replicates it.
+        uint64_t rcwsmask_el1;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[16];
+        uint8_t reserved[8];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

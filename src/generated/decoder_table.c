@@ -27686,7 +27686,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCAS",
           0xFFE0FC00,
           0x19200800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27698,7 +27698,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCASA",
           0xFFE0FC00,
           0x19A00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27710,7 +27710,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCASAL",
           0xFFE0FC00,
           0x19E00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27722,7 +27722,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCASL",
           0xFFE0FC00,
           0x19600800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27782,7 +27782,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCLR",
           0xFFE0FC00,
           0x38209000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27794,7 +27794,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCLRA",
           0xFFE0FC00,
           0x38A09000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27806,7 +27806,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCLRAL",
           0xFFE0FC00,
           0x38E09000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27818,7 +27818,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWCLRL",
           0xFFE0FC00,
           0x38609000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27878,7 +27878,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCAS",
           0xFFE0FC00,
           0x59200800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27890,7 +27890,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCASA",
           0xFFE0FC00,
           0x59A00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27902,7 +27902,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCASAL",
           0xFFE0FC00,
           0x59E00800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27914,7 +27914,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCASL",
           0xFFE0FC00,
           0x59600800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27974,7 +27974,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCLR",
           0xFFE0FC00,
           0x78209000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27986,7 +27986,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCLRA",
           0xFFE0FC00,
           0x78A09000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -27998,7 +27998,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCLRAL",
           0xFFE0FC00,
           0x78E09000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28010,7 +28010,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSCLRL",
           0xFFE0FC00,
           0x78609000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28070,7 +28070,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSET",
           0xFFE0FC00,
           0x3820B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28082,7 +28082,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSETA",
           0xFFE0FC00,
           0x38A0B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28094,7 +28094,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSETAL",
           0xFFE0FC00,
           0x38E0B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28106,7 +28106,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSETL",
           0xFFE0FC00,
           0x3860B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28166,7 +28166,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSET",
           0xFFE0FC00,
           0x7820B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28178,7 +28178,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSETA",
           0xFFE0FC00,
           0x78A0B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28190,7 +28190,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSETAL",
           0xFFE0FC00,
           0x78E0B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28202,7 +28202,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSETL",
           0xFFE0FC00,
           0x7860B000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28262,7 +28262,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSWP",
           0xFFE0FC00,
           0x7820A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28274,7 +28274,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSWPA",
           0xFFE0FC00,
           0x78A0A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28286,7 +28286,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSWPAL",
           0xFFE0FC00,
           0x78E0A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28298,7 +28298,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSSWPL",
           0xFFE0FC00,
           0x7860A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28358,7 +28358,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSWP",
           0xFFE0FC00,
           0x3820A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28370,7 +28370,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSWPA",
           0xFFE0FC00,
           0x38A0A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28382,7 +28382,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSWPAL",
           0xFFE0FC00,
           0x38E0A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -28394,7 +28394,7 @@ const bal_decoder_instruction_metadata_t
         { "RCWSWPL",
           0xFFE0FC00,
           0x3860A000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

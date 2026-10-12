@@ -121,6 +121,12 @@ local function derive_opcode(mnemonic)
         end
     end
 
+    -- FEAT_THE read-check-write operations on 64 bits; the 128-bit RCW*P forms need FEAT_D128.
+    if m:match("^RCWS?CAS[AL]*$") or m:match("^RCWS?CLR[AL]*$") or m:match("^RCWS?SET[AL]*$")
+        or m:match("^RCWS?SWP[AL]*$") then
+        return "OPCODE_ATOMIC"
+    end
+
     for _, operation in ipairs({ "LDADD", "LDCLR", "LDEOR", "LDSET", "LDSMAX", "LDSMIN", "LDUMAX",
                                  "LDUMIN", "SWP" }) do
         local suffix = m:sub(#operation + 1)

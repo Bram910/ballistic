@@ -1252,8 +1252,8 @@ local function main(...)
             inst.opcode_override = "OPCODE_TRAP"
         end
 
-        -- op0 = 0010 is SVE, executed by the SVE helper.
-        if 0x2 == top_bits then
+        -- op0 = 0010 is SVE, and op0 = 0000 with bit 31 set SME; the SVE helper executes both.
+        if 0x2 == top_bits or (0x0 == top_bits and bit.band(inst.value, bit.tobit(0x80000000)) ~= 0) then
             inst.opcode_override = "OPCODE_SVE"
         end
 

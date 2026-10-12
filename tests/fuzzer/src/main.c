@@ -68,6 +68,10 @@ is_newer_than_unicorn(const uint32_t instruction)
         { 0xFFFFFFE0U, 0xD50B73C0U }, // COSP RCTX (FEAT_SPECRES2)
         { 0xFFFFFFE0U, 0xD50B72E0U }, // TRCIT (FEAT_ITE)
         { 0x1E000000U, 0x04000000U }, // SVE, which Unicorn aborts on
+        { 0x9E000000U, 0x80000000U }, // SME, newer than Unicorn's QEMU 5.0
+        { 0xFFFFF8FFU, 0xD503407FU }, // SMSTART, SMSTOP (MSR SVCRSM, SVCRZA, SVCRSMZA)
+        { 0xFFDFFFE0U, 0xD51B4240U }, // MRS and MSR SVCR
+        { 0xFFDFFFE0U, 0xD51BD0A0U }, // MRS and MSR TPIDR2_EL0
     };
 
     for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)

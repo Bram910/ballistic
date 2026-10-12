@@ -185,8 +185,22 @@ extern "C"
         uint16_t p[16];
         uint16_t ffr;
 
-        /// Keeps the structure a whole number of its 64-byte alignment.
+        /// Keeps the SVE state a whole number of the 64-byte alignment.
         uint8_t reserved[30];
+
+        /// The SME state, with a streaming vector length of 128 bits like the SVE one: the ZA
+        /// array as its 16 horizontal byte slices of 16 bytes, and the SME2 lookup table ZT0.
+        uint8_t za[16][16];
+        uint8_t zt0[64];
+        /// SVCR: PSTATE.SM (bit 0), streaming mode, and PSTATE.ZA (bit 1), ZA storage. Changing SM
+        /// zeroes the Z and P registers and FFR and sets FPSR to 0x0800009F; enabling ZA zeroes ZA
+        /// and ZT0. SME instructions are undefined while the mode they need is off.
+        uint64_t svcr;
+        /// TPIDR2_EL0, the thread register SME software uses for lazy saving of ZA.
+        uint64_t tpidr2_el0;
+
+        /// Keeps the structure a whole number of its 64-byte alignment.
+        uint8_t reserved_sme[48];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

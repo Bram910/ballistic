@@ -219,7 +219,11 @@ build(const sve_test_t *test, uint32_t r)
         }
     }
 
-    emit(instruction);
+    emit(0U != test->substitute ? test->substitute : instruction);
+    for (uint32_t i = 0U; i < 2U && 0U != test->following[i]; ++i)
+    {
+        emit(test->following[i]);
+    }
     g_epilogue = (uint64_t)(uintptr_t)&g_code[g_count];
 
     for (uint32_t i = 0U; i < 31U; ++i)

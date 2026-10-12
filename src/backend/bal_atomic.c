@@ -196,6 +196,27 @@ sign_extend(const uint64_t value, const uint32_t bytes)
     return (int64_t)(value << shift) >> shift;
 }
 
+static uint8_t *translate(const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                          uint64_t                                   address,
+                          uint64_t                                   bytes);
+
+/// translate() for the load-acquire and store-release accesses, which with FEAT_LSE2 raise an
+/// alignment fault (NULL) only when a misaligned access does not fit in one aligned 16 bytes.
+static uint8_t *
+translate_ordered(const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+                  const uint64_t                             address,
+                  const uint64_t                             bytes)
+{
+    const bool is_aligned = 0U == (address & (bytes - 1U));
+
+    if (false == is_aligned && (address & 0xFU) + bytes > 16U)
+    {
+        return NULL;
+    }
+
+    return translate(memory_interface, address, bytes);
+}
+
 /// Returns the host address of `bytes` bytes at `address`, or NULL if they are not all mapped.
 static uint8_t *
 translate(const bal_memory_interface_t *BAL_RESTRICT memory_interface,
@@ -541,7 +562,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
         case ATOMIC_ORDERED:
         case ATOMIC_LOAD_ACQUIRE_PC:
         case ATOMIC_ORDERED_UNSCALED: {
-            // These need no alignment beyond what plain loads and stores need.
+            // Misaligned, they fault only across 16 bytes (translate_ordered()).
             uint64_t target   = address;
             uint32_t extend   = 0U; // 0: zero-extend, 32/64: sign-extend into a W/X register.
             bool     is_store = ATOMIC_ORDERED == instruction_class && false == is_load;
@@ -557,7 +578,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
                 extend   = 2U == opc ? 64U : (3U == opc ? 32U : 0U);
             }
 
-            uint8_t *pointer = translate(memory_interface, target, bytes);
+            uint8_t *pointer = translate_ordered(memory_interface, target, bytes);
 
             if (NULL == pointer)
             {
@@ -674,7 +695,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
             // stores there.
             const bool     is_store = 0U == (instruction & 0x00400000U);
             const uint64_t target   = true == is_store ? address - bytes : address;
-            uint8_t       *pointer  = translate(memory_interface, target, bytes);
+            uint8_t       *pointer  = translate_ordered(memory_interface, target, bytes);
 
             if (NULL == pointer)
             {
@@ -705,7 +726,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
             const uint64_t pair_bytes     = 2U * register_bytes;
             const uint64_t target
                 = false == is_load_pair && true == has_writeback ? address - pair_bytes : address;
-            uint8_t *pointer = translate(memory_interface, target, pair_bytes);
+            uint8_t *pointer = translate_ordered(memory_interface, target, pair_bytes);
 
             if (NULL == pointer)
             {
@@ -750,7 +771,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
             // WARNING: Shifting the 9-bit field to the top and back sign-extends it.
             const uint64_t target = address + (uint64_t)(int64_t)((int32_t)(imm9 << 23U) >> 23U);
             bytes                 = opc >= 2U ? 16U : bytes;
-            uint8_t *pointer      = translate(memory_interface, target, bytes);
+            uint8_t *pointer      = translate_ordered(memory_interface, target, bytes);
 
             if (NULL == pointer)
             {
@@ -780,7 +801,7 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
 
         case ATOMIC_ORDERED_LANE: {
             const uint32_t lane    = (instruction >> 30U) & 1U;
-            uint8_t       *pointer = translate(memory_interface, address, 8U);
+            uint8_t       *pointer = translate_ordered(memory_interface, address, 8U);
 
             if (NULL == pointer)
             {

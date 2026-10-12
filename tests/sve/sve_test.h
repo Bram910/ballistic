@@ -40,8 +40,15 @@ typedef struct
 
 typedef struct
 {
-    uint32_t    instruction;
-    uint32_t    flags;
+    uint32_t instruction;
+    uint32_t flags;
+    /// Up to two instructions that run after `instruction`, or zero: the main and epilogue
+    /// instructions of a memory copy or set sequence.
+    uint32_t following[2];
+    /// When not zero, the instruction the reference runs instead of `instruction`: an
+    /// architecturally equivalent one for instructions qemu lacks.
+    uint32_t    substitute;
+    uint32_t    pad;
     uint64_t    seed;
     sve_state_t state;
 } sve_test_t;

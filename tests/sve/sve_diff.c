@@ -8,10 +8,11 @@
 //! REFERENCE is the built reference program, run with $BAL_SVE_QEMU (qemu-aarch64-static by
 //! default). With $BAL_SVE_SPACE set to `sme` it tests the SME encoding space, and the SMSTART,
 //! SMSTOP, SVCR and TPIDR2_EL0 forms of MSR and MRS, with random streaming mode, ZA and ZT0
-//! state, which needs a qemu with SME2 (10.0 or later). $BAL_SVE_SEED, when set, changes the random
-//! encodings and states. MNEMONICS is an optional comma separated list of entries to test, and
-//! REPORTS the number of mismatches to describe. The output has one CSV line per entry, in the
-//! format of the status tracker's coverage tool:
+//! state, which needs a qemu with SME2 (10.1 or later). With `all`, it tests every decoder entry
+//! MNEMONICS names, which is how instructions newer than Unicorn are checked. $BAL_SVE_SEED, when
+//! set, changes the random encodings and states. MNEMONICS is an optional comma separated list of
+//! entries to test, and REPORTS the number of mismatches to describe. The output has one CSV line
+//! per entry, in the format of the status tracker's coverage tool:
 //!
 //!     index,mnemonic,mask,expected,status,translated,matched,samples
 //!
@@ -42,6 +43,7 @@
 #define STATUS_CRASHED 255U
 
 static bool     g_is_sme;
+static bool     g_is_all;
 static uint8_t  g_memory[SVE_DATA_SIZE];
 static uint8_t  g_code[0x1000];
 static void    *g_interface;
@@ -155,6 +157,10 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
 {
     memset(g_code, 0, sizeof(g_code));
     memcpy(g_code, &test->instruction, 4U);
+    memcpy(g_code + 4U, test->following, sizeof(test->following));
+    const uint64_t end
+        = CODE_ADDRESS
+          + 4U * (1U + (0U != test->following[0] ? 1U : 0U) + (0U != test->following[1] ? 1U : 0U));
     sve_fill_data(g_memory, test->seed);
 
     bal_allocator_t allocator;
@@ -189,7 +195,14 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
     memset(&engine, 0, sizeof(engine));
     (void)bal_engine_init(&engine, &cpu, &allocator, &memory_interface);
     engine.flags |= BAL_ENGINE_FLAG_SINGLE_STEP;
-    const bal_error_t status = bal_engine_run_thread(&engine);
+    bal_error_t status = BAL_SUCCESS;
+
+    // One instruction at a time until the last one has run.
+    for (uint32_t step = 0U; step < 16U && BAL_SUCCESS == status && cpu.pc < end; ++step)
+    {
+        status = bal_engine_run_thread(&engine);
+    }
+
     bal_engine_destroy(&engine);
 
     *out = test->state;
@@ -373,6 +386,8 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
 ///   they need.
 /// - Its SME vertical tile slice loads (qemu 11) leave the inactive elements after the last
 ///   active one unchanged instead of zeroing them.
+/// - For an instruction qemu lacks, the reference runs an equivalent one without its alignment
+///   checks, so a fault only Ballistic raises is not compared.
 /// - qemu-user turns a guest address into a host one without checking the guest mapped it, so a
 ///   gather from a random address can read qemu's own memory where Ballistic faults.
 static bool
@@ -385,6 +400,11 @@ is_known_qemu_difference(const sve_test_t  *test,
     const uint32_t m             = (instruction >> 16U) & 0x1FU;
     const bool     is_nonfault   = 0xA410A000U == (instruction & 0xFE10E000U);
     const bool     is_firstfault = 0xA4006000U == (instruction & 0xFE00E000U);
+
+    if (0U != test->substitute && STATUS_SIGSEGV == ballistic->status && 0U == reference->status)
+    {
+        return true;
+    }
 
     const bool is_narrowing_shift
         = 0xC1E0D400U == (instruction & 0xFFE0FC00U) || 0xC120D800U == (instruction & 0xFF20F800U);
@@ -546,16 +566,167 @@ run_reference(record_t *records, const uint32_t count, const char *reference, co
 /// The record index of the SME system forms, past the decoder entries.
 #define SYSTEM_ENTRY BAL_DECODER_ARM64_INSTRUCTIONS_SIZE
 
+/// Whether `instruction` is a FEAT_MOPS CPY* or SET* instruction, and the stage field: bits 23:22
+/// of the copies, 15:14 of the sets, with 00 the prologue, 01 the main and 10 the epilogue.
+static bool
+is_memory_operation(const uint32_t instruction, uint32_t *stage_shift)
+{
+    if (0x19000400U != (instruction & 0x3B200C00U))
+    {
+        return false;
+    }
+
+    // The sets have op1 = 11 in bits 23:22.
+    *stage_shift = 0xC00000U == (instruction & 0xC00000U) ? 14U : 22U;
+    return true;
+}
+
+/// Turns a test of a memory copy or set instruction into a test of its whole prologue, main and
+/// epilogue sequence, whose result the architecture defines. The registers are distinct, the
+/// size small and the addresses inside the data area, sometimes overlapping.
+static void
+make_sequence(sve_test_t *test, const uint32_t stage_shift)
+{
+    // Three distinct registers below 31, which the architecture requires.
+    uint32_t regs[3];
+
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        do
+        {
+            regs[i] = (uint32_t)(next_random() % 31U);
+        } while ((i > 0U && regs[i] == regs[0]) || (i > 1U && regs[i] == regs[1]));
+    }
+
+    uint32_t first = test->instruction & ~(0x3U << stage_shift) & ~0x1F03FFU;
+    first |= regs[0] | (regs[1] << 5U) | (regs[2] << 16U);
+    test->instruction      = first;
+    test->following[0]     = first | (1U << stage_shift);
+    test->following[1]     = first | (2U << stage_shift);
+    const uint32_t d       = first & 0x1FU;
+    const uint32_t n       = (first >> 5U) & 0x1FU;
+    const uint32_t s       = (first >> 16U) & 0x1FU;
+    test->state.x[n % 31U] = next_random() % 160U;
+
+    if (d < 31U)
+    {
+        test->state.x[d] = SVE_DATA_BASE + 0x1000U + next_random() % 0x800U;
+    }
+
+    if (s < 31U && 22U == stage_shift)
+    {
+        // Only CPY (bit 26 set), not the forward-only CPYF, handles overlapping regions.
+        const uint64_t near    = test->state.x[d % 31U] + next_random() % 64U - 32U;
+        const bool     memmove = 0U != (first & 0x4000000U);
+        test->state.x[s]       = true == memmove && 0U == next_random() % 2U
+                                     ? near
+                                     : SVE_DATA_BASE + 0x2000U + next_random() % 0x800U;
+    }
+}
+
+/// Sets a register field of `instruction` to a register other than those in `avoid`.
+static uint32_t
+replace_register(const uint32_t instruction, const uint32_t shift, const uint32_t avoid)
+{
+    uint32_t r;
+
+    do
+    {
+        r = (uint32_t)(next_random() % 31U);
+    } while (0U != (avoid & (1U << r)));
+
+    return (instruction & ~(0x1FU << shift)) | (r << shift);
+}
+
+/// For the FEAT_LRCPC3 instructions, which qemu lacks, the equivalent ordinary instruction for the
+/// reference to run, after making the registers ones the architecture does not leave
+/// unpredictable. Returns zero for other instructions.
+static uint32_t
+rcpc3_substitute(uint32_t *instruction)
+{
+    uint32_t       i     = *instruction;
+    const uint32_t n     = (i >> 5U) & 0x1FU;
+    const bool     is_64 = 0U != (i & 0x40000000U);
+
+    // LDAPUR and STLUR (SIMD&FP): size 011101 opc 0 imm9 10 Rn Rt are LDUR and STUR (size 111100
+    // opc 0 imm9 00 Rn Rt).
+    if (0x1D000800U == (i & 0x3F200C00U))
+    {
+        return (i & ~0x3F000C00U) | 0x3C000000U;
+    }
+
+    // LDAP1 and STL1 are LD1 and ST1 of one doubleword lane, with bit 16 clear.
+    if (0x0D018400U == (i & 0xBFBFFC00U))
+    {
+        return i & ~0x10000U;
+    }
+
+    // LDAPR post-indexed and STLR pre-indexed by the access size are LDR and STR (immediate).
+    if (0x99800800U == (i & 0xBFBFFC00U))
+    {
+        const bool     is_load = 0U != (i & 0x400000U);
+        const uint32_t bytes   = true == is_64 ? 8U : 4U;
+
+        if (n != 31U && (i & 0x1FU) == n)
+        {
+            i = replace_register(i, 0U, 1U << n);
+        }
+
+        *instruction        = i;
+        const uint32_t imm9 = (true == is_load ? bytes : 0x200U - bytes) & 0x1FFU;
+        return (true == is_64 ? 0xF8000000U : 0xB8000000U) | (true == is_load ? 0x400400U : 0xC00U)
+               | (imm9 << 12U) | (i & 0x3FFU);
+    }
+
+    // LDIAPP and STILP are LDP and STP: post-indexed (loads) or pre-indexed (stores) by two
+    // elements when bit 12 is clear, at Xn otherwise.
+    if (0x99000800U == (i & 0xBFA0EC00U))
+    {
+        const bool     is_load = 0U != (i & 0x400000U);
+        const bool     wback   = 0U == (i & 0x1000U);
+        const uint32_t t       = i & 0x1FU;
+        const uint32_t t2      = (i >> 16U) & 0x1FU;
+
+        // Distinct registers, and none the base when it is written back.
+        if ((true == is_load && t == t2) || (true == wback && n != 31U && (t == n || t2 == n)))
+        {
+            i = replace_register(i, 0U, (1U << n) | (1U << t2));
+            i = replace_register(i, 16U, (1U << n) | (1U << (i & 0x1FU)));
+        }
+
+        *instruction        = i;
+        const uint32_t imm7 = true == wback ? (true == is_load ? 2U : 0x7EU) : 0U;
+        uint32_t       base = true == wback ? (true == is_load ? 0x28C00000U : 0x29800000U)
+                                            : (true == is_load ? 0x29400000U : 0x29000000U);
+        base |= true == is_64 ? 0x80000000U : 0U;
+        return base | (imm7 << 15U) | (((i >> 16U) & 0x1FU) << 10U) | (i & 0x3FFU);
+    }
+
+    return 0U;
+}
+
 /// Fills `record` with a random test of `instruction` and runs it in Ballistic.
 static void
 add_record(record_t *record, const uint32_t entry, const uint32_t instruction)
 {
+    uint32_t stage_shift     = 0U;
     record->entry            = entry;
     record->test.instruction = instruction;
     record->test.flags       = true == g_is_sme ? SVE_TEST_SME : 0U;
     record->test.seed        = next_random();
     random_state(&record->test.state);
-    record->test.state.base_register = sve_base_register(instruction);
+
+    if (true == g_is_all && true == is_memory_operation(instruction, &stage_shift))
+    {
+        make_sequence(&record->test, stage_shift);
+    }
+
+    if (true == g_is_all)
+    {
+        record->test.substitute = rcpc3_substitute(&record->test.instruction);
+    }
+
+    record->test.state.base_register = sve_base_register(record->test.instruction);
     record->ballistic_ok = true == run_ballistic(&record->test, &record->ballistic) ? 1U : 0U;
 }
 
@@ -600,7 +771,9 @@ main(int argc, char **argv)
         g_random = strtoull(getenv("BAL_SVE_SEED"), NULL, 0);
     }
 
-    g_is_sme = NULL != getenv("BAL_SVE_SPACE") && 0 == strcmp(getenv("BAL_SVE_SPACE"), "sme");
+    const char *space = getenv("BAL_SVE_SPACE");
+    g_is_sme          = NULL != space && 0 == strcmp(space, "sme");
+    g_is_all          = NULL != space && 0 == strcmp(space, "all");
     bal_logger_init_default();
     bal_thread_logger.min_level = BAL_LOG_LEVEL_NONE;
     const char    *reference    = argv[1];
@@ -624,9 +797,10 @@ main(int argc, char **argv)
     {
         const bal_decoder_instruction_metadata_t *entry = &g_bal_decoder_arm64_instructions[e];
 
-        // The SVE encoding space, op0 = 0010, or the SME one, op0 = 0000 with bit 31 set.
-        const bool is_in_space = true == g_is_sme ? 0x80000000U == (entry->expected & 0x9E000000U)
-                                                  : 0x2U == ((entry->expected >> 25U) & 0xFU);
+        // The SVE encoding space, op0 = 0010, the SME one, op0 = 0000 with bit 31 set, or all.
+        const bool is_in_space = true == g_is_all   ? true
+                                 : true == g_is_sme ? 0x80000000U == (entry->expected & 0x9E000000U)
+                                                    : 0x2U == ((entry->expected >> 25U) & 0xFU);
 
         if (false == is_in_space || (NULL != filter && false == is_listed(filter, entry->name)))
         {
@@ -691,7 +865,16 @@ main(int argc, char **argv)
         ++t[0];
         char why[160] = "";
 
-        if (true == same_state(&record->ballistic, &record->reference, why, sizeof(why)))
+        // A memory copy or set prologue reports in NZCV which of the algorithms the architecture
+        // allows the implementation uses: Ballistic's and qemu's differ.
+        sve_state_t compared = record->reference;
+
+        if (0U != record->test.following[0])
+        {
+            compared.nzcv = record->ballistic.nzcv;
+        }
+
+        if (true == same_state(&record->ballistic, &compared, why, sizeof(why)))
         {
             ++t[1];
         }

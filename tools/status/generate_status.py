@@ -3,15 +3,15 @@
 
 Usage, from the repository root after a debug build with tests (Linux, needs Unicorn):
 
-    python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage [SVE_CSV]
+    python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage [QEMU_CSV...]
 
 The coverage tool runs random encodings of every decoder table entry through Ballistic and Unicorn
 and reports per entry whether tier 1 translates it and matches. Alias entries that the decoder never
 returns (their encodings resolve to the base instruction) are left out.
 
-Unicorn cannot run SVE. SVE_CSV, the output of tests/sve/run_sve_diff.sh, gives the SVE entries
-their status against qemu-aarch64 instead; entries both Ballistic and qemu reject count as not
-started.
+Unicorn cannot run SVE or SME. Each QEMU_CSV, an output of tests/sve/run_sve_diff.sh (with
+BAL_SVE_SPACE=sme for SME), gives the SVE or SME entries it covers their status against
+qemu-aarch64 instead; entries both Ballistic and qemu reject count as not started.
 """
 
 import csv
@@ -90,14 +90,16 @@ def read_coverage(source):
     return entries
 
 
-def apply_sve(entries, path):
-    """Replaces the status of the SVE entries with the qemu comparison in `path`."""
+def apply_qemu(entries, paths):
+    """Replaces the status of the SVE and SME entries with the qemu comparisons in `paths`."""
     statuses = {}
-    for row in csv.reader(line for line in Path(path).read_text().splitlines() if not line.startswith("#")):
-        statuses[int(row[0])] = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
+    for path in paths:
+        lines = (line for line in Path(path).read_text().splitlines() if not line.startswith("#"))
+        for row in csv.reader(lines):
+            statuses[int(row[0])] = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
     for entry in entries:
-        if entry["class"] == "SVE":
-            entry["status"] = statuses.get(entry["index"], TODO)
+        if entry["class"] in ("SVE", "SME") and entry["index"] in statuses:
+            entry["status"] = statuses[entry["index"]]
 
 
 def squarify(items, x, y, w, h):
@@ -245,7 +247,7 @@ def render(entries, commit):
     ly = H - 8
     lx = 0
     for status, text in (
-        (VERIFIED, "matches Unicorn (qemu for SVE)"),
+        (VERIFIED, "matches Unicorn (qemu for SVE, SME)"),
         (UNVERIFIED, "translated, not checkable"),
         (WRONG, "differs from the reference"),
         (TODO, "not started"),
@@ -289,8 +291,9 @@ def update_readme(summary):
 
 {summary}
 
-Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv` and
-`python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv`.
+Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv`,
+`BAL_SVE_SPACE=sme BAL_SVE_QEMU=<qemu 10.1 or later> tests/sve/run_sve_diff.sh > sme.csv` and
+`python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv sme.csv`.
 {MARK_END}"""
     text = README.read_text(encoding="utf-8")
     if MARK_BEGIN in text:
@@ -301,11 +304,10 @@ Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv` and
 
 
 def main():
-    if len(sys.argv) not in (2, 3):
+    if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     entries = read_coverage(sys.argv[1])
-    if len(sys.argv) == 3:
-        apply_sve(entries, sys.argv[2])
+    apply_qemu(entries, sys.argv[2:])
     commit = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], capture_output=True, text=True
     ).stdout.strip() or "unknown"
@@ -330,7 +332,7 @@ def main():
         if members:
             done = sum(e["status"] == VERIFIED for e in members) / len(members)
             groups.append(f"{name} {100 * done:.1f}%")
-    reference = "Unicorn, and SVE against qemu-aarch64 with 128-bit vectors" if len(sys.argv) == 3 else "Unicorn"
+    reference = "Unicorn, and SVE and SME against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
         f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "

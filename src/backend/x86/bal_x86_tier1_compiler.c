@@ -4,6 +4,7 @@
 #include "backend/bal_float.h"
 #include "backend/bal_pointer_authentication.h"
 #include "backend/bal_simd.h"
+#include "backend/bal_sve.h"
 #include "backend/bal_system.h"
 #include "bal_decoder.h"
 #include "bal_engine.h"
@@ -185,6 +186,11 @@ static void translate_atomic(bal_tier1_compiler_t         *compiler,
 static void translate_float(bal_tier1_compiler_t *compiler, uint32_t instruction);
 
 static void translate_integer_helper(bal_tier1_compiler_t *compiler, uint32_t instruction);
+
+static void translate_sve(bal_tier1_compiler_t         *compiler,
+                          const bal_memory_interface_t *memory_interface,
+                          uint32_t                      instruction,
+                          bal_guest_address_t           guest_address);
 
 static void translate_memory_operation(bal_tier1_compiler_t         *compiler,
                                        const bal_memory_interface_t *memory_interface,
@@ -552,7 +558,8 @@ translate_block(bal_tier1_compiler_t         *compiler,
             // encodings they accept themselves; other translators do not know 128-bit operands.
             const bool is_checked_by_translator
                 = OPCODE_FLOAT == metadata->ir_opcode || OPCODE_LOAD == metadata->ir_opcode
-                  || OPCODE_STORE == metadata->ir_opcode || OPCODE_ATOMIC == metadata->ir_opcode;
+                  || OPCODE_STORE == metadata->ir_opcode || OPCODE_ATOMIC == metadata->ir_opcode
+                  || OPCODE_SVE == metadata->ir_opcode;
 
             if (BAL_OPERAND_TYPE_REGISTER_128 == metadata->operands[0].type
                 && false == is_checked_by_translator)
@@ -799,6 +806,9 @@ translate_block(bal_tier1_compiler_t         *compiler,
                 case OPCODE_MEMORY_OPERATION:
                     translate_memory_operation(
                         compiler, memory_interface, instruction, guest_address);
+                    break;
+                case OPCODE_SVE:
+                    translate_sve(compiler, memory_interface, instruction, guest_address);
                     break;
                 case OPCODE_POINTER_AUTHENTICATION:
                     // The authenticated branches leave their target in the guest PC.
@@ -4517,7 +4527,8 @@ emit_runtime_call(bal_tier1_compiler_t *BAL_RESTRICT compiler, const uint64_t fu
     // the pending ones go to FPSR first, and whatever the helper leaves behind is cleared after
     // the call. The other helpers do no floating point.
     const bool is_float_helper = (uint64_t)(uintptr_t)&bal_execute_float == function
-                                 || (uint64_t)(uintptr_t)&bal_execute_simd == function;
+                                 || (uint64_t)(uintptr_t)&bal_execute_simd == function
+                                 || (uint64_t)(uintptr_t)&bal_execute_sve == function;
 
     if (true == is_float_helper)
     {
@@ -5598,6 +5609,29 @@ translate_memory_operation(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
                             instruction,
                             guest_address,
                             (uint64_t)(uintptr_t)&bal_execute_memory_operation);
+}
+
+/// Translates the SVE instructions through bal_execute_sve(), which raises a data abort for
+/// unmapped memory.
+static void
+translate_sve(bal_tier1_compiler_t *BAL_RESTRICT         compiler,
+              const bal_memory_interface_t *BAL_RESTRICT memory_interface,
+              const uint32_t                             instruction,
+              const bal_guest_address_t                  guest_address)
+{
+    if (BAL_UNLIKELY(false == bal_is_sve_supported(instruction)))
+    {
+        BAL_LOG_ERROR(
+            &bal_thread_logger, "Aborting function: unsupported SVE encoding %08x", instruction);
+        compiler->status = BAL_ERROR_UNKNOWN_INSTRUCTION;
+        return;
+    }
+
+    emit_memory_helper_call(compiler,
+                            memory_interface,
+                            instruction,
+                            guest_address,
+                            (uint64_t)(uintptr_t)&bal_execute_sve);
 }
 
 /// Translates CRC32, CRC32C and the flag manipulation instructions CFINV, RMIF, SETF8, SETF16,

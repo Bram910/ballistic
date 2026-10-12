@@ -45,6 +45,15 @@ extern "C"
                                      const bal_memory_interface_t *memory_interface,
                                      uint32_t                      instruction);
 
+    /// A half precision value as the single precision one it equals, as FMLAL widens it: NaNs
+    /// keep their payload and signalling bit, and denormals flush to zero under FPCR.FZ16.
+    uint64_t bal_simd_half_to_single(uint64_t fpcr, uint64_t half);
+
+    /// BFDotAdd(): `addend` + a1 * b1 + a2 * b2 on BFloat16 values, as BFDOT and BFMMLA compute
+    /// it.
+    uint32_t bal_simd_bfloat_dot_add(
+        uint32_t addend, uint16_t a1, uint16_t a2, uint16_t b1, uint16_t b2);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

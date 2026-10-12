@@ -1252,6 +1252,11 @@ local function main(...)
             inst.opcode_override = "OPCODE_TRAP"
         end
 
+        -- op0 = 0010 is SVE, executed by the SVE helper.
+        if 0x2 == top_bits then
+            inst.opcode_override = "OPCODE_SVE"
+        end
+
         -- Hints the guest CPU does not implement execute as NOP. Their own entries are more
         -- specific than HINT, so they need the same routing.
         local is_hint = bit.band(inst.value, bit.tobit(0xFFFFF01F)) == bit.tobit(0xD503201F)

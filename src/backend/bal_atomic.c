@@ -34,6 +34,8 @@ typedef enum
     ATOMIC_ORDERED_LANE,
     /// FEAT_LSE128: LDCLRP, LDSETP and SWPP, in every ordering.
     ATOMIC_MEMORY_OPERATION_PAIR,
+    /// FEAT_THE: RCWCAS, RCWCLR, RCWSET, RCWSWP and their RCWS soft forms, on 64 bits.
+    ATOMIC_READ_CHECK_WRITE,
 } atomic_class_t;
 
 static atomic_class_t
@@ -72,6 +74,15 @@ classify(const uint32_t instruction)
 
         // CASP needs even register pairs; odd ones are unallocated.
         return 0U == (rs & 1U) && 0U == (rt & 1U) ? ATOMIC_COMPARE_SWAP_PAIR : ATOMIC_UNSUPPORTED;
+    }
+
+    // FEAT_THE RCWCAS: 0 S 011001 A R 1 Rs 000010 Rn Rt; RCWCLR, RCWSWP and RCWSET:
+    // 0 S 111000 A R 1 Rs 1 opc 00 Rn Rt with opc 001, 010 or 011. The 128-bit forms need
+    // FEAT_D128, which this CPU does not enable.
+    if (0x19200800U == (instruction & 0xBF20FC00U) || 0x38209000U == (instruction & 0xBF20FC00U)
+        || 0x3820A000U == (instruction & 0xBF20FC00U) || 0x3820B000U == (instruction & 0xBF20FC00U))
+    {
+        return ATOMIC_READ_CHECK_WRITE;
     }
 
     // Atomic memory operations: size 111 V 00 A R 1 Rs o3 opc 00 Rn Rt, with V = 0.
@@ -817,6 +828,70 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
 
             write_register(cpu, rt, old[0]);
             write_register(cpu, rs, old[1]);
+            return 1U;
+        }
+
+        case ATOMIC_READ_CHECK_WRITE: {
+            // One 8-byte atomic access, which must be aligned.
+            uint8_t *pointer
+                = 0U == (address & 0x7U) ? translate(memory_interface, address, 8U) : NULL;
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            const bool     is_soft    = 0U != (instruction & 0x40000000U);
+            const bool     is_compare = 0x19000000U == (instruction & 0x3F000000U);
+            const uint32_t opc        = (instruction >> 12U) & 0x7U;
+            const uint64_t compare    = read_register(cpu, rs);
+            const uint64_t operand    = read_register(cpu, true == is_compare ? rt : rs);
+
+            // The soft mask, with bit 17 standing for bits 49:18.
+            uint64_t soft_mask = cpu->rcwsmask_el1 & ~0x0003FFFC0000ULL;
+            soft_mask |= 0U != (cpu->rcwsmask_el1 & (1ULL << 17U)) ? 0x0003FFFC0000ULL : 0U;
+
+            uint64_t old = load(pointer, 8U);
+            uint32_t nzcv;
+
+            for (;;)
+            {
+                const uint64_t desired = true == is_compare ? operand
+                                         : 1U == opc        ? old & ~operand // RCWCLR
+                                         : 2U == opc        ? operand        // RCWSWP
+                                                            : old | operand;        // RCWSET
+
+                // Without protected descriptors (TCR2_EL1.PnCH), only the soft checks apply:
+                // bit 0 must not change, and with it set neither may the bits outside the mask.
+                const bool is_soft_failure
+                    = true == is_soft
+                      && (0U != ((desired ^ old) & 1U)
+                          || (0U != (old & 1U) && 0U != ((desired ^ old) & ~soft_mask)));
+
+                nzcv = true == is_compare && old != compare ? 0xAU
+                       : true == is_soft_failure            ? 0x0U
+                                                            : 0x2U;
+
+                if (nzcv != 0x2U)
+                {
+                    break;
+                }
+
+                const uint64_t current = compare_swap(pointer, 8U, old, desired);
+
+                if (current == old)
+                {
+                    break;
+                }
+
+                old = current;
+            }
+
+            cpu->flag_n = (uint8_t)((nzcv >> 3U) & 1U);
+            cpu->flag_z = 0U;
+            cpu->flag_c = (uint8_t)((nzcv >> 1U) & 1U);
+            cpu->flag_v = 0U;
+            write_register(cpu, true == is_compare ? rs : rt, old);
             return 1U;
         }
 

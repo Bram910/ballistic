@@ -102,9 +102,10 @@ local function derive_opcode(mnemonic)
         return "OPCODE_POINTER_AUTHENTICATION"
     end
 
-    -- FEAT_MOPS memory copy and memory set, executed by a runtime helper. The tag-setting SETG*
-    -- forms need FEAT_MTE.
-    if m:match("^CPYF?[PME]") or m:match("^SET[PME]") then
+    -- FEAT_MOPS memory copy and memory set and the FEAT_MTE tag loads and stores, executed by a
+    -- runtime helper. The EL1 bulk forms LDGM, STGM and STZGM stay undefined.
+    if m:match("^CPYF?[PME]") or m:match("^SETG?[PME]") or m == "LDG" or m == "STG" or m == "STZG"
+        or m == "ST2G" or m == "STZ2G" or m == "STGP" then
         return "OPCODE_MEMORY_OPERATION"
     end
 
@@ -119,6 +120,12 @@ local function derive_opcode(mnemonic)
         if m:sub(1, #prefix) == prefix then
             return "OPCODE_ATOMIC"
         end
+    end
+
+    -- FEAT_THE read-check-write operations on 64 bits; the 128-bit RCW*P forms need FEAT_D128.
+    if m:match("^RCWS?CAS[AL]*$") or m:match("^RCWS?CLR[AL]*$") or m:match("^RCWS?SET[AL]*$")
+        or m:match("^RCWS?SWP[AL]*$") then
+        return "OPCODE_ATOMIC"
     end
 
     for _, operation in ipairs({ "LDADD", "LDCLR", "LDEOR", "LDSET", "LDSMAX", "LDSMIN", "LDUMAX",
@@ -1244,10 +1251,11 @@ local function main(...)
             inst.opcode_override = "OPCODE_NOP"
         end
 
-        -- The FEAT_CSSC integer instructions, executed by the integer helper; their SIMD and SVE
-        -- namesakes are routed by encoding around this.
+        -- The FEAT_CSSC integer instructions and the FEAT_MTE register-only ones, executed by the
+        -- integer helper; their SIMD and SVE namesakes are routed by encoding around this.
         local cssc = { ABS = true, CNT = true, CTZ = true, SMAX = true, SMIN = true, UMAX = true,
-                       UMIN = true }
+                       UMIN = true, ADDG = true, SUBG = true, IRG = true, GMI = true, SUBP = true,
+                       SUBPS = true }
 
         if cssc[inst.mnemonic] and top_bits > 0x3 then
             inst.opcode_override = "OPCODE_INTEGER_HELPER"

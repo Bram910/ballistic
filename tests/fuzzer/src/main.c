@@ -7,8 +7,8 @@
 static void fill_initial_state(bal_fuzzer_cpu_snapshot_t *state, uint64_t seed_index);
 
 /// Returns true for the instructions of extensions the Unicorn reference is too old to run, which
-/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128 and FEAT_MOPS. Ballistic's unit
-/// tests check them instead.
+/// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128, FEAT_MOPS, FEAT_MTE, FEAT_THE,
+/// FEAT_BF16 and FEAT_I8MM. Ballistic's unit tests check them instead.
 static bool
 is_newer_than_unicorn(const uint32_t instruction)
 {
@@ -25,6 +25,28 @@ is_newer_than_unicorn(const uint32_t instruction)
         { 0xFF20FC00U, 0x19208000U }, // SWPP
         { 0xFB200C00U, 0x19000400U }, // CPY*
         { 0xFFE00C00U, 0x19C00400U }, // SET*
+        { 0xBF20FC00U, 0x19200800U }, // RCWCAS, RCWSCAS
+        { 0xBF20FC00U, 0x38209000U }, // RCWCLR, RCWSCLR
+        { 0xBF20FC00U, 0x3820A000U }, // RCWSWP, RCWSSWP
+        { 0xBF20FC00U, 0x3820B000U }, // RCWSET, RCWSSET
+        { 0xBFC0C000U, 0x91800000U }, // ADDG, SUBG
+        { 0xDFE0FC00U, 0x9AC00000U }, // SUBP, SUBPS
+        { 0xFFE0F800U, 0x9AC01000U }, // IRG, GMI
+        { 0xFF200000U, 0xD9200000U }, // LDG, STG, STZG, ST2G, STZ2G and the bulk forms
+        { 0xFE400000U, 0x68000000U }, // STGP
+        { 0xFFE00C00U, 0x1DC00400U }, // SETG*
+        { 0xBFE0FC00U, 0x2E40FC00U }, // BFDOT (vector)
+        { 0xBFC0F400U, 0x0F40F000U }, // BFDOT (by element)
+        { 0xFFE0FC00U, 0x6E40EC00U }, // BFMMLA
+        { 0xBFE0FC00U, 0x2EC0FC00U }, // BFMLALB, BFMLALT (vector)
+        { 0xBFC0F400U, 0x0FC0F000U }, // BFMLALB, BFMLALT (by element)
+        { 0xBFFFFC00U, 0x0EA16800U }, // BFCVTN, BFCVTN2
+        { 0xFFFFFC00U, 0x1E634000U }, // BFCVT
+        { 0xDFE0FC00U, 0x4E80A400U }, // SMMLA, UMMLA
+        { 0xFFE0FC00U, 0x4E80AC00U }, // USMMLA
+        { 0xBFE0FC00U, 0x0E809C00U }, // USDOT (vector)
+        { 0xBFC0F400U, 0x0F80F000U }, // USDOT (by element)
+        { 0xBFC0F400U, 0x0F00F000U }, // SUDOT (by element)
     };
 
     for (size_t i = 0U; i < sizeof(MASKS) / sizeof(MASKS[0]); ++i)

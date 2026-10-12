@@ -935,6 +935,224 @@ test_Mops_UnmappedSetFaultsWithoutWriting(void)
     TEST_ASSERT_EQUAL_HEX64(0x200U, g_cpu.x[2]);
 }
 
+static void
+test_Rcw_OperationsSetTheFlags(void)
+{
+    // RCWSET X1, X2, [X10]; RCWCAS X3, X4, [X10] with a matching then a stale X3.
+    const uint32_t program[] = { 0x3821B142U, 0x19230944U, 0x19250946U };
+    load_program(program, 3U);
+    const uint64_t initial = 0x10U;
+    (void)memcpy(g_memory + 0x2000U, &initial, sizeof(initial));
+    g_cpu.x[10] = 0x2000U;
+    g_cpu.x[1]  = 0x0FU;
+    g_cpu.x[3]  = 0x1FU;
+    g_cpu.x[4]  = 0x77U;
+    g_cpu.x[5]  = 0x1FU;
+    g_cpu.x[6]  = 0x99U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x10U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x1FU, g_cpu.x[3]);
+    // The second compare-and-swap sees 0x77 and fails, setting N and leaving memory alone.
+    TEST_ASSERT_EQUAL_HEX64(0x77U, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_c);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_z);
+
+    uint64_t final = 0U;
+    (void)memcpy(&final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x77U, final);
+}
+
+static void
+test_Rcw_SoftChecksProtectBitZeroAndTheMask(void)
+{
+    // RCWSSET X1, X2, [X10]; RCWSSWP X3, X4, [X10]; RCWSCLR X5, X6, [X10].
+    const uint32_t program[] = { 0x7821B142U, 0x7823A144U, 0x78259146U };
+    load_program(program, 3U);
+    const uint64_t initial = 0x101U;
+    (void)memcpy(g_memory + 0x2000U, &initial, sizeof(initial));
+    g_cpu.x[10]        = 0x2000U;
+    g_cpu.rcwsmask_el1 = 0xF0U;
+    g_cpu.x[1]         = 0x30U;   // Inside the mask: allowed.
+    g_cpu.x[3]         = 0x1331U; // Changes bit 12, outside the mask: refused.
+    g_cpu.x[5]         = 0x1U;    // Clears bit 0: refused.
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x101U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x131U, g_cpu.x[4]);
+    TEST_ASSERT_EQUAL_HEX64(0x131U, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_c);
+
+    uint64_t final = 0U;
+    (void)memcpy(&final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x131U, final);
+}
+
+static void
+test_Mte_RegisterFormsClearTheTag(void)
+{
+    // ADDG X1, X2, #32, #3; SUBG SP, SP, #16, #0; IRG X3, X2; GMI X4, X2, X5; SUBPS X6, X7, X8.
+    const uint32_t program[] = { 0x91820C41U, 0xD18103FFU, 0x9ADF1043U, 0x9AC51444U, 0xBAC800E6U };
+    load_program(program, 5U);
+    g_cpu.x[2]  = 0x0500000000001000ULL;
+    g_cpu.x[5]  = 0x1U;
+    g_cpu.x[7]  = 0xFF00000000000010ULL;
+    g_cpu.x[8]  = 0x20U;
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    // Allocation tag access is disabled at EL0, so the generated tags are zero.
+    TEST_ASSERT_EQUAL_HEX64(0x1020U, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0x3EF0U, g_cpu.x[31]);
+    TEST_ASSERT_EQUAL_HEX64(0x1000U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x21U, g_cpu.x[4]);
+    // SUBPS subtracts the sign-extended 56-bit addresses: 0x10 - 0x20.
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFFFFFFFFF0ULL, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_UINT8(1U, g_cpu.flag_n);
+    TEST_ASSERT_EQUAL_UINT8(0U, g_cpu.flag_c);
+}
+
+static void
+test_Mte_TagStoresKeepTheirDataEffects(void)
+{
+    // STZG X1, [X2, #16]!; STZ2G X1, [X3], #32; STGP X4, X5, [X6, #16]; LDG X7, [X2].
+    const uint32_t program[] = { 0xD9601C41U, 0xD9E02461U, 0x690094C4U, 0xD9600047U };
+    load_program(program, 4U);
+    (void)memset(g_memory + 0x2000U, 0xFF, 0x300U);
+    g_cpu.x[2] = 0x2000U;
+    g_cpu.x[3] = 0x2100U;
+    g_cpu.x[4] = 0x1111111111111111ULL;
+    g_cpu.x[5] = 0x2222222222222222ULL;
+    g_cpu.x[6] = 0x2200U;
+    g_cpu.x[7] = 0x0A00000000004000ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x2010U, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0x2120U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x2200U, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_HEX64(0x4000U, g_cpu.x[7]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x200FU]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x2010U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x201FU]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x2020U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x2100U]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x211FU]);
+    TEST_ASSERT_EQUAL_HEX8(0xFFU, g_memory[0x2120U]);
+
+    uint64_t pair[2];
+    (void)memcpy(pair, g_memory + 0x2210U, sizeof(pair));
+    TEST_ASSERT_EQUAL_HEX64(0x1111111111111111ULL, pair[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x2222222222222222ULL, pair[1]);
+}
+
+static void
+test_Mte_UnalignedTagStoreRaisesDataAbort(void)
+{
+    // STG X1, [X8] at an address that is not 16-byte aligned.
+    const uint32_t program[] = { 0xD9200901U };
+    load_program(program, 1U);
+    g_cpu.x[8] = 0x2208U;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+}
+
+static void
+test_Mte_SetgFillsWholeGranules(void)
+{
+    // SETGP [X0]!, X2!, X3; SETGM; SETGE, then again with a size that is not a granule multiple.
+    const uint32_t program[] = { 0x1DC30440U, 0x1DC34440U, 0x1DC38440U };
+    load_program(program, 3U);
+    g_cpu.x[0] = 0x3000U;
+    g_cpu.x[2] = 48U;
+    g_cpu.x[3] = 0x5AU;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX8(0x5AU, g_memory[0x3000U]);
+    TEST_ASSERT_EQUAL_HEX8(0x5AU, g_memory[0x302FU]);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3030U]);
+    TEST_ASSERT_EQUAL_HEX64(0x3030U, g_cpu.x[0]);
+
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    g_cpu.x[0]  = 0x3100U;
+    g_cpu.x[2]  = 40U;
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX8(0U, g_memory[0x3100U]);
+}
+
+/// Fills both halves of V`index` with `lane`, repeated in elements of `bits` bits.
+static void
+fill_vector(const uint32_t index, const uint64_t lane, const uint32_t bits)
+{
+    uint64_t value = 0U;
+
+    for (uint32_t shift = 0U; shift < 64U; shift += bits)
+    {
+        value |= lane << shift;
+    }
+
+    g_cpu.v[index][0] = value;
+    g_cpu.v[index][1] = value;
+}
+
+static void
+test_I8mm_MatrixAndMixedSignDotProducts(void)
+{
+    // SMMLA V0, V1, V2; UMMLA V3, V1, V2; USMMLA V4, V1, V5; USDOT V6.4S, V1.16B, V5.16B;
+    // SUDOT V7.4S, V1.16B, V2.4B[1].
+    const uint32_t program[] = { 0x4E82A420U, 0x6E82A423U, 0x4E85AC24U, 0x4E859C26U, 0x4F22F027U };
+    load_program(program, 5U);
+    fill_vector(1U, 1U, 8U);
+    g_cpu.v[1][0] = (g_cpu.v[1][0] & ~0xFFULL) | 0xFFU; // Byte 0 is -1 or 255.
+    fill_vector(2U, 2U, 8U);
+    fill_vector(5U, 0xFFU, 8U);
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x0000000C0000000CULL, g_cpu.v[0][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000001000000010ULL, g_cpu.v[0][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000020C0000020CULL, g_cpu.v[3][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000001000000010ULL, g_cpu.v[3][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFEFAFFFFFEFAULL, g_cpu.v[4][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFF8FFFFFFF8ULL, g_cpu.v[4][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFCFFFFFEFEULL, g_cpu.v[6][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFFFFFFCFFFFFFFCULL, g_cpu.v[6][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000000800000004ULL, g_cpu.v[7][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x0000000800000008ULL, g_cpu.v[7][1]);
+}
+
+static void
+test_Bf16_ArithmeticAndConversions(void)
+{
+    // BFDOT V0.4S, V1.8H, V2.8H; BFMMLA V3, V1, V2; BFMLALB V4.4S, V1.8H, V5.8H;
+    // BFMLALT V8.4S, V1.8H, V5.8H; BFCVTN V9.4H, V10.4S; BFCVT H11, S12.
+    const uint32_t program[]
+        = { 0x6E42FC20U, 0x6E42EC23U, 0x2EC5FC24U, 0x6EC5FC28U, 0x0EA16949U, 0x1E63418BU };
+    load_program(program, 6U);
+    fill_vector(0U, 0x3F800000U, 32U); // 1.0
+    fill_vector(1U, 0x3F80U, 16U);     // BFloat16 1.0
+    fill_vector(2U, 0x4000U, 16U);     // BFloat16 2.0
+    fill_vector(4U, 0x3F000000U, 32U); // 0.5
+    fill_vector(5U, 0x4040U, 16U);     // BFloat16 3.0
+    g_cpu.v[9][1]  = ~0ULL;
+    g_cpu.v[10][0] = 0x3F8080003F800000ULL; // 1.0 and a tie that rounds to even, down.
+    g_cpu.v[10][1] = 0x3F8000013F818000ULL; // A tie that rounds up and an inexact value.
+    g_cpu.v[12][0] = 0x40490FDBU;           // pi
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x40A0000040A00000ULL, g_cpu.v[0][0]); // 1 + 1*2 + 1*2
+    TEST_ASSERT_EQUAL_HEX64(0x4100000041000000ULL, g_cpu.v[3][1]); // 4 * (1*2)
+    TEST_ASSERT_EQUAL_HEX64(0x4060000040600000ULL, g_cpu.v[4][0]); // 0.5 + 1*3
+    TEST_ASSERT_EQUAL_HEX64(0x4040000040400000ULL, g_cpu.v[8][1]); // 0 + 1*3
+    TEST_ASSERT_EQUAL_HEX64(0x3F803F823F803F80ULL, g_cpu.v[9][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[9][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x4049U, g_cpu.v[11][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[11][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x10U, g_cpu.fpsr & 0x9FU); // Inexact only.
+}
+
 int
 main(void)
 {
@@ -968,6 +1186,14 @@ main(void)
     RUN_TEST(test_Mops_OverlappingCopyGoesBackwards);
     RUN_TEST(test_Mops_SetFillsTheRange);
     RUN_TEST(test_Mops_UnmappedSetFaultsWithoutWriting);
+    RUN_TEST(test_Rcw_OperationsSetTheFlags);
+    RUN_TEST(test_Rcw_SoftChecksProtectBitZeroAndTheMask);
+    RUN_TEST(test_Mte_RegisterFormsClearTheTag);
+    RUN_TEST(test_Mte_TagStoresKeepTheirDataEffects);
+    RUN_TEST(test_Mte_UnalignedTagStoreRaisesDataAbort);
+    RUN_TEST(test_Mte_SetgFillsWholeGranules);
+    RUN_TEST(test_I8mm_MatrixAndMixedSignDotProducts);
+    RUN_TEST(test_Bf16_ArithmeticAndConversions);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

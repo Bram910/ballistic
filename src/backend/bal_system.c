@@ -25,6 +25,21 @@ is_crc32(const uint32_t instruction)
            && (instruction >> 31U) == (3U == size ? 1U : 0U);
 }
 
+/// FEAT_MTE ADDG and SUBG: 1 op 0 100011 0 uimm6 00 uimm4 Xn Xd.
+static bool
+is_tag_arithmetic(const uint32_t instruction)
+{
+    return 0x91800000U == (instruction & 0xBFC0C000U);
+}
+
+/// FEAT_MTE SUBP and SUBPS (1 S 0 11010110 Xm 000000 Xn Xd), IRG (... 000100 ...) and GMI
+/// (... 000101 ...).
+static bool
+is_tag_register(const uint32_t instruction)
+{
+    return 0x9AC00000U == (instruction & 0xDFE0FC00U) || 0x9AC01000U == (instruction & 0xFFE0F800U);
+}
+
 /// FEAT_CSSC ABS, CNT and CTZ: sf 1 0 11010110 00000 00 opcode Rn Rd, with opcode 000110 (CTZ),
 /// 000111 (CNT) or 001000 (ABS).
 static bool
@@ -75,7 +90,8 @@ bal_is_integer_helper_supported(const uint32_t instruction)
 {
     return is_crc32(instruction) || is_cfinv(instruction) || is_rmif(instruction)
            || is_setf(instruction) || is_flag_format(instruction) || is_cssc_one_source(instruction)
-           || is_cssc_minimum_maximum(instruction);
+           || is_cssc_minimum_maximum(instruction) || is_tag_arithmetic(instruction)
+           || is_tag_register(instruction);
 }
 
 static uint64_t
@@ -128,6 +144,59 @@ bal_execute_integer_helper(bal_cpu_t *cpu, const uint32_t instruction)
     {
         cpu->flag_c ^= 1U;
         return 1U;
+    }
+
+    if (true == is_tag_arithmetic(instruction) || true == is_tag_register(instruction))
+    {
+        // Allocation tag access is disabled at EL0 (SCTLR_EL1.ATA0 = 0), so ADDG, SUBG and IRG
+        // produce tag 0. Register 31 is SP for every address operand, and for the destination
+        // of ADDG, SUBG and IRG.
+        const uint64_t tag_mask = 0xFULL << 56U;
+        const uint32_t rd       = instruction & 0x1FU;
+        const uint32_t rm       = (instruction >> 16U) & 0x1FU;
+        const uint64_t address  = cpu->x[rn];
+
+        if (true == is_tag_arithmetic(instruction))
+        {
+            const uint64_t offset = (uint64_t)((instruction >> 16U) & 0x3FU) << 4U;
+            const bool     is_sub = 0U != (instruction & 0x40000000U);
+            cpu->x[rd] = ((true == is_sub) ? address - offset : address + offset) & ~tag_mask;
+            return 1U;
+        }
+
+        switch ((instruction >> 10U) & 0x3FU)
+        {
+            case 0x4U: // IRG
+                cpu->x[rd] = address & ~tag_mask;
+                return 1U;
+            case 0x5U: // GMI
+                if (rd != 31U)
+                {
+                    cpu->x[rd] = read_register(cpu, rm) | (1ULL << ((address >> 56U) & 0xFU));
+                }
+                return 1U;
+            default: // SUBP and SUBPS on the 56-bit addresses, sign-extended.
+            {
+                const uint64_t first  = (uint64_t)((int64_t)(address << 8U) >> 8U);
+                const uint64_t second = (uint64_t)((int64_t)(cpu->x[rm] << 8U) >> 8U);
+                const uint64_t result = first - second;
+
+                if (0U != (instruction & 0x20000000U))
+                {
+                    cpu->flag_n = (uint8_t)(result >> 63U);
+                    cpu->flag_z = (uint8_t)(0U == result ? 1U : 0U);
+                    cpu->flag_c = (uint8_t)(first >= second ? 1U : 0U);
+                    cpu->flag_v = (uint8_t)(((first ^ second) & (first ^ result)) >> 63U);
+                }
+
+                if (rd != 31U)
+                {
+                    cpu->x[rd] = result;
+                }
+
+                return 1U;
+            }
+        }
     }
 
     if (true == is_cssc_one_source(instruction) || true == is_cssc_minimum_maximum(instruction))
@@ -299,13 +368,36 @@ is_memory_copy(const uint32_t instruction)
     return 0x19000400U == (instruction & 0xFB200C00U) && ((instruction >> 22U) & 0x3U) != 3U;
 }
 
-/// FEAT_MOPS SETP, SETM, SETE and their option forms: 00 011 0 01 11 0 Rs op2 01 Rn Rd, with
-/// op2<3:2> 00 (prologue), 01 (main) or 10 (epilogue). SETGP and the other tag-setting forms
-/// need FEAT_MTE.
+/// FEAT_MOPS SETP, SETM, SETE and their option forms: 00 011 G 01 11 0 Rs op2 01 Rn Rd, with
+/// op2<3:2> 00 (prologue), 01 (main) or 10 (epilogue); G = 1 for the FEAT_MTE SETGP, SETGM and
+/// SETGE, which also set the allocation tags.
 static bool
 is_memory_set(const uint32_t instruction)
 {
-    return 0x19C00400U == (instruction & 0xFFE00C00U) && ((instruction >> 14U) & 0x3U) != 3U;
+    return 0x19C00400U == (instruction & 0xFBE00C00U) && ((instruction >> 14U) & 0x3U) != 3U;
+}
+
+/// FEAT_MTE LDG: 11011001 011 imm9 00 Xn Xt.
+static bool
+is_tag_load(const uint32_t instruction)
+{
+    return 0xD9600000U == (instruction & 0xFFE00C00U);
+}
+
+/// FEAT_MTE STG, STZG, ST2G and STZ2G: 11011001 two zero 1 imm9 op2 Xn Xt, with op2 01
+/// (post-index), 10 (signed offset) or 11 (pre-index); op2 00 is LDG and the EL1 bulk forms.
+static bool
+is_tag_store(const uint32_t instruction)
+{
+    return 0xD9200000U == (instruction & 0xFF200000U) && 0U != (instruction & 0x00000C00U);
+}
+
+/// FEAT_MTE STGP: 0110100 op 0 simm7 Xt2 Xn Xt, with op 01 (post-index), 10 (signed offset) or 11
+/// (pre-index).
+static bool
+is_tag_store_pair(const uint32_t instruction)
+{
+    return 0x68000000U == (instruction & 0xFE400000U) && 0U != (instruction & 0x01800000U);
 }
 
 bool
@@ -314,6 +406,12 @@ bal_is_memory_operation_supported(const uint32_t instruction)
     const uint32_t d = instruction & 0x1FU;
     const uint32_t n = (instruction >> 5U) & 0x1FU;
     const uint32_t s = (instruction >> 16U) & 0x1FU;
+
+    if (true == is_tag_load(instruction) || true == is_tag_store(instruction)
+        || true == is_tag_store_pair(instruction))
+    {
+        return true;
+    }
 
     // Overlapping registers and the zero register as an address or size are constrained
     // unpredictable; they are undefined here. SET may take its data from XZR.
@@ -440,6 +538,88 @@ set_memory(const bal_memory_interface_t *memory_interface,
     return true;
 }
 
+/// LDG, STG, STZG, ST2G, STZ2G and STGP with allocation tag access disabled: LDG reads tag 0 and
+/// the tag stores write no tag, but the addresses are still checked, STZG and STZ2G still zero
+/// their granules and STGP still stores its registers. Returns zero, changing nothing, for an
+/// unmapped address or an unaligned tag store.
+static uint64_t
+execute_tag_memory(bal_cpu_t                    *cpu,
+                   const bal_memory_interface_t *memory_interface,
+                   const uint32_t                instruction)
+{
+    const uint32_t rt      = instruction & 0x1FU;
+    const uint32_t rn      = (instruction >> 5U) & 0x1FU;
+    const uint64_t base    = cpu->x[rn];
+    const bool     is_pair = is_tag_store_pair(instruction);
+
+    // Both offsets count tag granules of 16 bytes.
+    const int64_t offset
+        = true == is_pair ? (int64_t)((int32_t)(((instruction >> 15U) & 0x7FU) << 25U) >> 25) * 16
+                          : (int64_t)((int32_t)(((instruction >> 12U) & 0x1FFU) << 23U) >> 23) * 16;
+
+    if (true == is_tag_load(instruction))
+    {
+        const uint64_t address = (base + (uint64_t)offset) & ~0xFULL;
+
+        if (false == is_range_mapped(memory_interface, address, 16U))
+        {
+            return 0U;
+        }
+
+        if (rt != 31U)
+        {
+            cpu->x[rt] &= ~(0xFULL << 56U);
+        }
+
+        return 1U;
+    }
+
+    // op 01 is post-index and 11 pre-index, both with writeback; 10 is a signed offset.
+    const uint32_t mode
+        = true == is_pair ? (instruction >> 23U) & 0x3U : (instruction >> 10U) & 0x3U;
+    const uint64_t address = 1U == mode ? base : base + (uint64_t)offset;
+    // ST2G and STZ2G cover two granules; STGP stores 16 bytes of data in one.
+    const bool     is_double = false == is_pair && 0U != (instruction & 0x00800000U);
+    const uint64_t bytes     = true == is_double ? 32U : 16U;
+
+    if (0U != (address & 0xFU) || false == is_range_mapped(memory_interface, address, bytes))
+    {
+        return 0U;
+    }
+
+    if (true == is_pair)
+    {
+        const uint64_t data[2]
+            = { 31U == rt ? 0U : cpu->x[rt],
+                31U == ((instruction >> 10U) & 0x1FU) ? 0U : cpu->x[(instruction >> 10U) & 0x1FU] };
+        uint8_t *host = contiguous(memory_interface, address, 16U);
+
+        if (NULL == host)
+        {
+            for (uint32_t i = 0U; i < 16U; ++i)
+            {
+                *byte_at(memory_interface, address + i)
+                    = (uint8_t)(data[i / 8U] >> (8U * (i % 8U)));
+            }
+        }
+        else
+        {
+            (void)memcpy(host, data, sizeof(data));
+        }
+    }
+    else if (0U != (instruction & 0x00400000U))
+    {
+        (void)set_memory(memory_interface, address, bytes, 0U);
+    }
+
+    if (mode != 2U)
+    {
+        cpu->x[rn] = 1U == mode ? base + (uint64_t)offset : address;
+    }
+
+    return 1U;
+}
+
 static void
 write_nzcv(bal_cpu_t *cpu, const uint32_t nzcv)
 {
@@ -454,6 +634,12 @@ bal_execute_memory_operation(bal_cpu_t                    *cpu,
                              const bal_memory_interface_t *memory_interface,
                              const uint32_t                instruction)
 {
+    if (true == is_tag_load(instruction) || true == is_tag_store(instruction)
+        || true == is_tag_store_pair(instruction))
+    {
+        return execute_tag_memory(cpu, memory_interface, instruction);
+    }
+
     const uint32_t d       = instruction & 0x1FU;
     const uint32_t n       = (instruction >> 5U) & 0x1FU;
     const uint32_t s       = (instruction >> 16U) & 0x1FU;
@@ -476,9 +662,17 @@ bal_execute_memory_operation(bal_cpu_t                    *cpu,
 
     if (false == is_copy)
     {
+        const bool is_tagged = 0U != (instruction & 0x04000000U);
+
         if (0U == stage && 0U != (size >> 63U))
         {
-            size = 0x7FFFFFFFFFFFFFFFULL;
+            size = true == is_tagged ? 0x7FFFFFFFFFFFFFF0ULL : 0x7FFFFFFFFFFFFFFFULL;
+        }
+
+        // SETG works on whole tag granules: an unaligned address or size is an alignment fault.
+        if (true == is_tagged && (0U != (size & 0xFU) || (0U != size && 0U != (to & 0xFU))))
+        {
+            return 0U;
         }
 
         const uint8_t data = (uint8_t)(31U == s ? 0U : cpu->x[s]);

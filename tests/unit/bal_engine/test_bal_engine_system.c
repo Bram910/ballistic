@@ -666,6 +666,55 @@ test_Retaa_ReturnsThroughTheSignedLinkRegister(void)
     TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
 }
 
+static void
+test_PacMemo_SigningAgainGivesTheSameCode(void)
+{
+    // PACIASP; MOV X1, X30; AUTIASP; PACIASP; MOV X2, X30; AUTIASP. The second signing and
+    // authentication come from the memo the first ones filled.
+    const uint32_t program[]
+        = { 0xD503233FU, 0xAA1E03E1U, 0xD50323BFU, 0xD503233FU, 0xAA1E03E2U, 0xD50323BFU };
+    load_program(program, 6U);
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(BAL_ENGINE_SENTINEL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(g_cpu.x[1], g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
+static void
+test_PacMemo_FollowsKeyChangesBetweenRuns(void)
+{
+    // PACIASP; MOV X1, X30; AUTIASP, run twice in one engine with a new key in between; the
+    // second run must sign with the new key, as a fresh engine does.
+    const uint32_t program[] = { 0xD503233FU, 0xAA1E03E1U, 0xD50323BFU };
+    load_program(program, 3U);
+    enable_instruction_key_a();
+    g_cpu.x[31] = 0x3F00U;
+
+    bal_engine_t engine;
+    (void)memset(&engine, 0, sizeof(engine));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS,
+                      bal_engine_init(&engine, &g_cpu, &g_allocator, &g_memory_interface));
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    const uint64_t first_code = g_cpu.x[1];
+
+    g_cpu.pc                          = 0U;
+    g_cpu.x[30]                       = BAL_ENGINE_SENTINEL;
+    g_cpu.pac_keys[BAL_PAC_KEY_IA][0] = 0x3333U;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, bal_engine_run_thread(&engine));
+    const uint64_t second_code = g_cpu.x[1];
+    bal_engine_destroy(&engine);
+
+    g_cpu.pc    = 0U;
+    g_cpu.x[30] = BAL_ENGINE_SENTINEL;
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_NOT_EQUAL(first_code, second_code);
+    TEST_ASSERT_EQUAL_HEX64(g_cpu.x[1], second_code);
+    TEST_ASSERT_EQUAL_HEX64(BAL_ENGINE_SENTINEL, g_cpu.x[30]);
+}
+
 int
 main(void)
 {
@@ -687,6 +736,8 @@ main(void)
     RUN_TEST(test_PointerAuthenticationHints_AreNopsWhileDisabled);
     RUN_TEST(test_Pacibsp_FollowsTheBKeyEnable);
     RUN_TEST(test_Retaa_ReturnsThroughTheSignedLinkRegister);
+    RUN_TEST(test_PacMemo_SigningAgainGivesTheSameCode);
+    RUN_TEST(test_PacMemo_FollowsKeyChangesBetweenRuns);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

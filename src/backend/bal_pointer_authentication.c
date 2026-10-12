@@ -408,6 +408,79 @@ sign_or_authenticate(const bal_cpu_t *cpu,
                                    : add_pac(cpu, pointer, modifier, key);
 }
 
+void
+bal_pac_memo_attach(bal_pac_memo_t *memo, bal_cpu_t *cpu)
+{
+    const uint64_t configuration[8] = {
+        cpu->pac_keys[KEY_IA][0],
+        cpu->pac_keys[KEY_IA][1],
+        cpu->pac_keys[KEY_IB][0],
+        cpu->pac_keys[KEY_IB][1],
+        cpu->tcr_el1,
+        0U,
+        0U,
+        0U,
+    };
+
+    if (0 != memcmp(memo->configuration, configuration, sizeof(configuration)))
+    {
+        (void)memset(memo->entries, 0, sizeof(memo->entries));
+        (void)memcpy(memo->configuration, configuration, sizeof(configuration));
+    }
+
+    cpu->jit_pac_memo = (uint64_t)(uintptr_t)memo->entries;
+}
+
+/// Records `plain` and `signed_pointer` in the memo when signing the one gives the other and
+/// authenticating the other gives the one back.
+static void
+remember(const bal_cpu_t *cpu,
+         const uint64_t   plain,
+         const uint64_t   signed_pointer,
+         const uint64_t   modifier,
+         const key_t      key)
+{
+    bal_pac_memo_entry_t *memo = (bal_pac_memo_entry_t *)(uintptr_t)cpu->jit_pac_memo;
+
+    if (NULL == memo || add_pac(cpu, plain, modifier, key) != signed_pointer
+        || authenticate(cpu, signed_pointer, modifier, key) != plain)
+    {
+        return;
+    }
+
+    bal_pac_memo_entry_t *entry = &memo[BAL_PAC_MEMO_INDEX(plain, modifier)];
+    entry->key                  = (uint64_t)key + 1U;
+    entry->modifier             = modifier;
+    entry->plain                = plain;
+    entry->signed_pointer       = signed_pointer;
+}
+
+/// sign_or_authenticate() for the forms translated code looks up in the memo, recording the
+/// result there.
+static uint64_t
+sign_or_authenticate_remembered(const bal_cpu_t *cpu,
+                                const uint64_t   pointer,
+                                const uint64_t   modifier,
+                                const key_t      key,
+                                const bool       is_authenticate)
+{
+    const uint64_t result = sign_or_authenticate(cpu, pointer, modifier, key, is_authenticate);
+
+    if (true == is_key_enabled(cpu, key))
+    {
+        if (true == is_authenticate)
+        {
+            remember(cpu, result, pointer, modifier, key);
+        }
+        else
+        {
+            remember(cpu, pointer, result, modifier, key);
+        }
+    }
+
+    return result;
+}
+
 static uint64_t
 read_register(const bal_cpu_t *cpu, const uint32_t index)
 {
@@ -572,7 +645,8 @@ bal_execute_pointer_authentication(bal_cpu_t *cpu, const uint32_t instruction)
         const uint64_t modifier        = true == is_1716      ? cpu->x[16]
                                          : 0U != (op2 & 0x1U) ? cpu->x[31]
                                                               : 0U;
-        cpu->x[target] = sign_or_authenticate(cpu, cpu->x[target], modifier, key, is_authenticate);
+        cpu->x[target]
+            = sign_or_authenticate_remembered(cpu, cpu->x[target], modifier, key, is_authenticate);
         return 1U;
     }
 
@@ -585,7 +659,9 @@ bal_execute_pointer_authentication(bal_cpu_t *cpu, const uint32_t instruction)
     const uint64_t modifier     = true == is_return ? cpu->x[31]
                                   : true == has_modifier ? read_register_or_sp(cpu, instruction & 0x1FU)
                                                          : 0U;
-    cpu->pc = sign_or_authenticate(cpu, read_register(cpu, rn), modifier, key, true);
+    cpu->pc                     = true == is_return
+                                      ? sign_or_authenticate_remembered(cpu, cpu->x[30], modifier, key, true)
+                                      : sign_or_authenticate(cpu, read_register(cpu, rn), modifier, key, true);
     return 1U;
 }
 

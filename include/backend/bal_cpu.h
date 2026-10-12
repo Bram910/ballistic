@@ -168,8 +168,12 @@ extern "C"
         /// Used by the engine: the bal_memory_interface_t a TLB miss asks.
         uint64_t jit_memory_interface;
 
+        /// Used by the engine: the pointer authentication memo translated code signs and
+        /// authenticates through, the entries of a bal_pac_memo_t.
+        uint64_t jit_pac_memo;
+
         /// Keeps the structure a whole number of its 64-byte alignment.
-        uint8_t reserved[24];
+        uint8_t reserved[16];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

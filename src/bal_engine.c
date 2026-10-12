@@ -1,4 +1,5 @@
 #include "bal_engine.h"
+#include "backend/bal_pointer_authentication.h"
 #include "backend/x86/bal_x86_tier1_compiler.h"
 #include "bal_decoder.h"
 #include "bal_engine_flags.h"
@@ -75,6 +76,10 @@ typedef struct
 
     /// The guest pages loads and stores reach directly; see bal_tier1_tlb_entry_t.
     BAL_ALIGNED(64) bal_tier1_tlb_entry_t memory_tlb[BAL_TIER1_TLB_ENTRIES];
+
+    /// The signed pointers PACIASP and the other hint-space forms reuse; see
+    /// bal_pac_memo_entry_t.
+    BAL_ALIGNED(64) bal_pac_memo_t pac_memo;
 } internal_engine_state_t;
 
 // Disable address sanitizers when executing jit code because it introduces very subtle but
@@ -296,6 +301,7 @@ bal_engine_run_thread(bal_engine_t *engine)
     engine->cpu->jit_memory_tlb       = (uint64_t)(uintptr_t)internal_engine_state->memory_tlb;
     engine->cpu->jit_memory_interface = (uint64_t)(uintptr_t)engine->memory_interface;
     bal_tier1_tlb_clear(internal_engine_state->memory_tlb);
+    bal_pac_memo_attach(&internal_engine_state->pac_memo, engine->cpu);
 
     while (true)
     {
@@ -565,6 +571,14 @@ bal_engine_destroy(bal_engine_t *engine)
 
     internal_engine_state_t *BAL_RESTRICT internal_engine_state
         = (internal_engine_state_t *)engine->engine_state;
+
+    // The helpers must not record into the memo once it is freed.
+    if (NULL != engine->cpu
+        && (uint64_t)(uintptr_t)internal_engine_state->pac_memo.entries
+               == engine->cpu->jit_pac_memo)
+    {
+        engine->cpu->jit_pac_memo = 0U;
+    }
 
     const bal_allocator_t *BAL_RESTRICT allocator = engine->allocator;
 

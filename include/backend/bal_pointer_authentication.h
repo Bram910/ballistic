@@ -22,6 +22,38 @@ extern "C"
 {
 #endif /* __cplusplus */
 
+    /// A pointer and its signed form under one key and modifier, as the hint-space forms and
+    /// RETAA and RETAB produced them. Translated code signs a pointer that matches `plain` by
+    /// replacing it with `signed_pointer`, and authenticates one that matches `signed_pointer` by
+    /// replacing it with `plain`, without calling the helper. Only pairs where signing and
+    /// authenticating are exact inverses are recorded.
+    typedef struct
+    {
+        /// The key plus one, so that an empty entry matches nothing.
+        uint64_t key;
+        uint64_t modifier;
+        uint64_t plain;
+        uint64_t signed_pointer;
+    } bal_pac_memo_entry_t;
+
+#define BAL_PAC_MEMO_ENTRIES 256U
+
+    /// The entry of a pointer and modifier. A pointer's bits below 25 are never part of its code,
+    /// so the plain and signed forms share it.
+#define BAL_PAC_MEMO_INDEX(pointer, modifier) \
+    ((((modifier) >> 4U) ^ ((pointer) >> 2U)) & (BAL_PAC_MEMO_ENTRIES - 1U))
+
+    /// The memo, with the keys and TCR_EL1 its entries were computed under.
+    typedef struct
+    {
+        uint64_t             configuration[8];
+        bal_pac_memo_entry_t entries[BAL_PAC_MEMO_ENTRIES];
+    } bal_pac_memo_t;
+
+    /// Points bal_cpu_t::jit_pac_memo at `memo`, emptying it first if the instruction keys or
+    /// TCR_EL1 changed since it was filled.
+    void bal_pac_memo_attach(bal_pac_memo_t *memo, bal_cpu_t *cpu);
+
     /// Returns true if bal_execute_pointer_authentication() implements `instruction`.
     bool bal_is_pointer_authentication_supported(uint32_t instruction);
 

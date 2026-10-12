@@ -2796,6 +2796,735 @@ count_elements(sve_t *sve, const uint32_t instruction)
 }
 
 // -----------------------------------------------------------------------------
+// Memory accesses
+// -----------------------------------------------------------------------------
+
+/// The host address of `bytes` bytes at `address` when they are contiguous, or NULL.
+static uint8_t *
+host_span(const sve_t *sve, const uint64_t address, const uint64_t bytes)
+{
+    // Like the other helpers, pass the interface itself; the flat interface reads its context.
+    size_t         available = 0U;
+    const uint8_t *host      = sve->memory->translate(
+        (void *)(uintptr_t)sve->memory, (bal_guest_address_t)address, &available);
+    return NULL != host && available >= bytes ? (uint8_t *)(uintptr_t)host : NULL;
+}
+
+/// Whether all `bytes` bytes at `address` are mapped.
+static bool
+is_mapped(const sve_t *sve, const uint64_t address, const uint64_t bytes)
+{
+    for (uint64_t i = 0U; i < bytes; ++i)
+    {
+        if (NULL == host_span(sve, address + i, 1U))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// Reads `bytes` (1 to 8) little-endian bytes. The caller has checked they are mapped.
+static uint64_t
+memory_read(const sve_t *sve, const uint64_t address, const uint32_t bytes)
+{
+    uint64_t       value = 0U;
+    const uint8_t *host  = host_span(sve, address, bytes);
+
+    for (uint32_t i = 0U; i < bytes; ++i)
+    {
+        const uint8_t byte = NULL != host ? host[i] : *host_span(sve, address + i, 1U);
+        value |= (uint64_t)byte << (8U * i);
+    }
+
+    return value;
+}
+
+static void
+memory_write(const sve_t *sve, const uint64_t address, const uint32_t bytes, const uint64_t value)
+{
+    uint8_t *host = host_span(sve, address, bytes);
+
+    for (uint32_t i = 0U; i < bytes; ++i)
+    {
+        uint8_t *byte = NULL != host ? &host[i] : host_span(sve, address + i, 1U);
+        *byte         = (uint8_t)(value >> (8U * i));
+    }
+}
+
+/// LDR and STR of a Z register (... 010 imm9l Rn Zt) or a predicate (... 000 imm9l Rn 0 Pt):
+/// 1x00010110 imm9h ... with Rn = 31 meaning SP.
+static sve_result_t
+load_store_register(sve_t *sve, const uint32_t instruction)
+{
+    const bool    is_store  = 0U != (instruction & 0x20000000U);
+    const bool    is_vector = 0U != (instruction & 0x4000U);
+    const int64_t imm9
+        = sign_extend(((instruction >> 13U) & 0x1F8U) | ((instruction >> 10U) & 0x7U), 9U);
+    const uint32_t bytes = true == is_vector ? BAL_SVE_VECTOR_BYTES : BAL_SVE_VECTOR_BYTES / 8U;
+    const uint64_t address
+        = sve->cpu->x[(instruction >> 5U) & 0x1FU] + (uint64_t)(imm9 * (int64_t)bytes);
+    const uint32_t t = instruction & 0x1FU;
+
+    if (false == is_vector && 0U != (instruction & 0x10U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_mapped(sve, address, bytes))
+    {
+        return SVE_FAULT;
+    }
+
+    if (true == is_vector)
+    {
+        if (true == is_store)
+        {
+            memory_write(sve, address, 8U, sve->cpu->v[t][0]);
+            memory_write(sve, address + 8U, 8U, sve->cpu->v[t][1]);
+        }
+        else
+        {
+            vector_t value
+                = { { memory_read(sve, address, 8U), memory_read(sve, address + 8U, 8U) } };
+            write_z(sve, t, value);
+        }
+    }
+    else if (true == is_store)
+    {
+        memory_write(sve, address, 2U, sve->cpu->p[t & 0xFU]);
+    }
+    else
+    {
+        sve->cpu->p[t & 0xFU] = (uint16_t)memory_read(sve, address, 2U);
+    }
+
+    return SVE_OK;
+}
+
+/// The memory size, element size and signedness of a contiguous load's dtype.
+static void
+decode_dtype(const uint32_t dtype, uint32_t *msize, uint32_t *esize, bool *is_signed)
+{
+    static const uint8_t TABLE[16][3] = {
+        { 8U, 8U, 0U },   { 8U, 16U, 0U },  { 8U, 32U, 0U },  { 8U, 64U, 0U },
+        { 32U, 64U, 1U }, { 16U, 16U, 0U }, { 16U, 32U, 0U }, { 16U, 64U, 0U },
+        { 16U, 64U, 1U }, { 16U, 32U, 1U }, { 32U, 32U, 0U }, { 32U, 64U, 0U },
+        { 8U, 64U, 1U },  { 8U, 32U, 1U },  { 8U, 16U, 1U },  { 64U, 64U, 0U },
+    };
+    *msize     = TABLE[dtype][0];
+    *esize     = TABLE[dtype][1];
+    *is_signed = 0U != TABLE[dtype][2];
+}
+
+/// The kinds of fault handling a contiguous load has.
+typedef enum
+{
+    LOAD_NORMAL,
+    LOAD_FIRST_FAULT,
+    LOAD_NON_FAULT,
+} load_kind_t;
+
+/// Loads `count` registers from Zt of interleaved structures of `esize`-bit elements, `msize`
+/// bits each in memory, from `base`. Normal loads check every active element first; first-fault
+/// and non-fault loads clear FFR from the first element they cannot read.
+static sve_result_t
+load_contiguous(sve_t            *sve,
+                const uint32_t    t,
+                const uint16_t    pg,
+                const uint64_t    base,
+                const uint32_t    msize,
+                const uint32_t    esize,
+                const bool        is_signed,
+                const uint32_t    count,
+                const load_kind_t kind)
+{
+    const uint32_t elements = elements_of(esize);
+    const uint32_t mbytes   = msize / 8U;
+    vector_t       results[4];
+
+    if (LOAD_NORMAL == kind)
+    {
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            if (true == is_active(pg, e, esize)
+                && false == is_mapped(sve, base + (uint64_t)e * count * mbytes, count * mbytes))
+            {
+                return SVE_FAULT;
+            }
+        }
+    }
+
+    for (uint32_t r = 0U; r < count; ++r)
+    {
+        results[r].d[0] = 0U;
+        results[r].d[1] = 0U;
+    }
+
+    bool first = true;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        for (uint32_t r = 0U; r < count; ++r)
+        {
+            const uint64_t address = base + ((uint64_t)e * count + r) * mbytes;
+
+            if (false == is_mapped(sve, address, mbytes))
+            {
+                // The first active element of a first-fault load faults normally.
+                if (LOAD_FIRST_FAULT == kind && true == first)
+                {
+                    return SVE_FAULT;
+                }
+
+                // Clear FFR from this element on; the later elements of the destination are
+                // zero.
+                for (uint32_t f = e; f < elements; ++f)
+                {
+                    sve->cpu->ffr = set_active(sve->cpu->ffr, f, esize, false);
+                }
+
+                write_z(sve, t, results[0]);
+                return SVE_OK;
+            }
+
+            uint64_t value = memory_read(sve, address, mbytes);
+
+            if (true == is_signed)
+            {
+                value = (uint64_t)sign_extend(value, msize);
+            }
+
+            set_element(&results[r], e, esize, value);
+        }
+
+        first = false;
+    }
+
+    for (uint32_t r = 0U; r < count; ++r)
+    {
+        write_z(sve, (t + r) & 0x1FU, results[r]);
+    }
+
+    return SVE_OK;
+}
+
+/// Stores `count` registers from Zt as interleaved structures, checking every active element
+/// first.
+static sve_result_t
+store_contiguous(sve_t         *sve,
+                 const uint32_t t,
+                 const uint16_t pg,
+                 const uint64_t base,
+                 const uint32_t msize,
+                 const uint32_t esize,
+                 const uint32_t count)
+{
+    const uint32_t elements = elements_of(esize);
+    const uint32_t mbytes   = msize / 8U;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (true == is_active(pg, e, esize)
+            && false == is_mapped(sve, base + (uint64_t)e * count * mbytes, count * mbytes))
+        {
+            return SVE_FAULT;
+        }
+    }
+
+    vector_t sources[4];
+
+    for (uint32_t r = 0U; r < count; ++r)
+    {
+        sources[r] = read_z(sve, (t + r) & 0x1FU);
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        for (uint32_t r = 0U; r < count; ++r)
+        {
+            memory_write(sve,
+                         base + ((uint64_t)e * count + r) * mbytes,
+                         mbytes,
+                         get_element(&sources[r], e, esize));
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// The contiguous loads: LD1 (scalar plus immediate, 1010010 dtype 0 imm4 101 Pg Rn Zt, and
+/// scalar plus scalar, ... dtype Rm 010 ...), LDFF1 (... dtype Rm 011 ...) and LDNF1 (... dtype
+/// 1 imm4 101 ...).
+static sve_result_t
+load_contiguous_dtype(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t op = (instruction >> 13U) & 0x7U;
+    uint32_t       msize;
+    uint32_t       esize;
+    bool           is_signed;
+    decode_dtype((instruction >> 21U) & 0xFU, &msize, &esize, &is_signed);
+
+    const uint64_t base = sve->cpu->x[(instruction >> 5U) & 0x1FU];
+    const uint16_t pg   = read_p(sve, (instruction >> 10U) & 0x7U);
+    uint64_t       address;
+    load_kind_t    kind = LOAD_NORMAL;
+
+    if (5U == op)
+    {
+        // Scalar plus immediate: imm4 times the bytes of one vector's worth of elements.
+        const int64_t imm4 = sign_extend((instruction >> 16U) & 0xFU, 4U);
+        address            = base + (uint64_t)(imm4 * (int64_t)(elements_of(esize) * (msize / 8U)));
+        kind               = 0U != (instruction & 0x100000U) ? LOAD_NON_FAULT : LOAD_NORMAL;
+    }
+    else
+    {
+        const uint32_t rm = (instruction >> 16U) & 0x1FU;
+
+        // LD1 needs an offset register; LDFF1 may take XZR.
+        if (2U == op && 31U == rm)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        address = base + (read_x(sve, rm) << __builtin_ctz(msize / 8U));
+        kind    = 3U == op ? LOAD_FIRST_FAULT : LOAD_NORMAL;
+    }
+
+    return load_contiguous(
+        sve, instruction & 0x1FU, pg, address, msize, esize, is_signed, 1U, kind);
+}
+
+/// LDNT1 and LD2, LD3, LD4 (scalar plus immediate, 1010010 msz num 0 imm4 111 Pg Rn Zt, and
+/// scalar plus scalar, ... msz num Rm 110 ...).
+static sve_result_t
+load_structures(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t msize = 8U << ((instruction >> 23U) & 0x3U);
+    const uint32_t count = ((instruction >> 21U) & 0x3U) + 1U;
+    const uint64_t base  = sve->cpu->x[(instruction >> 5U) & 0x1FU];
+    const uint16_t pg    = read_p(sve, (instruction >> 10U) & 0x7U);
+    uint64_t       address;
+
+    if (7U == ((instruction >> 13U) & 0x7U))
+    {
+        if (0U != (instruction & 0x100000U))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        const int64_t imm4 = sign_extend((instruction >> 16U) & 0xFU, 4U);
+        address            = base + (uint64_t)(imm4 * (int64_t)(count * BAL_SVE_VECTOR_BYTES));
+    }
+    else
+    {
+        const uint32_t rm = (instruction >> 16U) & 0x1FU;
+
+        if (31U == rm)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        address = base + (read_x(sve, rm) << __builtin_ctz(msize / 8U));
+    }
+
+    return load_contiguous(
+        sve, instruction & 0x1FU, pg, address, msize, msize, false, count, LOAD_NORMAL);
+}
+
+/// LD1RQ (scalar plus immediate, 1010010 msz 00 0 imm4 001 Pg Rn Zt, and scalar plus scalar, ...
+/// msz 00 Rm 000 ...): one predicated quadword.
+static sve_result_t
+load_replicate_quadword(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t msize = 8U << ((instruction >> 23U) & 0x3U);
+    const uint64_t base  = sve->cpu->x[(instruction >> 5U) & 0x1FU];
+    const uint16_t pg    = read_p(sve, (instruction >> 10U) & 0x7U);
+    uint64_t       address;
+
+    if (0U != (instruction & 0x2000U))
+    {
+        if (0U != (instruction & 0x100000U))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        address = base + (uint64_t)(sign_extend((instruction >> 16U) & 0xFU, 4U) * 16);
+    }
+    else
+    {
+        const uint32_t rm = (instruction >> 16U) & 0x1FU;
+
+        if (31U == rm)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        address = base + (read_x(sve, rm) << __builtin_ctz(msize / 8U));
+    }
+
+    return load_contiguous(
+        sve, instruction & 0x1FU, pg, address, msize, msize, false, 1U, LOAD_NORMAL);
+}
+
+/// LD1R: 1000010 dtypeh 1 imm6 1 dtypel Pg Rn Zt. One element, broadcast to the active
+/// elements, read only if there is one.
+static sve_result_t
+load_broadcast(sve_t *sve, const uint32_t instruction)
+{
+    uint32_t msize;
+    uint32_t esize;
+    bool     is_signed;
+    decode_dtype((((instruction >> 23U) & 0x3U) << 2U) | ((instruction >> 13U) & 0x3U),
+                 &msize,
+                 &esize,
+                 &is_signed);
+
+    const uint16_t pg      = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint64_t address = sve->cpu->x[(instruction >> 5U) & 0x1FU]
+                             + (uint64_t)((instruction >> 16U) & 0x3FU) * (msize / 8U);
+    vector_t result = { { 0U, 0U } };
+    bool     any    = false;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        any = any || is_active(pg, e, esize);
+    }
+
+    if (true == any)
+    {
+        if (false == is_mapped(sve, address, msize / 8U))
+        {
+            return SVE_FAULT;
+        }
+
+        uint64_t value = memory_read(sve, address, msize / 8U);
+        value          = true == is_signed ? (uint64_t)sign_extend(value, msize) : value;
+
+        for (uint32_t e = 0U; e < elements_of(esize); ++e)
+        {
+            if (true == is_active(pg, e, esize))
+            {
+                set_element(&result, e, esize, value);
+            }
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The contiguous stores: ST1 (scalar plus immediate, 1110010 msz size 0 imm4 111 Pg Rn Zt, and
+/// scalar plus scalar, ... msz size Rm 010 ...), STNT1 and ST2, ST3, ST4 (... msz num 1 imm4 111
+/// ..., and ... msz num Rm 011 ...).
+static sve_result_t
+store_contiguous_instruction(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t op        = (instruction >> 13U) & 0x7U;
+    const uint32_t msize     = 8U << ((instruction >> 23U) & 0x3U);
+    const uint64_t base      = sve->cpu->x[(instruction >> 5U) & 0x1FU];
+    const uint16_t pg        = read_p(sve, (instruction >> 10U) & 0x7U);
+    const bool     is_single = 2U == op || (7U == op && 0U == (instruction & 0x100000U));
+    const uint32_t esize     = true == is_single ? 8U << ((instruction >> 21U) & 0x3U) : msize;
+    const uint32_t count     = true == is_single ? 1U : ((instruction >> 21U) & 0x3U) + 1U;
+    uint64_t       address;
+
+    if (esize < msize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (7U == op)
+    {
+        const int64_t imm4 = sign_extend((instruction >> 16U) & 0xFU, 4U);
+        address = base + (uint64_t)(imm4 * (int64_t)(count * elements_of(esize) * (msize / 8U)));
+    }
+    else
+    {
+        const uint32_t rm = (instruction >> 16U) & 0x1FU;
+
+        if (31U == rm)
+        {
+            return SVE_UNDEFINED;
+        }
+
+        address = base + (read_x(sve, rm) << __builtin_ctz(msize / 8U));
+    }
+
+    return store_contiguous(sve, instruction & 0x1FU, pg, address, msize, esize, count);
+}
+
+/// The ways a gather or scatter forms its addresses.
+typedef enum
+{
+    /// Xn plus the 32-bit offsets in Zm, extended and optionally scaled.
+    ADDRESS_EXTENDED,
+    /// Xn plus the 64-bit offsets in Zm, optionally scaled.
+    ADDRESS_OFFSETS,
+    /// Zn plus an immediate times the memory size.
+    ADDRESS_VECTOR_IMMEDIATE,
+    /// Zn plus Xm.
+    ADDRESS_VECTOR_SCALAR,
+} address_kind_t;
+
+typedef struct
+{
+    address_kind_t kind;
+    uint32_t       esize;
+    uint32_t       msize;
+    bool           is_scaled;
+    bool           is_signed_offset;
+    uint8_t        reserved[2];
+} gather_t;
+
+/// The address of element `e` of a gather or scatter.
+static uint64_t
+gather_address(const sve_t    *sve,
+               const gather_t *gather,
+               const uint32_t  instruction,
+               const uint32_t  e)
+{
+    const uint32_t field = (instruction >> 16U) & 0x1FU;
+    const vector_t zn    = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const uint32_t shift
+        = true == gather->is_scaled ? (uint32_t)__builtin_ctz(gather->msize / 8U) : 0U;
+
+    switch (gather->kind)
+    {
+        case ADDRESS_EXTENDED: {
+            const vector_t zm     = read_z(sve, field);
+            const uint64_t offset = get_element(&zm, e, gather->esize) & 0xFFFFFFFFU;
+            const uint64_t extended
+                = true == gather->is_signed_offset ? (uint64_t)sign_extend(offset, 32U) : offset;
+            return sve->cpu->x[(instruction >> 5U) & 0x1FU] + (extended << shift);
+        }
+        case ADDRESS_OFFSETS: {
+            const vector_t zm = read_z(sve, field);
+            return sve->cpu->x[(instruction >> 5U) & 0x1FU] + (get_element(&zm, e, 64U) << shift);
+        }
+        case ADDRESS_VECTOR_IMMEDIATE:
+            return get_element(&zn, e, gather->esize) + (uint64_t)field * (gather->msize / 8U);
+        default:
+            return get_element(&zn, e, gather->esize) + read_x(sve, field);
+    }
+}
+
+/// Decodes the addressing of a gather (1x00010 msz ...) into `gather`. Returns false if it is
+/// unallocated.
+static bool
+decode_gather(const uint32_t instruction, gather_t *gather, bool *is_unsigned, bool *is_first_fault)
+{
+    const uint32_t msz       = (instruction >> 23U) & 0x3U;
+    const uint32_t opc       = (instruction >> 21U) & 0x3U;
+    const bool     is_wide   = 0U != (instruction & 0x40000000U);
+    gather->esize            = true == is_wide ? 64U : 32U;
+    gather->msize            = 8U << msz;
+    gather->is_scaled        = false;
+    gather->is_signed_offset = false;
+    *is_unsigned             = 0U != (instruction & 0x4000U);
+    *is_first_fault          = 0U != (instruction & 0x2000U);
+
+    if (0U == (instruction & 0x8000U))
+    {
+        // Xn plus extended 32-bit offsets: ... msz xs scaled Zm 0 U ff ...
+        gather->kind             = ADDRESS_EXTENDED;
+        gather->is_scaled        = 0U != (opc & 1U);
+        gather->is_signed_offset = 0U != (opc & 2U);
+    }
+    else if (1U == opc)
+    {
+        gather->kind = ADDRESS_VECTOR_IMMEDIATE;
+    }
+    else if (true == is_wide && opc >= 2U)
+    {
+        gather->kind      = ADDRESS_OFFSETS;
+        gather->is_scaled = 3U == opc;
+    }
+    else if (0U == opc)
+    {
+        // LDNT1 (vector plus scalar): 32-bit ... 10 U 0, 64-bit ... 1 U 0 0.
+        gather->kind    = ADDRESS_VECTOR_SCALAR;
+        *is_first_fault = false;
+
+        if (true == is_wide ? 0U != (instruction & 0x2000U) : 0U != (instruction & 0x4000U))
+        {
+            return false;
+        }
+
+        *is_unsigned = 0U != (instruction & (true == is_wide ? 0x4000U : 0x2000U));
+    }
+    else
+    {
+        return false;
+    }
+
+    // Scaling bytes is the prefetch encoding; a sign extending load must widen.
+    if ((true == gather->is_scaled && 0U == msz) || gather->msize > gather->esize
+        || (false == *is_unsigned && gather->msize == gather->esize))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/// The gathers: LD1, LD1S, LDFF1, LDFF1S and LDNT1 with vector addresses.
+static sve_result_t
+load_gather(sve_t *sve, const uint32_t instruction)
+{
+    gather_t gather;
+    bool     is_unsigned;
+    bool     is_first_fault;
+
+    if (false == decode_gather(instruction, &gather, &is_unsigned, &is_first_fault))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg       = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint32_t mbytes   = gather.msize / 8U;
+    const uint32_t elements = elements_of(gather.esize);
+    vector_t       result   = { { 0U, 0U } };
+    bool           first    = true;
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (false == is_active(pg, e, gather.esize))
+        {
+            continue;
+        }
+
+        const uint64_t address = gather_address(sve, &gather, instruction, e);
+
+        // Like qemu, a first-fault gather also gives up on a later element that crosses a page,
+        // which the architecture allows.
+        const bool is_crossing = ((address ^ (address + mbytes - 1U)) >> 12U) != 0U;
+
+        if (false == is_mapped(sve, address, mbytes)
+            || (true == is_first_fault && false == first && true == is_crossing))
+        {
+            if (false == is_first_fault || true == first)
+            {
+                return SVE_FAULT;
+            }
+
+            for (uint32_t f = e; f < elements; ++f)
+            {
+                sve->cpu->ffr = set_active(sve->cpu->ffr, f, gather.esize, false);
+            }
+
+            break;
+        }
+
+        const uint64_t value = memory_read(sve, address, mbytes);
+        set_element(&result,
+                    e,
+                    gather.esize,
+                    true == is_unsigned ? value : (uint64_t)sign_extend(value, gather.msize));
+        first = false;
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The scatters: ST1 and STNT1 with vector addresses (1110010 msz opc ... 1 xs 0, ... 101 and
+/// ... 001 ...). Every active element is checked before any is stored.
+static sve_result_t
+store_scatter(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t op  = (instruction >> 13U) & 0x7U;
+    const uint32_t opc = (instruction >> 21U) & 0x3U;
+    gather_t       gather;
+    gather.msize            = 8U << ((instruction >> 23U) & 0x3U);
+    gather.is_scaled        = false;
+    gather.is_signed_offset = false;
+
+    if (1U == op)
+    {
+        // STNT1 (vector plus scalar): ... msz 00 Rm 001 for 64-bit and ... msz 10 Rm 001 for
+        // 32-bit.
+        if (0U != (opc & 1U))
+        {
+            return SVE_UNDEFINED;
+        }
+
+        gather.kind  = ADDRESS_VECTOR_SCALAR;
+        gather.esize = 0U != (opc & 2U) ? 32U : 64U;
+    }
+    else if (4U == (op & 0x5U))
+    {
+        // Extended offsets: bit 22 picks 32-bit elements, bit 21 scales and bit 14 signs.
+        gather.kind             = ADDRESS_EXTENDED;
+        gather.esize            = 0U != (opc & 2U) ? 32U : 64U;
+        gather.is_scaled        = 0U != (opc & 1U);
+        gather.is_signed_offset = 0U != (instruction & 0x4000U);
+    }
+    else if (5U == op)
+    {
+        gather.kind      = opc >= 2U ? ADDRESS_VECTOR_IMMEDIATE : ADDRESS_OFFSETS;
+        gather.esize     = 3U == opc ? 32U : 64U;
+        gather.is_scaled = 1U == opc;
+    }
+    else
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if ((true == gather.is_scaled && 8U == gather.msize) || gather.msize > gather.esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg       = read_p(sve, (instruction >> 10U) & 0x7U);
+    const uint32_t mbytes   = gather.msize / 8U;
+    const uint32_t elements = elements_of(gather.esize);
+    const vector_t source   = read_z(sve, instruction & 0x1FU);
+    uint64_t       addresses[4];
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        addresses[e] = gather_address(sve, &gather, instruction, e);
+
+        if (true == is_active(pg, e, gather.esize) && false == is_mapped(sve, addresses[e], mbytes))
+        {
+            return SVE_FAULT;
+        }
+    }
+
+    for (uint32_t e = 0U; e < elements; ++e)
+    {
+        if (true == is_active(pg, e, gather.esize))
+        {
+            memory_write(sve, addresses[e], mbytes, get_element(&source, e, gather.esize));
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// The prefetches: they do nothing here, but the scalar plus scalar form needs an offset register.
+static sve_result_t
+prefetch(sve_t *sve, const uint32_t instruction)
+{
+    (void)sve;
+    const bool is_scalar_plus_scalar = 0x8400C000U == (instruction & 0xFE60E000U);
+    return true == is_scalar_plus_scalar && 31U == ((instruction >> 16U) & 0x1FU) ? SVE_UNDEFINED
+                                                                                  : SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
 
@@ -2863,6 +3592,26 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFF200000U, 0x24000000U, compare_vectors },
     { 0xFF204000U, 0x25000000U, compare_immediate },
     { 0xFF200000U, 0x24200000U, compare_immediate },
+    { 0xFFC0A000U, 0x85800000U, load_store_register },
+    { 0xFFC0A000U, 0xE5800000U, load_store_register },
+    { 0xFE00E000U, 0xA400A000U, load_contiguous_dtype },
+    { 0xFE00C000U, 0xA4004000U, load_contiguous_dtype },
+    { 0xFE00E000U, 0xA400E000U, load_structures },
+    { 0xFE00E000U, 0xA400C000U, load_structures },
+    { 0xFE60C000U, 0xA4000000U, load_replicate_quadword },
+    { 0xFE408000U, 0x84408000U, load_broadcast },
+    { 0xFE00E000U, 0xE400E000U, store_contiguous_instruction },
+    { 0xFE00C000U, 0xE4004000U, store_contiguous_instruction },
+    { 0xFE60E010U, 0x8400E000U, prefetch },
+    { 0xFE60E010U, 0xC400E000U, prefetch },
+    { 0xFFC08010U, 0x85C00000U, prefetch },
+    { 0xFE60E010U, 0x8400C000U, prefetch },
+    { 0xFFA08010U, 0x84200000U, prefetch },
+    { 0xFFA08010U, 0xC4200000U, prefetch },
+    { 0xFFE08010U, 0xC4608000U, prefetch },
+    { 0xFE000000U, 0x84000000U, load_gather },
+    { 0xFE000000U, 0xC4000000U, load_gather },
+    { 0xFE000000U, 0xE4000000U, store_scatter },
 };
 
 static sve_result_t

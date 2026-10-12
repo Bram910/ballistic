@@ -2616,6 +2616,7 @@ compare_terminate(sve_t *sve, const uint32_t instruction)
 // -----------------------------------------------------------------------------
 
 /// Compares `a` with `b` by `kind`: 0 EQ, 1 NE, 2 GE, 3 GT, 4 LT, 5 LE, 6 HS, 7 HI, 8 LO, 9 LS.
+/// EQ and NE are signed comparisons, which matters for negative immediates and doublewords.
 static bool
 compare_integers(
     const uint32_t kind, const int64_t sa, const int64_t sb, const uint64_t ua, const uint64_t ub)
@@ -2623,9 +2624,9 @@ compare_integers(
     switch (kind)
     {
         case 0U:
-            return ua == ub;
+            return sa == sb;
         case 1U:
-            return ua != ub;
+            return sa != sb;
         case 2U:
             return sa >= sb;
         case 3U:

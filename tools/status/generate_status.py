@@ -11,7 +11,8 @@ returns (their encodings resolve to the base instruction) are left out.
 
 Unicorn cannot run SVE or SME. Each QEMU_CSV, an output of tests/sve/run_sve_diff.sh (with
 BAL_SVE_SPACE=sme for SME), gives the SVE or SME entries it covers their status against
-qemu-aarch64 instead; entries both Ballistic and qemu reject count as not started.
+qemu-aarch64 instead; entries both Ballistic and qemu reject count as not started. A CSV made with
+BAL_SVE_SPACE=all also gives the other entries Unicorn cannot check the status qemu found.
 """
 
 import csv
@@ -91,15 +92,21 @@ def read_coverage(source):
 
 
 def apply_qemu(entries, paths):
-    """Replaces the status of the SVE and SME entries with the qemu comparisons in `paths`."""
+    """Replaces the status of the SVE and SME entries with the qemu comparisons in `paths`, and
+    that of the other entries Unicorn cannot check where qemu checked them."""
     statuses = {}
     for path in paths:
         lines = (line for line in Path(path).read_text().splitlines() if not line.startswith("#"))
         for row in csv.reader(lines):
             statuses[int(row[0])] = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
     for entry in entries:
-        if entry["class"] in ("SVE", "SME") and entry["index"] in statuses:
-            entry["status"] = statuses[entry["index"]]
+        status = statuses.get(entry["index"])
+        if status is None:
+            continue
+        if entry["class"] in ("SVE", "SME"):
+            entry["status"] = status
+        elif entry["status"] == UNVERIFIED and status in (VERIFIED, WRONG):
+            entry["status"] = status
 
 
 def squarify(items, x, y, w, h):
@@ -293,7 +300,8 @@ def update_readme(summary):
 
 Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv`,
 `BAL_SVE_SPACE=sme BAL_SVE_QEMU=<qemu 10.1 or later> tests/sve/run_sve_diff.sh > sme.csv` and
-`python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv sme.csv`.
+`BAL_SVE_SPACE=all BAL_SVE_QEMU=<qemu> tests/sve/run_sve_diff.sh 24 <unverified mnemonics> > all.csv` and
+`python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv sme.csv all.csv`.
 {MARK_END}"""
     text = README.read_text(encoding="utf-8")
     if MARK_BEGIN in text:

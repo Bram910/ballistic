@@ -529,6 +529,16 @@ randomize_pac_state(const uint32_t instruction, state_t *state)
 /// it reports as undefined: FEAT_CSSC, FEAT_LRCPC3, FEAT_LSE128, FEAT_MOPS, FEAT_MTE, FEAT_THE,
 /// FEAT_BF16, FEAT_I8MM, FEAT_HBC, FEAT_WFxT, FEAT_TME, FEAT_GCS, FEAT_SPECRES2 and FEAT_ITE.
 /// Ballistic's unit tests check them instead.
+/// The load-acquire and store-release accesses: LDAR, STLR, LDLAR and STLLR, LDAPR, and LDAPUR
+/// and STLUR. A misaligned one across 16 bytes raises an alignment fault, which Unicorn's QEMU 5.0
+/// does not check.
+static bool
+is_ordered_access(const uint32_t instruction)
+{
+    return 0x08800000U == (instruction & 0x3FA00000U) || 0x38BFC000U == (instruction & 0x3FFFFC00U)
+           || 0x19000000U == (instruction & 0x3F200C00U);
+}
+
 static bool
 is_newer_than_unicorn(const uint32_t instruction)
 {
@@ -687,6 +697,13 @@ main(void)
             const run_result_t unicorn_result = run_unicorn(instruction, &expected);
 
             if (RUN_REJECTED == unicorn_result)
+            {
+                continue;
+            }
+
+            // An alignment fault Unicorn misses.
+            if (true == is_ordered_access(instruction) && RUN_MEMORY_FAULT == ballistic_result
+                && RUN_MEMORY_FAULT != unicorn_result)
             {
                 continue;
             }

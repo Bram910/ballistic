@@ -143,13 +143,30 @@ emit_vector_access(
     emit(opcode | ((index >> 3U) << 16U) | ((index & 7U) << 10U) | (base << 5U) | t);
 }
 
+/// The ZA array loads and stores: LDR and STR ZA[W12, #i], [Xn, #i, MUL VL] for the 16 slices,
+/// then ZT0, from the context in Xr through Xn. W12 is free: the base is never W12-W15.
+static void
+emit_za_access(uint32_t r, uint32_t n, uint32_t is_store)
+{
+    emit(0xD280000CU); // MOV X12, #0
+    emit_add_imm(n, r, OFFSET(za));
+    for (uint32_t i = 0U; i < 16U; ++i)
+    {
+        emit((is_store ? 0xE1200000U : 0xE1000000U) | (n << 5U) | i);
+    }
+    emit_add_imm(n, r, OFFSET(zt0));
+    emit((is_store ? 0xE13F8000U : 0xE11F8000U) | (n << 5U)); // LDR or STR ZT0, [Xn]
+}
+
 /// Builds: save the host registers, load the guest state from the context in Xr, the
 /// instruction, store the guest state, restore the host and return.
 static void
-build(uint32_t instruction, uint32_t r)
+build(const sve_test_t *test, uint32_t r)
 {
-    const uint32_t temp = 0U == r ? 1U : 0U;
-    g_count             = 0U;
+    const uint32_t instruction = test->instruction;
+    const uint32_t is_sme      = 0U != (test->flags & SVE_TEST_SME);
+    const uint32_t temp        = 0U == r ? 1U : 0U;
+    g_count                    = 0U;
 
     emit(0xA9BF7BFDU); // STP X29, X30, [SP, #-16]!
     for (uint32_t i = 19U; i < 29U; i += 2U)
@@ -159,6 +176,19 @@ build(uint32_t instruction, uint32_t r)
     emit_add_imm(1U, 31U, 0U);           // MOV X1, SP
     emit_str_x(1U, 0U, HOST_SP_OFFSET);  // the host SP in the context's padding
     emit(0xAA0003E0U | (0U << 16U) | r); // MOV Xr, X0
+
+    // Streaming mode and ZA first: changing them resets the vector state and FPSR.
+    if (is_sme)
+    {
+        emit_ldr_x(1U, r, OFFSET(svcr));
+        emit(0xD51B4240U | 1U); // MSR SVCR, X1
+        emit_ldr_x(1U, r, OFFSET(tpidr2_el0));
+        emit(0xD51BD0A0U | 1U); // MSR TPIDR2_EL0, X1
+        if (0U != (test->state.svcr & 2U))
+        {
+            emit_za_access(r, 1U, 0U);
+        }
+    }
 
     emit_ldr_x(1U, r, OFFSET(nzcv));
     emit(0xD51B4200U | 1U); // MSR NZCV, X1
@@ -218,6 +248,17 @@ build(uint32_t instruction, uint32_t r)
     emit(0x2519F000U); // RDFFR P0.B
     emit_add_imm(temp, r, OFFSET(ffr));
     emit_vector_access(temp, 1U, 1U, 0U, 0U);
+    if (is_sme)
+    {
+        emit(0xD53BD0A0U | temp); // MRS Xt, TPIDR2_EL0
+        emit_str_x(temp, r, OFFSET(tpidr2_el0));
+        emit(0xD53B4240U | temp); // MRS Xt, SVCR
+        emit_str_x(temp, r, OFFSET(svcr));
+        // TBZ Xt, #1 over the ZA stores, which are only possible while ZA is on.
+        emit(0x36080000U | (21U << 5U) | temp);
+        emit_za_access(r, temp, 1U);
+        emit(0xD51B4240U | 31U); // MSR SVCR, XZR
+    }
     emit(0xD51B4400U | 31U); // MSR FPCR, XZR
     emit_ldr_x(temp, r, HOST_SP_OFFSET);
     emit_add_imm(31U, temp, 0U); // MOV SP, Xt
@@ -246,7 +287,15 @@ handler(int signal, void *info, void *context)
     // ucontext: uc_flags, uc_link, uc_stack (24), uc_sigmask (8), padding to 176, then
     // sigcontext: fault_address, regs[31], sp, pc.
     uint64_t *pc = (uint64_t *)((char *)context + 176 + 8 + 31 * 8 + 8);
-    *pc          = g_epilogue;
+
+    // A fault in the epilogue would come back here forever; give up instead, which the driver
+    // reports as a reference crash on this test.
+    if (*pc >= g_epilogue)
+    {
+        syscall6(94, 3, 0, 0, 0, 0, 0); // exit_group
+    }
+
+    *pc = g_epilogue;
 }
 
 typedef struct
@@ -303,7 +352,7 @@ _start(void)
         g_context.status        = 0U;
         const uint32_t r        = sve_base_register(test.instruction);
         g_context.base_register = r;
-        build(test.instruction, r);
+        build(&test, r);
         ((void (*)(sve_state_t *))(uintptr_t)g_code)(&g_context);
         g_context.data_hash = sve_hash_data((const uint8_t *)SVE_DATA_BASE);
         g_context.pad[0] = g_context.pad[1] = g_context.pad[2] = 0U;

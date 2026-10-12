@@ -26,12 +26,22 @@ typedef struct
     /// The register the reference keeps its context pointer in, which the instruction never
     /// names; it is not compared.
     uint64_t base_register;
+    /// The SME state, set up and compared for tests with SVE_TEST_SME: ZA as its 16 horizontal
+    /// byte slices, ZT0, and SVCR (PSTATE.SM in bit 0 and PSTATE.ZA in bit 1). ZA and ZT0 are
+    /// only compared while ZA is on.
+    uint8_t  za[256];
+    uint8_t  zt0[64];
+    uint64_t svcr;
+    uint64_t tpidr2_el0;
 } sve_state_t;
+
+/// sve_test_t::flags: the test has SME state, which needs a reference CPU with SME.
+#define SVE_TEST_SME 1U
 
 typedef struct
 {
     uint32_t    instruction;
-    uint32_t    pad;
+    uint32_t    flags;
     uint64_t    seed;
     sve_state_t state;
 } sve_test_t;
@@ -73,13 +83,14 @@ sve_hash_data(const uint8_t *data)
 }
 
 /// The general register the reference may use as its base: one the instruction's register
-/// fields (bits 4:0, 9:5, 14:10 and 20:16) do not name.
+/// fields (bits 4:0, 9:5, 14:10 and 20:16) do not name, and not W12-W15, which SME instructions
+/// name with two-bit fields.
 static inline uint32_t
 sve_base_register(const uint32_t instruction)
 {
     for (uint32_t r = 30U; r > 0U; --r)
     {
-        if (r != (instruction & 0x1FU) && r != ((instruction >> 5U) & 0x1FU)
+        if ((r < 12U || r > 15U) && r != (instruction & 0x1FU) && r != ((instruction >> 5U) & 0x1FU)
             && r != ((instruction >> 10U) & 0x1FU) && r != ((instruction >> 16U) & 0x1FU))
         {
             return r;

@@ -6,10 +6,12 @@
 //! Usage: bal_sve_diff REFERENCE [SAMPLES] [MNEMONICS] [REPORTS]
 //!
 //! REFERENCE is the built reference program, run with $BAL_SVE_QEMU (qemu-aarch64-static by
-//! default). $BAL_SVE_SEED, when set, changes the random encodings and states. MNEMONICS is an
-//! optional comma separated list of entries to test, and REPORTS the number of mismatches to
-//! describe. The output has one CSV line per entry, in the format of the status
-//! tracker's coverage tool:
+//! default). With $BAL_SVE_SPACE set to `sme` it tests the SME encoding space, and the SMSTART,
+//! SMSTOP, SVCR and TPIDR2_EL0 forms of MSR and MRS, with random streaming mode, ZA and ZT0
+//! state, which needs a qemu with SME2 (10.0 or later). $BAL_SVE_SEED, when set, changes the random
+//! encodings and states. MNEMONICS is an optional comma separated list of entries to test, and
+//! REPORTS the number of mismatches to describe. The output has one CSV line per entry, in the
+//! format of the status tracker's coverage tool:
 //!
 //!     index,mnemonic,mask,expected,status,translated,matched,samples
 //!
@@ -39,6 +41,7 @@
 /// The reference crashed (a qemu bug) on this test.
 #define STATUS_CRASHED 255U
 
+static bool     g_is_sme;
 static uint8_t  g_memory[SVE_DATA_SIZE];
 static uint8_t  g_code[0x1000];
 static void    *g_interface;
@@ -99,6 +102,25 @@ random_state(sve_state_t *state)
     }
 
     state->ffr = 0U == next_random() % 2U ? 0xFFFFU : (uint16_t)next_random();
+
+    if (true == g_is_sme)
+    {
+        // Mostly streaming mode with ZA on, which most SME instructions need.
+        state->svcr       = 0U == next_random() % 4U ? next_random() % 3U : 3U;
+        state->tpidr2_el0 = next_random();
+
+        for (uint32_t i = 0U; i < sizeof(state->za); i += 8U)
+        {
+            const uint64_t value = next_random();
+            memcpy(&state->za[i], &value, 8U);
+        }
+
+        for (uint32_t i = 0U; i < sizeof(state->zt0); i += 8U)
+        {
+            const uint64_t value = next_random();
+            memcpy(&state->zt0[i], &value, 8U);
+        }
+    }
 }
 
 static const uint8_t *
@@ -158,6 +180,10 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
     memcpy(cpu.v, test->state.v, sizeof(cpu.v));
     memcpy(cpu.p, test->state.p, sizeof(cpu.p));
     cpu.ffr = test->state.ffr;
+    memcpy(cpu.za, test->state.za, sizeof(cpu.za));
+    memcpy(cpu.zt0, test->state.zt0, sizeof(cpu.zt0));
+    cpu.svcr       = test->state.svcr;
+    cpu.tpidr2_el0 = test->state.tpidr2_el0;
 
     bal_engine_t engine;
     memset(&engine, 0, sizeof(engine));
@@ -174,17 +200,23 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
     out->fpsr = cpu.fpsr;
     memcpy(out->v, cpu.v, sizeof(out->v));
     memcpy(out->p, cpu.p, sizeof(out->p));
-    out->ffr       = cpu.ffr;
-    out->data_hash = sve_hash_data(g_memory);
-    out->status    = 0U;
+    out->ffr = cpu.ffr;
+    memcpy(out->za, cpu.za, sizeof(out->za));
+    memcpy(out->zt0, cpu.zt0, sizeof(out->zt0));
+    out->svcr       = cpu.svcr;
+    out->tpidr2_el0 = cpu.tpidr2_el0;
+    out->data_hash  = sve_hash_data(g_memory);
+    out->status     = 0U;
 
     if (BAL_ERROR_MEMORY_FAULT == status
         || (BAL_ERROR_GUEST_EXCEPTION == status && BAL_EXCEPTION_DATA_ABORT == cpu.exception))
     {
         out->status = STATUS_SIGSEGV;
     }
-    else if (BAL_ERROR_GUEST_EXCEPTION == status)
+    else if (BAL_ERROR_GUEST_EXCEPTION == status
+             && BAL_EXCEPTION_UNDEFINED_INSTRUCTION == cpu.exception)
     {
+        // An SME instruction whose mode is off: translated, and a SIGILL to compare.
         out->status = STATUS_SIGILL;
     }
     else if (status != BAL_SUCCESS)
@@ -192,7 +224,7 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
         return false;
     }
 
-    return STATUS_SIGILL != out->status;
+    return true;
 }
 
 /// Compares two final states, describing the first difference in `why`.
@@ -272,6 +304,39 @@ same_state(const sve_state_t *a, const sve_state_t *b, char *why, size_t size)
         if (a->p[r] != b->p[r])
         {
             snprintf(why, size, "p%u %04x vs %04x", r, a->p[r], b->p[r]);
+            return false;
+        }
+    }
+
+    // qemu keeps the RES0 bits of a value written to SVCR.
+    if ((a->svcr & 3U) != (b->svcr & 3U) || a->tpidr2_el0 != b->tpidr2_el0)
+    {
+        snprintf(why,
+                 size,
+                 "svcr/tpidr2 %llx/%llx vs %llx/%llx",
+                 (unsigned long long)a->svcr,
+                 (unsigned long long)a->tpidr2_el0,
+                 (unsigned long long)b->svcr,
+                 (unsigned long long)b->tpidr2_el0);
+        return false;
+    }
+
+    // ZA and ZT0 only hold values while ZA is on.
+    if (0U != (b->svcr & 2U))
+    {
+        for (uint32_t i = 0U; i < sizeof(a->za); ++i)
+        {
+            if (a->za[i] != b->za[i])
+            {
+                snprintf(
+                    why, size, "za[%u][%u] %02x vs %02x", i / 16U, i % 16U, a->za[i], b->za[i]);
+                return false;
+            }
+        }
+
+        if (0 != memcmp(a->zt0, b->zt0, sizeof(a->zt0)))
+        {
+            snprintf(why, size, "zt0 differs");
             return false;
         }
     }
@@ -404,8 +469,9 @@ run_reference(record_t *records, const uint32_t count, const char *reference, co
     snprintf(results_path, sizeof(results_path), "%s/results", directory);
     snprintf(command,
              sizeof(command),
-             "%s -cpu max,sve-default-vector-length=16 %s < %s > %s 2> /dev/null",
+             "%s -cpu max,sve-default-vector-length=16%s %s < %s > %s 2> /dev/null",
              qemu,
+             true == g_is_sme ? ",sme-default-vector-length=16,sme_fa64=on" : "",
              reference,
              tests_path,
              results_path);
@@ -444,6 +510,22 @@ run_reference(record_t *records, const uint32_t count, const char *reference, co
     (void)rmdir(directory);
 }
 
+/// The record index of the SME system forms, past the decoder entries.
+#define SYSTEM_ENTRY BAL_DECODER_ARM64_INSTRUCTIONS_SIZE
+
+/// Fills `record` with a random test of `instruction` and runs it in Ballistic.
+static void
+add_record(record_t *record, const uint32_t entry, const uint32_t instruction)
+{
+    record->entry            = entry;
+    record->test.instruction = instruction;
+    record->test.flags       = true == g_is_sme ? SVE_TEST_SME : 0U;
+    record->test.seed        = next_random();
+    random_state(&record->test.state);
+    record->test.state.base_register = sve_base_register(instruction);
+    record->ballistic_ok = true == run_ballistic(&record->test, &record->ballistic) ? 1U : 0U;
+}
+
 /// Describes a mismatch.
 static void
 report(const record_t *record, const char *why)
@@ -453,7 +535,8 @@ report(const record_t *record, const char *why)
     const uint32_t     n           = (instruction >> 5U) & 0x1FU;
     const uint32_t     m           = (instruction >> 16U) & 0x1FU;
     printf("# %s %08X: ballistic vs reference: %s\n",
-           g_bal_decoder_arm64_instructions[record->entry].name,
+           SYSTEM_ENTRY == record->entry ? "SVCR"
+                                         : g_bal_decoder_arm64_instructions[record->entry].name,
            instruction,
            why);
     printf("#   xn/sp=%016llx xm=%016llx pg=%04x ffr %04x -> %04x vs %04x\n",
@@ -484,6 +567,7 @@ main(int argc, char **argv)
         g_random = strtoull(getenv("BAL_SVE_SEED"), NULL, 0);
     }
 
+    g_is_sme = NULL != getenv("BAL_SVE_SPACE") && 0 == strcmp(getenv("BAL_SVE_SPACE"), "sme");
     bal_logger_init_default();
     bal_thread_logger.min_level = BAL_LOG_LEVEL_NONE;
     const char    *reference    = argv[1];
@@ -494,7 +578,7 @@ main(int argc, char **argv)
         = NULL != getenv("BAL_SVE_QEMU") ? getenv("BAL_SVE_QEMU") : "qemu-aarch64-static";
 
     record_t *records
-        = calloc((size_t)BAL_DECODER_ARM64_INSTRUCTIONS_SIZE * samples, sizeof(record_t));
+        = calloc((size_t)(BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U) * samples, sizeof(record_t));
     uint32_t count = 0U;
 
     if (NULL == records)
@@ -507,9 +591,11 @@ main(int argc, char **argv)
     {
         const bal_decoder_instruction_metadata_t *entry = &g_bal_decoder_arm64_instructions[e];
 
-        // The SVE encoding space, op0 = 0010.
-        if (0x2U != ((entry->expected >> 25U) & 0xFU)
-            || (NULL != filter && false == is_listed(filter, entry->name)))
+        // The SVE encoding space, op0 = 0010, or the SME one, op0 = 0000 with bit 31 set.
+        const bool is_in_space = true == g_is_sme ? 0x80000000U == (entry->expected & 0x9E000000U)
+                                                  : 0x2U == ((entry->expected >> 25U) & 0xFU);
+
+        if (false == is_in_space || (NULL != filter && false == is_listed(filter, entry->name)))
         {
             continue;
         }
@@ -525,22 +611,32 @@ main(int argc, char **argv)
                 continue;
             }
 
-            record_t *record         = &records[count++];
-            record->entry            = e;
-            record->test.instruction = instruction;
-            record->test.seed        = next_random();
-            random_state(&record->test.state);
-            record->test.state.base_register = sve_base_register(instruction);
-            record->ballistic_ok
-                = true == run_ballistic(&record->test, &record->ballistic) ? 1U : 0U;
+            add_record(&records[count++], e, instruction);
             ++taken;
+        }
+    }
+
+    // SMSTART and SMSTOP (MSR SVCRSM, SVCRZA and SVCRSMZA, #imm), MSR and MRS SVCR and
+    // TPIDR2_EL0, counted apart from the decoder entries they share with other MSR and MRS.
+    if (true == g_is_sme && NULL == filter)
+    {
+        static const uint32_t FORMS[]
+            = { 0xD503437FU, 0xD503427FU, 0xD503457FU, 0xD503447FU, 0xD503477FU,
+                0xD503467FU, 0xD51B4240U, 0xD53B4240U, 0xD51BD0A0U, 0xD53BD0A0U };
+
+        for (uint32_t i = 0U; i < samples; ++i)
+        {
+            const uint32_t form = FORMS[i % (sizeof(FORMS) / sizeof(FORMS[0]))];
+            const uint32_t rt   = 0x1FU == (form & 0x1FU) ? 0x1FU : (uint32_t)(next_random() % 32U);
+            add_record(&records[count++], SYSTEM_ENTRY, (form & ~0x1FU) | rt);
         }
     }
 
     run_reference(records, count, reference, qemu);
 
-    // Per entry: compared, matched, samples, samples the reference ran.
-    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE][4];
+    // Per entry, and for the system forms last: compared, matched, samples, samples the reference
+    // ran.
+    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U][4];
     long            reported = 0;
 
     for (uint32_t i = 0U; i < count; ++i)
@@ -607,6 +703,13 @@ main(int argc, char **argv)
                t[0],
                t[1],
                t[2]);
+    }
+
+    if (0U != tally[SYSTEM_ENTRY][2])
+    {
+        printf("# SMSTART, SMSTOP, SVCR and TPIDR2_EL0: %u of %u compared samples matched\n",
+               tally[SYSTEM_ENTRY][1],
+               tally[SYSTEM_ENTRY][0]);
     }
 
     free(records);

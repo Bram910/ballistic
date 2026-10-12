@@ -67,9 +67,17 @@ local function derive_opcode(mnemonic)
         return "OPCODE_MOV"
     end
 
-    -- Hints the engine does not implement execute as NOP, as the architecture requires.
-    if m == "NOP" or m == "HINT" then
+    -- Hints the engine does not implement execute as NOP, as the architecture requires. WFET and
+    -- WFIT may complete at once, as WFE and WFI may, and TCANCEL outside a transaction does
+    -- nothing; with transactions that always fail, there never is one.
+    if m == "NOP" or m == "HINT" or m == "WFET" or m == "WFIT" or m == "TCANCEL" then
         return "OPCODE_NOP"
+    end
+
+    -- FEAT_TME with trivial transactions: TSTART always fails and TTEST reads depth 0. TCOMMIT
+    -- outside a transaction stays undefined.
+    if m == "TSTART" or m == "TTEST" then
+        return "OPCODE_INTEGER_HELPER"
     end
 
     -- Barriers. Tier 1 emits a fence for DMB and DSB; the rest need no code.
@@ -109,8 +117,8 @@ local function derive_opcode(mnemonic)
         return "OPCODE_MEMORY_OPERATION"
     end
 
-    -- SYS: the cache maintenance operations EL0 may execute.
-    if m == "SYS" then
+    -- SYS and SYSL: the cache maintenance and other operations EL0 may execute.
+    if m == "SYS" or m == "SYSL" then
         return "OPCODE_SYSTEM_REGISTER"
     end
 
@@ -252,7 +260,8 @@ local function derive_opcode(mnemonic)
         return "OPCODE_JUMP"
     end
 
-    if m:sub(1, 2) == "B." then
+    -- B.cond and the FEAT_HBC BC.cond, whose hint that the branch is consistent needs no code.
+    if m:sub(1, 2) == "B." or m == "BC" then
         return "OPCODE_BRANCH_CONDITIONAL"
     end
 

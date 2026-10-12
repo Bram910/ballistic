@@ -179,6 +179,14 @@ extern "C"
         /// PSTATE.TCO (bit 25), the MTE tag check override, as MSR TCO writes it and MRS TCO
         /// reads it. Tag checks are not performed, so it has no other effect.
         uint64_t tco;
+
+        /// The SVE predicate registers P0-P15 and the first-fault register FFR. The vector
+        /// length is 128 bits, so a predicate has one bit per byte of a Z register, 16 bits.
+        uint16_t p[16];
+        uint16_t ffr;
+
+        /// Keeps the structure a whole number of its 64-byte alignment.
+        uint8_t reserved[30];
     } bal_cpu_t;
 
     /// The function signature of a JIT-compiled basic block.

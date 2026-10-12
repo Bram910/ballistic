@@ -369,6 +369,8 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
 /// - Its first-fault loads give up on the elements on the page after the first one.
 /// - Its WHILERW treats only equal addresses as conflict free, where the architecture (and later
 ///   qemu) divides the distance by the element size first.
+/// - It runs the SME2 SQRSHR, UQRSHR and SQRSHRU forms (qemu 11) outside streaming mode, which
+///   they need.
 /// - Its SME vertical tile slice loads (qemu 11) leave the inactive elements after the last
 ///   active one unchanged instead of zeroing them.
 /// - qemu-user turns a guest address into a host one without checking the guest mapped it, so a
@@ -383,6 +385,15 @@ is_known_qemu_difference(const sve_test_t  *test,
     const uint32_t m             = (instruction >> 16U) & 0x1FU;
     const bool     is_nonfault   = 0xA410A000U == (instruction & 0xFE10E000U);
     const bool     is_firstfault = 0xA4006000U == (instruction & 0xFE00E000U);
+
+    const bool is_narrowing_shift
+        = 0xC1E0D400U == (instruction & 0xFFE0FC00U) || 0xC120D800U == (instruction & 0xFF20F800U);
+
+    if (true == is_narrowing_shift && 0U == (test->state.svcr & 1U)
+        && 0U != (test->flags & SVE_TEST_SME))
+    {
+        return true;
+    }
 
     const bool is_tile_load
         = 0xE0000000U == (instruction & 0xFF200010U) || 0xE1C00000U == (instruction & 0xFFE00010U);

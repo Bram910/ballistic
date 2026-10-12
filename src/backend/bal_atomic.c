@@ -32,6 +32,8 @@ typedef enum
     ATOMIC_ORDERED_UNSCALED_VECTOR,
     /// FEAT_LRCPC3: LDAP1 and STL1, one 64-bit lane.
     ATOMIC_ORDERED_LANE,
+    /// FEAT_LSE128: LDCLRP, LDSETP and SWPP, in every ordering.
+    ATOMIC_MEMORY_OPERATION_PAIR,
 } atomic_class_t;
 
 static atomic_class_t
@@ -91,6 +93,16 @@ classify(const uint32_t instruction)
         }
 
         return ATOMIC_UNSUPPORTED;
+    }
+
+    // FEAT_LSE128 LDCLRP (o3 = 0, opc = 001), LDSETP (0, 011) and SWPP (1, 000):
+    // 0 0 011001 A R 1 Rt2 o3 opc 00 Rn Rt, with neither Rt nor Rt2 the zero register.
+    if (0x19200000U == (instruction & 0xFF208C00U) || 0x19208000U == (instruction & 0xFF20FC00U))
+    {
+        const uint32_t operation = (instruction >> 12U) & 0xFU;
+        const bool     is_valid  = 0x1U == operation || 0x3U == operation || 0x8U == operation;
+        return true == is_valid && rt != 31U && rs != 31U ? ATOMIC_MEMORY_OPERATION_PAIR
+                                                          : ATOMIC_UNSUPPORTED;
     }
 
     // FEAT_LRCPC3 LDAPR (post-index) and STLR (pre-index): 1 x 011001 1 L 0 00000 100010 Rn Rt.
@@ -773,6 +785,38 @@ bal_execute_atomic(bal_cpu_t *BAL_RESTRICT                    cpu,
                 store(pointer, 8U, cpu->v[rt][lane]);
             }
 
+            return 1U;
+        }
+
+        case ATOMIC_MEMORY_OPERATION_PAIR: {
+            // One 16-byte atomic access, which must be aligned. Rt holds the low half of the
+            // operand and receives the low half of the old value; Rt2 the high halves.
+            uint8_t *pointer
+                = 0U == (address & 0xFU) ? translate(memory_interface, address, 16U) : NULL;
+
+            if (NULL == pointer)
+            {
+                return 0U;
+            }
+
+            const uint32_t operation  = (instruction >> 12U) & 0xFU;
+            const uint64_t operand[2] = { read_register(cpu, rt), read_register(cpu, rs) };
+            uint64_t       old[2];
+            uint64_t       desired[2];
+            load_16(pointer, old);
+
+            do
+            {
+                for (uint32_t half = 0U; half < 2U; ++half)
+                {
+                    desired[half] = 0x1U == operation   ? old[half] & ~operand[half] // LDCLRP
+                                    : 0x3U == operation ? old[half] | operand[half]  // LDSETP
+                                                        : operand[half];             // SWPP
+                }
+            } while (false == compare_swap_16(pointer, old, desired));
+
+            write_register(cpu, rt, old[0]);
+            write_register(cpu, rs, old[1]);
             return 1U;
         }
 

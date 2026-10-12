@@ -19370,7 +19370,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRP",
           0xFFE0FC00,
           0x19201000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19382,7 +19382,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRPA",
           0xFFE0FC00,
           0x19A01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19394,7 +19394,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRPAL",
           0xFFE0FC00,
           0x19E01000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -19406,7 +19406,7 @@ const bal_decoder_instruction_metadata_t
         { "LDCLRPL",
           0xFFE0FC00,
           0x19601000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22622,7 +22622,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETP",
           0xFFE0FC00,
           0x19203000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22634,7 +22634,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETPA",
           0xFFE0FC00,
           0x19A03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22646,7 +22646,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETPAL",
           0xFFE0FC00,
           0x19E03000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -22658,7 +22658,7 @@ const bal_decoder_instruction_metadata_t
         { "LDSETPL",
           0xFFE0FC00,
           0x19603000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40634,7 +40634,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPP",
           0xFFE0FC00,
           0x19208000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40646,7 +40646,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPPA",
           0xFFE0FC00,
           0x19A08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40658,7 +40658,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPPAL",
           0xFFE0FC00,
           0x19E08000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -40670,7 +40670,7 @@ const bal_decoder_instruction_metadata_t
         { "SWPPL",
           0xFFE0FC00,
           0x19608000,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

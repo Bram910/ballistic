@@ -78,8 +78,7 @@ local function derive_opcode(mnemonic)
     end
 
     -- Synchronisation instructions, executed by the runtime atomic helper. CLREX clears its
-    -- exclusive monitor. The 128-bit LSE forms (LDCLRP, LDSETP, SWPP) and the SIMD LDAP1/STL1 are
-    -- not implemented.
+    -- exclusive monitor.
     if m == "CLREX" then
         return "OPCODE_ATOMIC"
     end
@@ -120,7 +119,7 @@ local function derive_opcode(mnemonic)
                                  "LDUMIN", "SWP" }) do
         local suffix = m:sub(#operation + 1)
 
-        if m:sub(1, #operation) == operation and suffix:sub(1, 1) ~= "P" then
+        if m:sub(1, #operation) == operation then
             return "OPCODE_ATOMIC"
         end
     end

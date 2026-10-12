@@ -800,6 +800,48 @@ test_Rcpc3_VectorFormsRoundTrip(void)
     TEST_ASSERT_EQUAL_HEX64(0x5555U, g_cpu.v[3][1]);
 }
 
+static void
+test_Lse128_OperationsReturnTheOldPair(void)
+{
+    // SWPP X1, X2, [X10]; LDSETP X3, X4, [X10]; LDCLRPAL X5, X6, [X10].
+    const uint32_t program[] = { 0x19228141U, 0x19243143U, 0x19E61145U };
+    load_program(program, 3U);
+    const uint64_t initial[2] = { 0x1111111111111111ULL, 0x2222222222222222ULL };
+    (void)memcpy(g_memory + 0x2000U, initial, sizeof(initial));
+    g_cpu.x[10] = 0x2000U;
+    g_cpu.x[1]  = 0x00000000000000F0ULL;
+    g_cpu.x[2]  = 0x0F00000000000000ULL;
+    g_cpu.x[3]  = 0x000000000000000FULL;
+    g_cpu.x[4]  = 0x00F0000000000000ULL;
+    g_cpu.x[5]  = 0x00000000000000F0ULL;
+    g_cpu.x[6]  = 0x0F00000000000000ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x1111111111111111ULL, g_cpu.x[1]);
+    TEST_ASSERT_EQUAL_HEX64(0x2222222222222222ULL, g_cpu.x[2]);
+    TEST_ASSERT_EQUAL_HEX64(0xF0U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x0F00000000000000ULL, g_cpu.x[4]);
+    TEST_ASSERT_EQUAL_HEX64(0xFFU, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_HEX64(0x0FF0000000000000ULL, g_cpu.x[6]);
+
+    uint64_t final[2];
+    (void)memcpy(final, g_memory + 0x2000U, sizeof(final));
+    TEST_ASSERT_EQUAL_HEX64(0x0FU, final[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x00F0000000000000ULL, final[1]);
+}
+
+static void
+test_Lse128_MisalignedAddressRaisesDataAbort(void)
+{
+    // SWPP X1, X2, [X10] at an address that is only 8-byte aligned.
+    const uint32_t program[] = { 0x19228141U };
+    load_program(program, 1U);
+    g_cpu.x[10] = 0x2008U;
+
+    TEST_ASSERT_NOT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL(BAL_EXCEPTION_DATA_ABORT, g_cpu.exception);
+}
+
 int
 main(void)
 {
@@ -827,6 +869,8 @@ main(void)
     RUN_TEST(test_Cssc_MinimumMaximum);
     RUN_TEST(test_Rcpc3_WritebackFormsRoundTrip);
     RUN_TEST(test_Rcpc3_VectorFormsRoundTrip);
+    RUN_TEST(test_Lse128_OperationsReturnTheOldPair);
+    RUN_TEST(test_Lse128_MisalignedAddressRaisesDataAbort);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

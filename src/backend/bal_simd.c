@@ -4101,6 +4101,22 @@ bal_is_simd_supported(const uint32_t instruction)
 }
 
 uint64_t
+bal_simd_half_to_single(const uint64_t fpcr, const uint64_t half)
+{
+    return half_to_single(fpcr, half);
+}
+
+uint32_t
+bal_simd_bfloat_dot_add(const uint32_t addend,
+                        const uint16_t a1,
+                        const uint16_t a2,
+                        const uint16_t b1,
+                        const uint16_t b2)
+{
+    return bfloat_dot_add(addend, a1, a2, b1, b2);
+}
+
+uint64_t
 bal_execute_simd(bal_cpu_t *cpu, const uint32_t instruction)
 {
     simd_t simd = { .cpu = cpu, .flags = 0U };

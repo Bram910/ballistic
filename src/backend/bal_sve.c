@@ -1,5 +1,7 @@
 #include "backend/bal_sve.h"
 
+#include "backend/bal_float.h"
+#include "backend/bal_simd.h"
 #include "bal_attributes.h"
 #include <string.h>
 
@@ -3525,6 +3527,1359 @@ prefetch(sve_t *sve, const uint32_t instruction)
 }
 
 // -----------------------------------------------------------------------------
+// Floating point
+// -----------------------------------------------------------------------------
+
+#define FPSR_IOC (1ULL << 0U)
+#define FPSR_IDC (1ULL << 7U)
+
+static uint64_t
+fp(sve_t                      *sve,
+   const uint32_t              esize,
+   const bal_float_operation_t operation,
+   const uint64_t              a,
+   const uint64_t              b,
+   const uint64_t              c)
+{
+    return bal_float_element(sve->cpu->fpcr, &sve->flags, esize, operation, a, b, c);
+}
+
+static uint64_t
+fp_negate(const uint64_t value, const uint32_t esize)
+{
+    return value ^ (1ULL << (esize - 1U));
+}
+
+static uint32_t
+fp_fraction_bits(const uint32_t esize)
+{
+    return 16U == esize ? 10U : (32U == esize ? 23U : 52U);
+}
+
+static bool
+fp_is_nan(const uint64_t value, const uint32_t esize)
+{
+    const uint32_t fraction = fp_fraction_bits(esize);
+    const uint64_t exponent = mask_of(esize - 1U - fraction);
+    return ((value >> fraction) & exponent) == exponent && 0U != (value & mask_of(fraction));
+}
+
+/// The FP element size of a size field: 1, 2 and 3 are half, single and double precision.
+static uint32_t
+fp_esize(const uint32_t size)
+{
+    return 0U == size ? 0U : 8U << size;
+}
+
+/// 2^exponent, which must be a normal number of `esize` bits.
+static uint64_t
+fp_power_of_two(const int32_t exponent, const uint32_t esize)
+{
+    const uint32_t fraction = fp_fraction_bits(esize);
+    const int32_t  bias     = (int32_t)mask_of(esize - 2U - fraction);
+    return (uint64_t)(exponent + bias) << fraction;
+}
+
+/// FSCALE on one element: value * 2^scale with a single rounding.
+static uint64_t
+fp_scale(sve_t *sve, const uint32_t esize, const uint64_t value, int64_t scale)
+{
+    const uint32_t fraction = fp_fraction_bits(esize);
+    const int32_t  bias     = (int32_t)mask_of(esize - 2U - fraction);
+    const int32_t  minimum  = 1 - bias;
+
+    // Multiplying by one processes NaNs and flushes denormal inputs.
+    uint64_t result = fp(sve, esize, BAL_FLOAT_MULTIPLY, value, fp_power_of_two(0, esize), 0U);
+    const uint64_t exponent = (result >> fraction) & mask_of(esize - 1U - fraction);
+
+    if (0U == (result & mask_of(esize - 1U)) || exponent == mask_of(esize - 1U - fraction))
+    {
+        return result;
+    }
+
+    // Far enough to overflow or underflow anything; the loops below stay short.
+    const int64_t limit = 4 * bias + (int64_t)fraction;
+    scale               = scale > limit ? limit : (scale < -limit ? -limit : scale);
+
+    // Scaling up is exact until it overflows, and stays overflowed.
+    while (scale > 0)
+    {
+        const int64_t step = scale < bias ? scale : bias;
+        result
+            = fp(sve, esize, BAL_FLOAT_MULTIPLY, result, fp_power_of_two((int32_t)step, esize), 0U);
+        scale -= step;
+    }
+
+    // Scaling down is exact while the result stays normal; the step that leaves the normal range
+    // is the only one that rounds.
+    while (scale < 0)
+    {
+        const int64_t room = (int64_t)((result >> fraction) & mask_of(esize - 1U - fraction)) - 1;
+
+        if (room <= 0)
+        {
+            const int64_t step = scale < minimum ? minimum : scale;
+            result             = fp(
+                sve, esize, BAL_FLOAT_MULTIPLY, result, fp_power_of_two((int32_t)step, esize), 0U);
+            break;
+        }
+
+        int64_t step = scale < -room ? -room : scale;
+        step         = step < minimum ? minimum : step;
+        result
+            = fp(sve, esize, BAL_FLOAT_MULTIPLY, result, fp_power_of_two((int32_t)step, esize), 0U);
+        scale -= step;
+    }
+
+    return result;
+}
+
+/// FADD, FSUB, FMUL, FTSMUL, FRECPS and FRSQRTS (unpredicated): 01100101 size 0 Zm 000 opc Zn Zd.
+static sve_result_t
+float_arithmetic_unpredicated(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc   = (instruction >> 10U) & 0x7U;
+
+    if (0U == esize || 4U == opc || 5U == opc)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    static const bal_float_operation_t OPERATIONS[8] = {
+        BAL_FLOAT_ADD,
+        BAL_FLOAT_SUBTRACT,
+        BAL_FLOAT_MULTIPLY,
+        BAL_FLOAT_MULTIPLY,
+        BAL_FLOAT_ADD,
+        BAL_FLOAT_ADD,
+        BAL_FLOAT_RECIPROCAL_STEP,
+        BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_STEP,
+    };
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a = get_element(&n, e, esize);
+        const uint64_t b = get_element(&m, e, esize);
+        uint64_t       r = fp(sve, esize, OPERATIONS[opc], a, 3U == opc ? a : b, 0U);
+
+        // FTSMUL: the square, with its sign from bit 0 of the other operand.
+        if (3U == opc && false == fp_is_nan(r, esize))
+        {
+            r = (r & mask_of(esize - 1U)) | ((b & 1U) << (esize - 1U));
+        }
+
+        set_element(&result, e, esize, r);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// One predicated binary operation (opc of 01100101 size 00 opc 100 Pg Zm Zdn) on `a` (Zdn) and
+/// `b`.
+static uint64_t
+float_binary(
+    sve_t *sve, const uint32_t esize, const uint32_t opc, const uint64_t a, const uint64_t b)
+{
+    switch (opc)
+    {
+        case 0x0U:
+            return fp(sve, esize, BAL_FLOAT_ADD, a, b, 0U);
+        case 0x1U:
+            return fp(sve, esize, BAL_FLOAT_SUBTRACT, a, b, 0U);
+        case 0x2U:
+            return fp(sve, esize, BAL_FLOAT_MULTIPLY, a, b, 0U);
+        case 0x3U:
+            return fp(sve, esize, BAL_FLOAT_SUBTRACT, b, a, 0U);
+        case 0x4U:
+            return fp(sve, esize, BAL_FLOAT_MAXIMUM_NUMBER, a, b, 0U);
+        case 0x5U:
+            return fp(sve, esize, BAL_FLOAT_MINIMUM_NUMBER, a, b, 0U);
+        case 0x6U:
+            return fp(sve, esize, BAL_FLOAT_MAXIMUM, a, b, 0U);
+        case 0x7U:
+            return fp(sve, esize, BAL_FLOAT_MINIMUM, a, b, 0U);
+        case 0x8U:
+            return fp(sve, esize, BAL_FLOAT_ABSOLUTE_DIFFERENCE, a, b, 0U);
+        case 0x9U:
+            return fp_scale(sve, esize, a, sign_extend(b, esize));
+        case 0xAU:
+            return fp(sve, esize, BAL_FLOAT_MULTIPLY_EXTENDED, a, b, 0U);
+        case 0xCU:
+            return fp(sve, esize, BAL_FLOAT_DIVIDE, b, a, 0U);
+        default:
+            return fp(sve, esize, BAL_FLOAT_DIVIDE, a, b, 0U);
+    }
+}
+
+/// FADD, FSUB, FMUL, FSUBR, FMAXNM, FMINNM, FMAX, FMIN, FABD, FSCALE, FMULX, FDIVR and FDIV
+/// (predicated): 01100101 size 00 opc 100 Pg Zm Zdn.
+static sve_result_t
+float_arithmetic_predicated(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc   = (instruction >> 16U) & 0xFU;
+
+    if (0U == esize || 0xBU == opc || opc >= 0xEU)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            set_element(
+                &result,
+                e,
+                esize,
+                float_binary(
+                    sve, esize, opc, get_element(&result, e, esize), get_element(&m, e, esize)));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The FP immediates 0.5, 1.0, 2.0 and 0.0 of each size.
+static uint64_t
+fp_constant(const uint32_t esize, const uint32_t which)
+{
+    static const uint64_t CONSTANTS[3][4] = {
+        { 0x3800U, 0x3C00U, 0x4000U, 0U },
+        { 0x3F000000U, 0x3F800000U, 0x40000000U, 0U },
+        { 0x3FE0000000000000ULL, 0x3FF0000000000000ULL, 0x4000000000000000ULL, 0U },
+    };
+    return CONSTANTS[16U == esize ? 0U : (32U == esize ? 1U : 2U)][which];
+}
+
+/// FADD, FSUB, FMUL, FSUBR, FMAXNM, FMINNM, FMAX and FMIN with an immediate: 01100101 size 011
+/// opc 100 Pg 0000 i1 Zdn.
+static sve_result_t
+float_immediate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc   = (instruction >> 16U) & 0x7U;
+    const bool     i1    = 0U != (instruction & 0x20U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    // 0.5 or 1.0, 0.5 or 2.0 for FMUL, and 0.0 or 1.0 for the maxima and minima.
+    const uint32_t which
+        = opc >= 4U ? (true == i1 ? 1U : 3U) : (true == i1 ? (2U == opc ? 2U : 1U) : 0U);
+    const uint64_t constant = fp_constant(esize, which);
+    const uint16_t pg       = read_p(sve, (instruction >> 10U) & 0x7U);
+    vector_t       result   = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            set_element(&result,
+                        e,
+                        esize,
+                        float_binary(sve, esize, opc, get_element(&result, e, esize), constant));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FMLA, FMLS, FNMLA and FNMLS (01100101 size 1 Zm 0 opc Pg Zn Zda) and FMAD, FMSB, FNMAD and
+/// FNMSB (01100101 size 1 Za 1 opc Pg Zm Zdn).
+static sve_result_t
+float_multiply_add(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize  = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc    = (instruction >> 13U) & 0x3U;
+    const bool     is_mad = 0U != (instruction & 0x8000U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t d     = instruction & 0x1FU;
+    const uint16_t pg    = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t first = read_z(sve, true == is_mad ? d : (instruction >> 5U) & 0x1FU);
+    const vector_t second
+        = read_z(sve, true == is_mad ? (instruction >> 5U) & 0x1FU : (instruction >> 16U) & 0x1FU);
+    const vector_t addend = read_z(sve, true == is_mad ? (instruction >> 16U) & 0x1FU : d);
+    vector_t       result = read_z(sve, d);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        uint64_t a = get_element(&first, e, esize);
+        uint64_t c = get_element(&addend, e, esize);
+        a          = 1U == opc || 2U == opc ? fp_negate(a, esize) : a;
+        c          = opc >= 2U ? fp_negate(c, esize) : c;
+        set_element(&result,
+                    e,
+                    esize,
+                    fp(sve, esize, BAL_FLOAT_MULTIPLY_ADD, a, get_element(&second, e, esize), c));
+    }
+
+    write_z(sve, d, result);
+    return SVE_OK;
+}
+
+/// One FP comparison: 0 GE, 1 GT, 2 EQ, 3 NE, 4 UO, 5 ACGE, 7 ACGT.
+static bool
+float_compare(
+    sve_t *sve, const uint32_t esize, const uint32_t op, const uint64_t a, const uint64_t b)
+{
+    switch (op)
+    {
+        case 0U:
+            return 0U != fp(sve, esize, BAL_FLOAT_COMPARE_GREATER_EQUAL, a, b, 0U);
+        case 1U:
+            return 0U != fp(sve, esize, BAL_FLOAT_COMPARE_GREATER, a, b, 0U);
+        case 2U:
+            return 0U != fp(sve, esize, BAL_FLOAT_COMPARE_EQUAL, a, b, 0U);
+        case 3U:
+            return 0U == fp(sve, esize, BAL_FLOAT_COMPARE_EQUAL, a, b, 0U);
+        case 4U:
+            // The quiet comparison raises the same exceptions as an unordered one.
+            (void)fp(sve, esize, BAL_FLOAT_COMPARE_EQUAL, a, b, 0U);
+            return true == fp_is_nan(a, esize) || true == fp_is_nan(b, esize);
+        case 5U:
+            return 0U != fp(sve, esize, BAL_FLOAT_ABSOLUTE_COMPARE_GREATER_EQUAL, a, b, 0U);
+        default:
+            return 0U != fp(sve, esize, BAL_FLOAT_ABSOLUTE_COMPARE_GREATER, a, b, 0U);
+    }
+}
+
+/// FCMGE, FCMGT, FCMEQ, FCMNE, FCMUO, FACGE and FACGT (vectors, 01100101 size 0 Zm op 1 cmp Pg Zn
+/// cmp Pd) and FCMGE, FCMGT, FCMLT, FCMLE, FCMEQ and FCMNE (with zero, 01100101 size 0100 eq lt
+/// 001 Pg Zn ne Pd).
+static sve_result_t
+float_compare_vectors(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize     = fp_esize((instruction >> 22U) & 0x3U);
+    const bool     with_zero = 0x65102000U == (instruction & 0xFF3CE000U);
+    uint32_t       op;
+    bool           swap = false;
+
+    if (true == with_zero)
+    {
+        static const int8_t ZERO_OPS[8] = { 0, 1, 1, 0, 2, -1, 3, -1 };
+        const uint32_t index = (((instruction >> 16U) & 0x3U) << 1U) | ((instruction >> 4U) & 1U);
+        op                   = ZERO_OPS[index] < 0 ? 6U : (uint32_t)ZERO_OPS[index];
+        swap                 = 2U == index || 3U == index;
+    }
+    else
+    {
+        op = (((instruction >> 15U) & 1U) << 2U) | (((instruction >> 13U) & 1U) << 1U)
+             | ((instruction >> 4U) & 1U);
+    }
+
+    if (0U == esize || 6U == op)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n  = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m  = read_z(sve, (instruction >> 16U) & 0x1FU);
+    uint16_t       pd = 0U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            const uint64_t a = get_element(&n, e, esize);
+            const uint64_t b = true == with_zero ? 0U : get_element(&m, e, esize);
+            pd               = set_active(pd,
+                            e,
+                            esize,
+                            true == swap ? float_compare(sve, esize, op, b, a)
+                                                       : float_compare(sve, esize, op, a, b));
+        }
+    }
+
+    sve->cpu->p[instruction & 0xFU] = pd;
+    return SVE_OK;
+}
+
+/// The identity of a reduction: +0 for FADDV, the default NaN for FMAXNMV and FMINNMV, -infinity
+/// for FMAXV and +infinity for FMINV.
+static uint64_t
+fp_identity(const uint32_t esize, const uint32_t opc)
+{
+    const uint32_t fraction = fp_fraction_bits(esize);
+    const uint64_t infinity = mask_of(esize - 1U - fraction) << fraction;
+
+    switch (opc)
+    {
+        case 4U:
+        case 5U:
+            return infinity | (1ULL << (fraction - 1U));
+        case 6U:
+            return infinity | (1ULL << (esize - 1U));
+        case 7U:
+            return infinity;
+        default:
+            return 0U;
+    }
+}
+
+static const bal_float_operation_t REDUCTIONS[8] = {
+    BAL_FLOAT_ADD,
+    BAL_FLOAT_ADD,
+    BAL_FLOAT_ADD,
+    BAL_FLOAT_ADD,
+    BAL_FLOAT_MAXIMUM_NUMBER,
+    BAL_FLOAT_MINIMUM_NUMBER,
+    BAL_FLOAT_MAXIMUM,
+    BAL_FLOAT_MINIMUM,
+};
+
+/// The pairwise tree reduction of `count` values.
+static uint64_t
+fp_reduce(sve_t                      *sve,
+          const uint32_t              esize,
+          const bal_float_operation_t operation,
+          const uint64_t             *values,
+          const uint32_t              count)
+{
+    if (1U == count)
+    {
+        return values[0];
+    }
+
+    const uint64_t low  = fp_reduce(sve, esize, operation, values, count / 2U);
+    const uint64_t high = fp_reduce(sve, esize, operation, values + count / 2U, count / 2U);
+    return fp(sve, esize, operation, low, high, 0U);
+}
+
+/// FADDV, FMAXNMV, FMINNMV, FMAXV and FMINV: 01100101 size 000 opc 001 Pg Zn Vd.
+static sve_result_t
+float_reduction(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc   = (instruction >> 16U) & 0x7U;
+
+    if (0U == esize || (0U != opc && opc < 4U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n  = read_z(sve, (instruction >> 5U) & 0x1FU);
+    uint64_t       values[8];
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        values[e]
+            = true == is_active(pg, e, esize) ? get_element(&n, e, esize) : fp_identity(esize, opc);
+    }
+
+    const vector_t result
+        = { { fp_reduce(sve, esize, REDUCTIONS[opc], values, elements_of(esize)), 0U } };
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FADDA: 01100101 size 011000 001 Pg Zm Vdn, adding the active elements in order.
+static sve_result_t
+float_add_ordered(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg  = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t m   = read_z(sve, (instruction >> 5U) & 0x1FU);
+    uint64_t       sum = sve->cpu->v[instruction & 0x1FU][0] & mask_of(esize);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            sum = fp(sve, esize, BAL_FLOAT_ADD, sum, get_element(&m, e, esize), 0U);
+        }
+    }
+
+    const vector_t result = { { sum, 0U } };
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FADDP, FMAXNMP, FMINNMP, FMAXP and FMINP: 01100100 size 010 opc 100 Pg Zm Zdn.
+static sve_result_t
+float_pairwise(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+    const uint32_t opc   = (instruction >> 16U) & 0x7U;
+
+    if (0U == esize || (0U != opc && opc < 4U))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n      = read_z(sve, instruction & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = n;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            const vector_t *source = 0U == (e & 1U) ? &n : &m;
+            const uint32_t  pair   = e & ~1U;
+            set_element(&result,
+                        e,
+                        esize,
+                        fp(sve,
+                           esize,
+                           REDUCTIONS[opc],
+                           get_element(source, pair, esize),
+                           get_element(source, pair + 1U, esize),
+                           0U));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FLOGB on one element: the unbiased exponent as a signed integer.
+static uint64_t
+fp_log_b(sve_t *sve, const uint32_t esize, const uint64_t value)
+{
+    const uint32_t fraction_bits = fp_fraction_bits(esize);
+    const uint64_t exponent_mask = mask_of(esize - 1U - fraction_bits);
+    const int64_t  bias          = (int64_t)(exponent_mask >> 1U);
+    const uint64_t exponent      = (value >> fraction_bits) & exponent_mask;
+    const uint64_t fraction      = value & mask_of(fraction_bits);
+    const bool     flush = 0U != (sve->cpu->fpcr & (16U == esize ? (1ULL << 19U) : (1ULL << 24U)));
+
+    if (0U == exponent)
+    {
+        if (0U != fraction)
+        {
+            if (false == flush)
+            {
+                return (uint64_t)(1 - bias
+                                  - (int64_t)(fraction_bits
+                                              - (63U - (uint32_t)__builtin_clzll(fraction))))
+                       & mask_of(esize);
+            }
+
+            sve->flags |= FPSR_IDC;
+        }
+    }
+    else if (exponent == exponent_mask)
+    {
+        if (0U == fraction)
+        {
+            return mask_of(esize - 1U);
+        }
+    }
+    else
+    {
+        return (uint64_t)((int64_t)exponent - bias) & mask_of(esize);
+    }
+
+    // NaN or zero.
+    sve->flags |= FPSR_IOC;
+    return 1ULL << (esize - 1U);
+}
+
+/// FRINTN, FRINTP, FRINTM, FRINTZ, FRINTA, FRINTX and FRINTI (01100101 size 000 rmode 101 Pg Zn
+/// Zd), FRECPX and FSQRT (... size 00110 op 101 ...) and FLOGB (01100101 00011 size 0 101 ...).
+static sve_result_t
+float_unary(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_log_b = 0x6518A000U == (instruction & 0xFFF9E000U);
+    const uint32_t esize
+        = fp_esize(true == is_log_b ? (instruction >> 17U) & 0x3U : (instruction >> 22U) & 0x3U);
+    const uint32_t opc = (instruction >> 16U) & 0xFU;
+
+    if (0U == esize || (false == is_log_b && 5U == opc))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint16_t pg         = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n          = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result     = read_z(sve, instruction & 0x1FU);
+    const uint32_t fpcr_rmode = (uint32_t)(sve->cpu->fpcr >> 22U) & 0x3U;
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        const uint64_t a = get_element(&n, e, esize);
+        uint64_t       r;
+
+        if (true == is_log_b)
+        {
+            r = fp_log_b(sve, esize, a);
+        }
+        else if (0xCU == opc)
+        {
+            r = fp(sve, esize, BAL_FLOAT_RECIPROCAL_EXPONENT, a, 0U, 0U);
+        }
+        else if (0xDU == opc)
+        {
+            r = fp(sve, esize, BAL_FLOAT_SQUARE_ROOT, a, 0U, 0U);
+        }
+        else
+        {
+            const uint32_t rmode = opc >= 6U ? fpcr_rmode : opc;
+            r = bal_float_round_element(sve->cpu->fpcr, &sve->flags, esize, a, rmode, 6U == opc);
+        }
+
+        set_element(&result, e, esize, r);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The kinds of conversion.
+typedef enum
+{
+    CONVERT_FLOAT,
+    CONVERT_ODD,
+    CONVERT_BFLOAT,
+    CONVERT_TO_INTEGER,
+    CONVERT_FROM_INTEGER,
+} convert_kind_t;
+
+typedef struct
+{
+    uint32_t value;
+    uint8_t  kind;
+    uint8_t  from;
+    uint8_t  to;
+    uint8_t  container;
+} convert_t;
+
+/// The predicated conversions, by their encoding with Pg, Zn, Zd and the U bit (bit 16 of the
+/// integer conversions) clear.
+static const convert_t CONVERSIONS[] = {
+    { 0x6588A000U, CONVERT_FLOAT, 32U, 16U, 32U },
+    { 0x6589A000U, CONVERT_FLOAT, 16U, 32U, 32U },
+    { 0x65C8A000U, CONVERT_FLOAT, 64U, 16U, 64U },
+    { 0x65C9A000U, CONVERT_FLOAT, 16U, 64U, 64U },
+    { 0x65CAA000U, CONVERT_FLOAT, 64U, 32U, 64U },
+    { 0x65CBA000U, CONVERT_FLOAT, 32U, 64U, 64U },
+    { 0x650AA000U, CONVERT_ODD, 64U, 32U, 64U },
+    { 0x658AA000U, CONVERT_BFLOAT, 32U, 16U, 32U },
+    { 0x655AA000U, CONVERT_TO_INTEGER, 16U, 16U, 16U },
+    { 0x655CA000U, CONVERT_TO_INTEGER, 16U, 32U, 32U },
+    { 0x655EA000U, CONVERT_TO_INTEGER, 16U, 64U, 64U },
+    { 0x659CA000U, CONVERT_TO_INTEGER, 32U, 32U, 32U },
+    { 0x65D8A000U, CONVERT_TO_INTEGER, 64U, 32U, 64U },
+    { 0x65DCA000U, CONVERT_TO_INTEGER, 32U, 64U, 64U },
+    { 0x65DEA000U, CONVERT_TO_INTEGER, 64U, 64U, 64U },
+    { 0x6552A000U, CONVERT_FROM_INTEGER, 16U, 16U, 16U },
+    { 0x6554A000U, CONVERT_FROM_INTEGER, 32U, 16U, 32U },
+    { 0x6556A000U, CONVERT_FROM_INTEGER, 64U, 16U, 64U },
+    { 0x6594A000U, CONVERT_FROM_INTEGER, 32U, 32U, 32U },
+    { 0x65D0A000U, CONVERT_FROM_INTEGER, 32U, 64U, 64U },
+    { 0x65D4A000U, CONVERT_FROM_INTEGER, 64U, 32U, 64U },
+    { 0x65D6A000U, CONVERT_FROM_INTEGER, 64U, 64U, 64U },
+};
+
+/// One conversion of `value`.
+static uint64_t
+convert_element(sve_t *sve, const convert_t *convert, const bool is_unsigned, const uint64_t value)
+{
+    const uint64_t fpcr = sve->cpu->fpcr;
+    const uint64_t a    = value & mask_of(convert->from);
+
+    switch (convert->kind)
+    {
+        case CONVERT_FLOAT:
+            return bal_float_convert_element(fpcr, &sve->flags, convert->from, convert->to, a);
+        case CONVERT_ODD:
+            return bal_float_narrow_odd_element(fpcr, &sve->flags, a);
+        case CONVERT_BFLOAT:
+            return bal_float_to_bfloat16_element(fpcr, &sve->flags, a);
+        case CONVERT_TO_INTEGER: {
+            const uint64_t r = bal_float_to_integer_element(
+                fpcr, &sve->flags, convert->from, a, 0U, 3U, is_unsigned, convert->to);
+            return true == is_unsigned
+                       ? r & mask_of(convert->to)
+                       : (uint64_t)sign_extend(r & mask_of(convert->to), convert->to);
+        }
+        default:
+            return bal_float_from_integer_element(
+                fpcr, &sve->flags, convert->to, a, 0U, is_unsigned, convert->from);
+    }
+}
+
+/// FCVT, FCVTX, BFCVT, FCVTZS, FCVTZU, SCVTF and UCVTF: 01100101 opc 0 1x opc2 101 Pg Zn Zd.
+static sve_result_t
+float_convert(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t   key     = instruction & 0xFFFFE000U;
+    const convert_t *convert = NULL;
+
+    for (size_t i = 0U; i < sizeof(CONVERSIONS) / sizeof(CONVERSIONS[0]); ++i)
+    {
+        const bool is_integer = CONVERSIONS[i].kind >= CONVERT_TO_INTEGER;
+
+        if (CONVERSIONS[i].value == (true == is_integer ? key & ~0x10000U : key))
+        {
+            convert = &CONVERSIONS[i];
+        }
+    }
+
+    if (NULL == convert)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool     is_unsigned = 0U != (instruction & 0x10000U);
+    const uint32_t esize       = convert->container;
+    const uint16_t pg          = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result      = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (true == is_active(pg, e, esize))
+        {
+            set_element(&result,
+                        e,
+                        esize,
+                        convert_element(sve, convert, is_unsigned, get_element(&n, e, esize)));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FCVTNT, FCVTLT, FCVTXNT and BFCVTNT: 01100100 opc 0010 opc2 101 Pg Zn Zd, converting between the
+/// odd narrow elements and the wide ones.
+static sve_result_t
+float_convert_top(sve_t *sve, const uint32_t instruction)
+{
+    static const convert_t TOP[] = {
+        { 0x6488A000U, CONVERT_FLOAT, 32U, 16U, 32U },
+        { 0x6489A000U, CONVERT_FLOAT, 16U, 32U, 32U },
+        { 0x64CAA000U, CONVERT_FLOAT, 64U, 32U, 64U },
+        { 0x64CBA000U, CONVERT_FLOAT, 32U, 64U, 64U },
+        { 0x640AA000U, CONVERT_ODD, 64U, 32U, 64U },
+        { 0x648AA000U, CONVERT_BFLOAT, 32U, 16U, 32U },
+    };
+    const convert_t *convert = NULL;
+
+    for (size_t i = 0U; i < sizeof(TOP) / sizeof(TOP[0]); ++i)
+    {
+        convert = TOP[i].value == (instruction & 0xFFFFE000U) ? &TOP[i] : convert;
+    }
+
+    if (NULL == convert)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t esize     = convert->container;
+    const uint32_t half      = esize / 2U;
+    const bool     is_narrow = convert->to < convert->from;
+    const uint16_t pg        = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result    = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        if (false == is_active(pg, e, esize))
+        {
+            continue;
+        }
+
+        if (true == is_narrow)
+        {
+            set_element(&result,
+                        2U * e + 1U,
+                        half,
+                        convert_element(sve, convert, false, get_element(&n, e, esize)));
+        }
+        else
+        {
+            set_element(&result,
+                        e,
+                        esize,
+                        convert_element(sve, convert, false, get_element(&n, 2U * e + 1U, half)));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FRECPE and FRSQRTE: 01100101 size 00111 op 001100 Zn Zd.
+static sve_result_t
+float_estimate(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bal_float_operation_t operation = 0U != (instruction & 0x10000U)
+                                                ? BAL_FLOAT_RECIPROCAL_SQUARE_ROOT_ESTIMATE
+                                                : BAL_FLOAT_RECIPROCAL_ESTIMATE;
+    const vector_t              n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t                    result    = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        set_element(
+            &result, e, esize, fp(sve, esize, operation, get_element(&n, e, esize), 0U, 0U));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FEXPA: 00000100 size 100000 101110 Zn Zd. The fraction of 2^(i/N) from a table, with the
+/// exponent from the next bits of the operand.
+static sve_result_t
+float_exponential(sve_t *sve, const uint32_t instruction)
+{
+    static const uint16_t HALF[32] = {
+        0x0000U, 0x0016U, 0x002DU, 0x0045U, 0x005DU, 0x0075U, 0x008EU, 0x00A8U,
+        0x00C2U, 0x00DCU, 0x00F8U, 0x0114U, 0x0130U, 0x014DU, 0x016BU, 0x0189U,
+        0x01A8U, 0x01C8U, 0x01E8U, 0x0209U, 0x022BU, 0x024EU, 0x0271U, 0x0295U,
+        0x02BAU, 0x02E0U, 0x0306U, 0x032EU, 0x0356U, 0x037FU, 0x03A9U, 0x03D4U,
+    };
+    static const uint32_t SINGLE[64] = {
+        0x000000U, 0x0164D2U, 0x02CD87U, 0x043A29U, 0x05AAC3U, 0x071F62U, 0x08980FU, 0x0A14D5U,
+        0x0B95C2U, 0x0D1ADFU, 0x0EA43AU, 0x1031DCU, 0x11C3D3U, 0x135A2BU, 0x14F4F0U, 0x16942DU,
+        0x1837F0U, 0x19E046U, 0x1B8D3AU, 0x1D3EDAU, 0x1EF532U, 0x20B051U, 0x227043U, 0x243516U,
+        0x25FED7U, 0x27CD94U, 0x29A15BU, 0x2B7A3AU, 0x2D583FU, 0x2F3B79U, 0x3123F6U, 0x3311C4U,
+        0x3504F3U, 0x36FD92U, 0x38FBAFU, 0x3AFF5BU, 0x3D08A4U, 0x3F179AU, 0x412C4DU, 0x4346CDU,
+        0x45672AU, 0x478D75U, 0x49B9BEU, 0x4BEC15U, 0x4E248CU, 0x506334U, 0x52A81EU, 0x54F35BU,
+        0x5744FDU, 0x599D16U, 0x5BFBB8U, 0x5E60F5U, 0x60CCDFU, 0x633F89U, 0x65B907U, 0x68396AU,
+        0x6AC0C7U, 0x6D4F30U, 0x6FE4BAU, 0x728177U, 0x75257DU, 0x77D0DFU, 0x7A83B3U, 0x7D3E0CU,
+    };
+    static const uint64_t DOUBLE[64] = {
+        0x0000000000000ULL, 0x02C9A3E778061ULL, 0x059B0D3158574ULL, 0x0874518759BC8ULL,
+        0x0B5586CF9890FULL, 0x0E3EC32D3D1A2ULL, 0x11301D0125B51ULL, 0x1429AAEA92DE0ULL,
+        0x172B83C7D517BULL, 0x1A35BEB6FCB75ULL, 0x1D4873168B9AAULL, 0x2063B88628CD6ULL,
+        0x2387A6E756238ULL, 0x26B4565E27CDDULL, 0x29E9DF51FDEE1ULL, 0x2D285A6E4030BULL,
+        0x306FE0A31B715ULL, 0x33C08B26416FFULL, 0x371A7373AA9CBULL, 0x3A7DB34E59FF7ULL,
+        0x3DEA64C123422ULL, 0x4160A21F72E2AULL, 0x44E086061892DULL, 0x486A2B5C13CD0ULL,
+        0x4BFDAD5362A27ULL, 0x4F9B2769D2CA7ULL, 0x5342B569D4F82ULL, 0x56F4736B527DAULL,
+        0x5AB07DD485429ULL, 0x5E76F15AD2148ULL, 0x6247EB03A5585ULL, 0x6623882552225ULL,
+        0x6A09E667F3BCDULL, 0x6DFB23C651A2FULL, 0x71F75E8EC5F74ULL, 0x75FEB564267C9ULL,
+        0x7A11473EB0187ULL, 0x7E2F336CF4E62ULL, 0x82589994CCE13ULL, 0x868D99B4492EDULL,
+        0x8ACE5422AA0DBULL, 0x8F1AE99157736ULL, 0x93737B0CDC5E5ULL, 0x97D829FDE4E50ULL,
+        0x9C49182A3F090ULL, 0xA0C667B5DE565ULL, 0xA5503B23E255DULL, 0xA9E6B5579FDBFULL,
+        0xAE89F995AD3ADULL, 0xB33A2B84F15FBULL, 0xB7F76F2FB5E47ULL, 0xBCC1E904BC1D2ULL,
+        0xC199BDD85529CULL, 0xC67F12E57D14BULL, 0xCB720DCEF9069ULL, 0xD072D4A07897CULL,
+        0xD5818DCFBA487ULL, 0xDA9E603DB3285ULL, 0xDFC97337B9B5FULL, 0xE502EE78B3FF6ULL,
+        0xEA4AFA2A490DAULL, 0xEFA1BEE615A27ULL, 0xF50765B6E4540ULL, 0xFA7C1819E90D8ULL,
+    };
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a = get_element(&n, e, esize);
+        uint64_t       r;
+
+        if (16U == esize)
+        {
+            r = (((a >> 5U) & 0x1FU) << 10U) | HALF[a & 0x1FU];
+        }
+        else if (32U == esize)
+        {
+            r = (((a >> 6U) & 0xFFU) << 23U) | SINGLE[a & 0x3FU];
+        }
+        else
+        {
+            r = (((a >> 6U) & 0x7FFU) << 52U) | DOUBLE[a & 0x3FU];
+        }
+
+        set_element(&result, e, esize, r);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FTMAD: 01100101 size 010 imm3 100000 Zm Zdn, one step of a sine or cosine polynomial.
+static sve_result_t
+float_trig_multiply_add(sve_t *sve, const uint32_t instruction)
+{
+    static const uint64_t COEFFICIENTS[3][16] = {
+        { 0x3C00U,
+          0xB155U,
+          0x2030U,
+          0U,
+          0U,
+          0U,
+          0U,
+          0U,
+          0x3C00U,
+          0xB800U,
+          0x293AU,
+          0U,
+          0U,
+          0U,
+          0U,
+          0U },
+        { 0x3F800000U,
+          0xBE2AAAABU,
+          0x3C088886U,
+          0xB95008B9U,
+          0x36369D6DU,
+          0U,
+          0U,
+          0U,
+          0x3F800000U,
+          0xBF000000U,
+          0x3D2AAAA6U,
+          0xBAB60705U,
+          0x37CD37CCU,
+          0U,
+          0U,
+          0U },
+        { 0x3FF0000000000000ULL,
+          0xBFC5555555555543ULL,
+          0x3F8111111110F30CULL,
+          0xBF2A01A019B92FC6ULL,
+          0x3EC71DE351F3D22BULL,
+          0xBE5AE5E2B60F7B91ULL,
+          0x3DE5D8408868552FULL,
+          0x0000000000000000ULL,
+          0x3FF0000000000000ULL,
+          0xBFE0000000000000ULL,
+          0x3FA5555555555536ULL,
+          0xBF56C16C16C13A0BULL,
+          0x3EFA01A019B1E8D8ULL,
+          0xBE927E4F7282F468ULL,
+          0x3E21EE96D2641B13ULL,
+          0xBDA8F76380FBB401ULL },
+    };
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t table  = 16U == esize ? 0U : (32U == esize ? 1U : 2U);
+    const uint32_t imm    = (instruction >> 16U) & 0x7U;
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        uint64_t       b           = get_element(&m, e, esize);
+        const bool     is_negative = 0U != (b >> (esize - 1U));
+        const uint32_t index       = imm + (true == is_negative ? 8U : 0U);
+        b                          = b & mask_of(esize - 1U);
+        set_element(&result,
+                    e,
+                    esize,
+                    fp(sve,
+                       esize,
+                       BAL_FLOAT_MULTIPLY_ADD,
+                       get_element(&result, e, esize),
+                       b,
+                       COEFFICIENTS[table][index]));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FTSSEL: 00000100 size 1 Zm 101100 Zn Zd. One, or the operand, with bit 1 of Zm negating it.
+static sve_result_t
+float_trig_select(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = { { 0U, 0U } };
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t b = get_element(&m, e, esize);
+        uint64_t       r = 0U != (b & 1U) ? fp_constant(esize, 1U) : get_element(&n, e, esize);
+        r                = 0U != (b & 2U) ? fp_negate(r, esize) : r;
+        set_element(&result, e, esize, r);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// The complex pair products of FCMLA with rotation `rotation` added to the pairs of `result`,
+/// for the active elements; `index` picks one pair of `m` for all pairs, or is negative.
+static void
+complex_multiply_add(sve_t          *sve,
+                     vector_t       *result,
+                     const vector_t *n,
+                     const vector_t *m,
+                     const uint32_t  esize,
+                     const uint32_t  rotation,
+                     const int32_t   index,
+                     const uint16_t  pg)
+{
+    const uint32_t sel_a = rotation & 1U;
+    const bool     neg_r = (rotation & 1U) != ((rotation >> 1U) & 1U);
+    const bool     neg_i = 0U != (rotation & 2U);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        const uint32_t source = index < 0 ? pair : (uint32_t)index;
+        const uint64_t a      = get_element(n, 2U * pair + sel_a, esize);
+        uint64_t       b_r    = get_element(m, 2U * source + sel_a, esize);
+        uint64_t       b_i    = get_element(m, 2U * source + (sel_a ^ 1U), esize);
+        b_r                   = true == neg_r ? fp_negate(b_r, esize) : b_r;
+        b_i                   = true == neg_i ? fp_negate(b_i, esize) : b_i;
+
+        if (true == is_active(pg, 2U * pair, esize))
+        {
+            set_element(result,
+                        2U * pair,
+                        esize,
+                        fp(sve,
+                           esize,
+                           BAL_FLOAT_MULTIPLY_ADD,
+                           a,
+                           b_r,
+                           get_element(result, 2U * pair, esize)));
+        }
+
+        if (true == is_active(pg, 2U * pair + 1U, esize))
+        {
+            set_element(result,
+                        2U * pair + 1U,
+                        esize,
+                        fp(sve,
+                           esize,
+                           BAL_FLOAT_MULTIPLY_ADD,
+                           a,
+                           b_i,
+                           get_element(result, 2U * pair + 1U, esize)));
+        }
+    }
+}
+
+/// FCMLA (vectors): 01100100 size 0 Zm 0 rot Pg Zn Zda.
+static sve_result_t
+float_complex_multiply_add(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, (instruction >> 16U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+    complex_multiply_add(sve,
+                         &result,
+                         &n,
+                         &m,
+                         esize,
+                         (instruction >> 13U) & 0x3U,
+                         -1,
+                         read_p(sve, (instruction >> 10U) & 0x7U));
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FCMLA (indexed): 01100100 1x1 ... 0001 rot Zn Zda, half precision with i2 and Zm in bits 18:16
+/// or single precision with i1 and Zm in bits 19:16.
+static sve_result_t
+float_complex_multiply_add_indexed(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_single = 0U != (instruction & 0x400000U);
+    const uint32_t esize     = true == is_single ? 32U : 16U;
+    const uint32_t zm        = (instruction >> 16U) & (true == is_single ? 0xFU : 0x7U);
+    const int32_t  index     = (int32_t)((instruction >> (true == is_single ? 20U : 19U))
+                                    & (true == is_single ? 0x1U : 0x3U));
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m         = read_z(sve, zm);
+    vector_t       result    = read_z(sve, instruction & 0x1FU);
+    complex_multiply_add(sve, &result, &n, &m, esize, (instruction >> 10U) & 0x3U, index, 0xFFFFU);
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FCADD: 01100100 size 00000 rot 100 Pg Zm Zdn.
+static sve_result_t
+float_complex_add(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t esize = fp_esize((instruction >> 22U) & 0x3U);
+
+    if (0U == esize)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const bool     is_270 = 0U != (instruction & 0x10000U);
+    const uint16_t pg     = read_p(sve, (instruction >> 10U) & 0x7U);
+    const vector_t m      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t pair = 0U; pair < elements_of(esize) / 2U; ++pair)
+    {
+        const uint64_t real      = get_element(&m, 2U * pair, esize);
+        const uint64_t imaginary = get_element(&m, 2U * pair + 1U, esize);
+        const uint64_t to_real   = true == is_270 ? imaginary : fp_negate(imaginary, esize);
+        const uint64_t to_imag   = true == is_270 ? fp_negate(real, esize) : real;
+
+        if (true == is_active(pg, 2U * pair, esize))
+        {
+            set_element(
+                &result,
+                2U * pair,
+                esize,
+                fp(sve, esize, BAL_FLOAT_ADD, get_element(&result, 2U * pair, esize), to_real, 0U));
+        }
+
+        if (true == is_active(pg, 2U * pair + 1U, esize))
+        {
+            set_element(&result,
+                        2U * pair + 1U,
+                        esize,
+                        fp(sve,
+                           esize,
+                           BAL_FLOAT_ADD,
+                           get_element(&result, 2U * pair + 1U, esize),
+                           to_imag,
+                           0U));
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FMLA, FMLS (01100100 1 size 1 ... 00000 op Zn Zda) and FMUL (... 001000 Zn Zd) by element:
+/// half precision with i3h:i3l and Zm in bits 18:16, single with i2 and Zm in bits 18:16, double
+/// with i1 and Zm in bits 19:16.
+static sve_result_t
+float_multiply_indexed(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t size = (instruction >> 22U) & 0x3U;
+    uint32_t       esize;
+    uint32_t       index;
+    uint32_t       zm;
+
+    if (size < 2U)
+    {
+        esize = 16U;
+        index = ((instruction >> 20U) & 0x4U) | ((instruction >> 19U) & 0x3U);
+        zm    = (instruction >> 16U) & 0x7U;
+    }
+    else if (2U == size)
+    {
+        esize = 32U;
+        index = (instruction >> 19U) & 0x3U;
+        zm    = (instruction >> 16U) & 0x7U;
+    }
+    else
+    {
+        esize = 64U;
+        index = (instruction >> 20U) & 0x1U;
+        zm    = (instruction >> 16U) & 0xFU;
+    }
+
+    const bool     is_multiply = 0U != (instruction & 0x2000U);
+    const bool     is_subtract = 0U != (instruction & 0x400U);
+    const vector_t n           = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m           = read_z(sve, zm);
+    const uint64_t b           = get_element(&m, index, esize);
+    vector_t       result      = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < elements_of(esize); ++e)
+    {
+        const uint64_t a = get_element(&n, e, esize);
+        const uint64_t r = true == is_multiply ? fp(sve, esize, BAL_FLOAT_MULTIPLY, a, b, 0U)
+                                               : fp(sve,
+                                                    esize,
+                                                    BAL_FLOAT_MULTIPLY_ADD,
+                                                    true == is_subtract ? fp_negate(a, esize) : a,
+                                                    b,
+                                                    get_element(&result, e, esize));
+        set_element(&result, e, esize, r);
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// FMLALB, FMLALT, FMLSLB and FMLSLT (vectors, 01100100 101 Zm 10 S 00 T Zn Zda, and indexed,
+/// 01100100 101 i3h:i3l Zm 01 S 0 i3l T Zn Zda), and BFMLALB and BFMLALT (01100100 111 ...): the
+/// even or odd half precision or BFloat16 elements, widened and multiplied into single precision
+/// with one rounding.
+static sve_result_t
+float_widening_multiply_add(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_bfloat   = 0U != (instruction & 0x400000U);
+    const bool     is_indexed  = 0U == (instruction & 0x8000U);
+    const bool     is_subtract = 0U != (instruction & 0x2000U);
+    const uint32_t top         = (instruction >> 10U) & 1U;
+
+    // BFMLSLB and BFMLSLT are SVE2.1.
+    if (true == is_bfloat && true == is_subtract)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    const uint32_t zm     = (instruction >> 16U) & (true == is_indexed ? 0x7U : 0x1FU);
+    const uint32_t index  = (((instruction >> 19U) & 0x3U) << 1U) | ((instruction >> 11U) & 1U);
+    const uint64_t fpcr   = sve->cpu->fpcr;
+    const vector_t n      = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m      = read_z(sve, zm);
+    vector_t       result = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        uint64_t a = get_element(&n, 2U * e + top, 16U);
+        uint64_t b = get_element(&m, true == is_indexed ? index : 2U * e + top, 16U);
+        a          = true == is_subtract ? a ^ 0x8000U : a;
+        a          = true == is_bfloat ? a << 16U : bal_simd_half_to_single(fpcr, a);
+        b          = true == is_bfloat ? b << 16U : bal_simd_half_to_single(fpcr, b);
+        set_element(&result,
+                    e,
+                    32U,
+                    fp(sve, 32U, BAL_FLOAT_MULTIPLY_ADD, a, b, get_element(&result, e, 32U)));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// BFDOT (vectors, 01100100 011 Zm 100000 Zn Zda, and indexed, 01100100 011 i2 Zm 010000 Zn Zda).
+static sve_result_t
+bfloat_dot(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_indexed = 0U == (instruction & 0x8000U);
+    const uint32_t zm         = (instruction >> 16U) & (true == is_indexed ? 0x7U : 0x1FU);
+    const uint32_t index      = (instruction >> 19U) & 0x3U;
+    const vector_t n          = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m          = read_z(sve, zm);
+    vector_t       result     = read_z(sve, instruction & 0x1FU);
+
+    for (uint32_t e = 0U; e < 4U; ++e)
+    {
+        const uint32_t pair = true == is_indexed ? index : e;
+        set_element(&result,
+                    e,
+                    32U,
+                    bal_simd_bfloat_dot_add((uint32_t)get_element(&result, e, 32U),
+                                            (uint16_t)get_element(&n, 2U * e, 16U),
+                                            (uint16_t)get_element(&n, 2U * e + 1U, 16U),
+                                            (uint16_t)get_element(&m, 2U * pair, 16U),
+                                            (uint16_t)get_element(&m, 2U * pair + 1U, 16U)));
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+/// BFMMLA (01100100 011 Zm 111001 Zn Zda) and FMMLA on single precision (01100100 101 Zm 111001
+/// Zn Zda): a 2x2 matrix product added to Zda.
+static sve_result_t
+matrix_multiply_add_float(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_bfloat = 0x6460E400U == (instruction & 0xFFE0FC00U);
+    const vector_t n         = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const vector_t m         = read_z(sve, (instruction >> 16U) & 0x1FU);
+    const vector_t d         = read_z(sve, instruction & 0x1FU);
+    vector_t       result    = d;
+
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        for (uint32_t j = 0U; j < 2U; ++j)
+        {
+            uint64_t sum = get_element(&d, 2U * i + j, 32U);
+
+            if (true == is_bfloat)
+            {
+                for (uint32_t k = 0U; k < 2U; ++k)
+                {
+                    sum = bal_simd_bfloat_dot_add(
+                        (uint32_t)sum,
+                        (uint16_t)get_element(&n, 4U * i + 2U * k, 16U),
+                        (uint16_t)get_element(&n, 4U * i + 2U * k + 1U, 16U),
+                        (uint16_t)get_element(&m, 4U * j + 2U * k, 16U),
+                        (uint16_t)get_element(&m, 4U * j + 2U * k + 1U, 16U));
+                }
+            }
+            else
+            {
+                const uint64_t p0 = fp(sve,
+                                       32U,
+                                       BAL_FLOAT_MULTIPLY,
+                                       get_element(&n, 2U * i, 32U),
+                                       get_element(&m, 2U * j, 32U),
+                                       0U);
+                const uint64_t p1 = fp(sve,
+                                       32U,
+                                       BAL_FLOAT_MULTIPLY,
+                                       get_element(&n, 2U * i + 1U, 32U),
+                                       get_element(&m, 2U * j + 1U, 32U),
+                                       0U);
+                sum = fp(sve, 32U, BAL_FLOAT_ADD, sum, fp(sve, 32U, BAL_FLOAT_ADD, p0, p1, 0U), 0U);
+            }
+
+            set_element(&result, 2U * i + j, 32U, sum);
+        }
+    }
+
+    write_z(sve, instruction & 0x1FU, result);
+    return SVE_OK;
+}
+
+// -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
 
@@ -3612,6 +4967,37 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFE000000U, 0x84000000U, load_gather },
     { 0xFE000000U, 0xC4000000U, load_gather },
     { 0xFE000000U, 0xE4000000U, store_scatter },
+    { 0xFF20E000U, 0x65000000U, float_arithmetic_unpredicated },
+    { 0xFF30E000U, 0x65008000U, float_arithmetic_predicated },
+    { 0xFF38E3C0U, 0x65188000U, float_immediate },
+    { 0xFF38FC00U, 0x65108000U, float_trig_multiply_add },
+    { 0xFF200000U, 0x65200000U, float_multiply_add },
+    { 0xFF3CE000U, 0x65102000U, float_compare_vectors },
+    { 0xFF204000U, 0x65004000U, float_compare_vectors },
+    { 0xFF38E000U, 0x65002000U, float_reduction },
+    { 0xFF3FE000U, 0x65182000U, float_add_ordered },
+    { 0xFF38E000U, 0x64108000U, float_pairwise },
+    { 0xFF38E000U, 0x6500A000U, float_unary },
+    { 0xFF3EE000U, 0x650CA000U, float_unary },
+    { 0xFFF9E000U, 0x6518A000U, float_unary },
+    { 0xFF20E000U, 0x6500A000U, float_convert },
+    { 0xFF3CE000U, 0x6408A000U, float_convert_top },
+    { 0xFF3EFC00U, 0x650E3000U, float_estimate },
+    { 0xFF3FFC00U, 0x0420B800U, float_exponential },
+    { 0xFF20FC00U, 0x0420B000U, float_trig_select },
+    { 0xFF3EE000U, 0x64008000U, float_complex_add },
+    { 0xFF208000U, 0x64000000U, float_complex_multiply_add },
+    { 0xFFA0F000U, 0x64A01000U, float_complex_multiply_add_indexed },
+    { 0xFFA0F800U, 0x64200000U, float_multiply_indexed },
+    { 0xFFA0F800U, 0x64A00000U, float_multiply_indexed },
+    { 0xFFA0FC00U, 0x64202000U, float_multiply_indexed },
+    { 0xFFA0FC00U, 0x64A02000U, float_multiply_indexed },
+    { 0xFFA0D800U, 0x64A08000U, float_widening_multiply_add },
+    { 0xFFA0D000U, 0x64A04000U, float_widening_multiply_add },
+    { 0xFFE0FC00U, 0x64608000U, bfloat_dot },
+    { 0xFFE0FC00U, 0x64604000U, bfloat_dot },
+    { 0xFFE0FC00U, 0x6460E400U, matrix_multiply_add_float },
+    { 0xFFE0FC00U, 0x64A0E400U, matrix_multiply_add_float },
 };
 
 static sve_result_t

@@ -755,6 +755,51 @@ test_Cssc_MinimumMaximum(void)
     TEST_ASSERT_EQUAL_HEX64(0x80000000U, run_one(0x1AC26420U, 0x1234U, 0x7780000000ULL));
 }
 
+static void
+test_Rcpc3_WritebackFormsRoundTrip(void)
+{
+    // STLR W1, [X2, #-4]!; LDAPR W3, [X2], #4; STILP X1, X4, [X2, #-16]!;
+    // LDIAPP X5, X6, [X2], #16.
+    const uint32_t program[] = { 0x99800841U, 0x99C00843U, 0xD9040841U, 0xD9460845U };
+    load_program(program, 4U);
+    g_cpu.x[1] = 0x1122334455667788ULL;
+    g_cpu.x[2] = 0x2010U;
+    g_cpu.x[4] = 0x99AABBCCDDEEFF00ULL;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x55667788U, g_cpu.x[3]);
+    TEST_ASSERT_EQUAL_HEX64(0x1122334455667788ULL, g_cpu.x[5]);
+    TEST_ASSERT_EQUAL_HEX64(0x99AABBCCDDEEFF00ULL, g_cpu.x[6]);
+    TEST_ASSERT_EQUAL_HEX64(0x2010U, g_cpu.x[2]);
+
+    uint64_t pair[2];
+    (void)memcpy(pair, g_memory + 0x2000U, sizeof(pair));
+    TEST_ASSERT_EQUAL_HEX64(0x1122334455667788ULL, pair[0]);
+    TEST_ASSERT_EQUAL_HEX64(0x99AABBCCDDEEFF00ULL, pair[1]);
+}
+
+static void
+test_Rcpc3_VectorFormsRoundTrip(void)
+{
+    // STLUR Q0, [X2, #-16]; LDAPUR Q1, [X2, #-16]; LDAPUR S2, [X2, #-16];
+    // STL1 {V0.D}[1], [X2]; LDAP1 {V3.D}[0], [X2].
+    const uint32_t program[] = { 0x1D9F0840U, 0x1DDF0841U, 0x9D5F0842U, 0x4D018440U, 0x0D418443U };
+    load_program(program, 5U);
+    g_cpu.x[2]    = 0x2010U;
+    g_cpu.v[0][0] = 0x0123456789ABCDEFULL;
+    g_cpu.v[0][1] = 0xFEDCBA9876543210ULL;
+    g_cpu.v[2][1] = ~0ULL;
+    g_cpu.v[3][1] = 0x5555U;
+
+    TEST_ASSERT_EQUAL(BAL_SUCCESS, run());
+    TEST_ASSERT_EQUAL_HEX64(0x0123456789ABCDEFULL, g_cpu.v[1][0]);
+    TEST_ASSERT_EQUAL_HEX64(0xFEDCBA9876543210ULL, g_cpu.v[1][1]);
+    TEST_ASSERT_EQUAL_HEX64(0x89ABCDEFU, g_cpu.v[2][0]);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.v[2][1]);
+    TEST_ASSERT_EQUAL_HEX64(0xFEDCBA9876543210ULL, g_cpu.v[3][0]);
+    TEST_ASSERT_EQUAL_HEX64(0x5555U, g_cpu.v[3][1]);
+}
+
 int
 main(void)
 {
@@ -780,6 +825,8 @@ main(void)
     RUN_TEST(test_PacMemo_FollowsKeyChangesBetweenRuns);
     RUN_TEST(test_Cssc_AbsCntCtz);
     RUN_TEST(test_Cssc_MinimumMaximum);
+    RUN_TEST(test_Rcpc3_WritebackFormsRoundTrip);
+    RUN_TEST(test_Rcpc3_VectorFormsRoundTrip);
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);

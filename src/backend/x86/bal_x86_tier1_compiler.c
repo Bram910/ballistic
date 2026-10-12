@@ -543,11 +543,11 @@ translate_block(bal_tier1_compiler_t         *compiler,
                 break;
             }
 
-            // The SIMD&FP helpers and the load/store translator check the encodings they
-            // accept themselves; other translators do not know 128-bit operands.
-            const bool is_checked_by_translator = OPCODE_FLOAT == metadata->ir_opcode
-                                                  || OPCODE_LOAD == metadata->ir_opcode
-                                                  || OPCODE_STORE == metadata->ir_opcode;
+            // The SIMD&FP helpers, the load/store translator and the atomic helper check the
+            // encodings they accept themselves; other translators do not know 128-bit operands.
+            const bool is_checked_by_translator
+                = OPCODE_FLOAT == metadata->ir_opcode || OPCODE_LOAD == metadata->ir_opcode
+                  || OPCODE_STORE == metadata->ir_opcode || OPCODE_ATOMIC == metadata->ir_opcode;
 
             if (BAL_OPERAND_TYPE_REGISTER_128 == metadata->operands[0].type
                 && false == is_checked_by_translator)

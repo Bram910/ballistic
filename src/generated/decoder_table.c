@@ -18806,7 +18806,7 @@ const bal_decoder_instruction_metadata_t
         { "LDAP1",
           0xBFFFFC00,
           0x0D418400,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20354,7 +20354,7 @@ const bal_decoder_instruction_metadata_t
         { "LDIAPP",
           0xFFE0FC00,
           0x99400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20366,7 +20366,7 @@ const bal_decoder_instruction_metadata_t
         { "LDIAPP",
           0xFFE0FC00,
           0x99401800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20378,7 +20378,7 @@ const bal_decoder_instruction_metadata_t
         { "LDIAPP",
           0xFFE0FC00,
           0xD9400800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -20390,7 +20390,7 @@ const bal_decoder_instruction_metadata_t
         { "LDIAPP",
           0xFFE0FC00,
           0xD9401800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37286,7 +37286,7 @@ const bal_decoder_instruction_metadata_t
         { "STILP",
           0xFFE0FC00,
           0x99000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37298,7 +37298,7 @@ const bal_decoder_instruction_metadata_t
         { "STILP",
           0xFFE0FC00,
           0x99001800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_32, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37310,7 +37310,7 @@ const bal_decoder_instruction_metadata_t
         { "STILP",
           0xFFE0FC00,
           0xD9000800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37322,7 +37322,7 @@ const bal_decoder_instruction_metadata_t
         { "STILP",
           0xFFE0FC00,
           0xD9001800,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_64, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },
@@ -37334,7 +37334,7 @@ const bal_decoder_instruction_metadata_t
         { "STL1",
           0xBFFFFC00,
           0x0D018400,
-          OPCODE_TRAP,
+          OPCODE_ATOMIC,
           {
               { BAL_OPERAND_TYPE_REGISTER_128, 0, 5 },
               { BAL_OPERAND_TYPE_REGISTER_64, 5, 5 },

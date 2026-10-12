@@ -109,7 +109,8 @@ local function derive_opcode(mnemonic)
     end
 
     for _, prefix in ipairs({ "LDXR", "LDAXR", "STXR", "STLXR", "LDXP", "LDAXP", "STXP", "STLXP",
-                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS" }) do
+                              "LDAR", "LDLAR", "STLR", "STLLR", "LDAPR", "LDAPUR", "STLUR", "CAS",
+                              "LDIAPP", "STILP", "LDAP1", "STL1" }) do
         if m:sub(1, #prefix) == prefix then
             return "OPCODE_ATOMIC"
         end

@@ -788,6 +788,324 @@ integer_outer_product_pairs(sve_t *sve, const uint32_t instruction)
     return SVE_OK;
 }
 
+/// Copies tile slice `slice` of tile `tile` to `out`, or from `in` when `in` is not NULL.
+static void
+access_slice(const sve_t   *sve,
+             const uint32_t bytes,
+             const uint32_t tile,
+             const uint32_t slice,
+             const bool     is_vertical,
+             uint8_t        out[SVL_BYTES],
+             const uint8_t *in)
+{
+    for (uint32_t e = 0U; e < SVL_BYTES / bytes; ++e)
+    {
+        uint8_t *element = tile_element(sve, bytes, tile, slice, is_vertical, e);
+
+        if (NULL != in)
+        {
+            (void)memcpy(element, &in[e * bytes], bytes);
+        }
+        else
+        {
+            (void)memcpy(&out[e * bytes], element, bytes);
+        }
+    }
+}
+
+/// The first ZA array vector of a vector group: (W8-W11 picked by `rv`, plus `offset`) modulo
+/// the stride between the groups' vectors, 16 divided by `groups`.
+static uint32_t
+array_vector(const sve_t *sve, const uint32_t rv, const uint32_t offset, const uint32_t groups)
+{
+    return (uint32_t)((uint32_t)(sve->cpu->x[8U + rv] + offset) % (SVL_BYTES / groups));
+}
+
+/// MOVA and MOVAZ between two or four tile slices and vectors, and between ZA array vector
+/// groups and vectors: 11000000 size 0001 D 0 V Rs 0 G N ... with D set from ZA to vectors, N
+/// set for four registers, and G set for the ZA array forms (size 00, V 0); MOVAZ (from ZA,
+/// bits 9:8 = 10) zeroes what it reads.
+static sve_result_t
+move_multiple(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t size       = (instruction >> 22U) & 0x3U;
+    const bool     to_vector  = 0U != (instruction & 0x20000U);
+    const bool     is_array   = 0U != (instruction & 0x800U);
+    const uint32_t nreg       = 0U != (instruction & 0x400U) ? 4U : 2U;
+    const bool     is_zeroing = true == to_vector && 0U != (instruction & 0x200U);
+    const uint32_t bytes      = 1U << size;
+    const uint32_t field      = true == to_vector ? (instruction >> 5U) & 0x7U : instruction & 0x7U;
+    // The tile and offset field: three bits for two registers or doubleword tiles, two otherwise.
+    const uint32_t width = 2U == nreg || 8U == bytes ? 3U : 2U;
+
+    // Vector numbers are multiples of the register count, and the to-ZA forms have bits 5:3
+    // clear.
+    const uint32_t vector_bits
+        = true == to_vector ? instruction & (nreg - 1U) : (instruction >> 5U) & (nreg - 1U);
+
+    if ((true == is_array && (0U != size || 0U != (instruction & 0x8000U)))
+        || (true == to_vector && 0U != (instruction & 0x100U)) || 0U != vector_bits
+        || (false == to_vector && 0U != (instruction & 0x38U))
+        || (false == is_array && 3U != width && 0U != (field & 0x4U))
+        || (false == is_array && 4U == nreg && 8U == bytes))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t z     = true == to_vector ? instruction & 0x1FU : (instruction >> 5U) & 0x1FU;
+    const uint32_t first = z & ~(nreg - 1U);
+    uint8_t        vectors[4][SVL_BYTES];
+
+    if (false == to_vector)
+    {
+        for (uint32_t r = 0U; r < nreg; ++r)
+        {
+            (void)memcpy(vectors[r], sve->cpu->v[first + r], SVL_BYTES);
+        }
+    }
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        if (true == is_array)
+        {
+            const uint32_t vector = array_vector(sve, (instruction >> 13U) & 0x3U, field, nreg)
+                                    + r * (SVL_BYTES / nreg);
+
+            if (true == to_vector)
+            {
+                (void)memcpy(vectors[r], sve->cpu->za[vector], SVL_BYTES);
+            }
+            else
+            {
+                (void)memcpy(sve->cpu->za[vector], vectors[r], SVL_BYTES);
+            }
+
+            if (true == is_zeroing)
+            {
+                (void)memset(sve->cpu->za[vector], 0, SVL_BYTES);
+            }
+
+            continue;
+        }
+
+        const uint32_t tile_bits = (uint32_t)__builtin_ctz(bytes);
+        const uint32_t tile      = field >> (width - (tile_bits < width ? tile_bits : width));
+        const uint32_t offset
+            = tile_bits >= width ? 0U : (field & ((1U << (width - tile_bits)) - 1U)) * nreg;
+        const uint32_t slices   = SVL_BYTES / bytes;
+        const uint64_t index    = sve->cpu->x[12U + ((instruction >> 13U) & 0x3U)] & 0xFFFFFFFFU;
+        const uint32_t slice    = (uint32_t)((index - index % nreg + offset) % slices) + r;
+        const bool     vertical = 0U != (instruction & 0x8000U);
+        access_slice(sve,
+                     bytes,
+                     tile_bits >= width ? field : tile,
+                     slice,
+                     vertical,
+                     vectors[r],
+                     true == to_vector ? NULL : vectors[r]);
+
+        if (true == is_zeroing)
+        {
+            static const uint8_t ZEROS[SVL_BYTES] = { 0U };
+            access_slice(
+                sve, bytes, tile_bits >= width ? field : tile, slice, vertical, NULL, ZEROS);
+        }
+    }
+
+    if (true == to_vector)
+    {
+        for (uint32_t r = 0U; r < nreg; ++r)
+        {
+            (void)memcpy(sve->cpu->v[first + r], vectors[r], SVL_BYTES);
+        }
+    }
+
+    return SVE_OK;
+}
+
+/// MOVAZ to one vector: 11000000 size 00001 Q V Rs 000 1 ZAn:off Zd, which zeroes the slice it
+/// reads.
+static sve_result_t
+move_zeroing(sve_t *sve, const uint32_t instruction)
+{
+    const uint32_t size    = (instruction >> 22U) & 0x3U;
+    const bool     is_quad = 0U != (instruction & 0x10000U);
+
+    if (true == is_quad && 3U != size)
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t bytes = true == is_quad ? 16U : 1U << size;
+    uint32_t       tile;
+    uint32_t       offset;
+    tile_and_offset((instruction >> 5U) & 0xFU, bytes, &tile, &offset);
+    const uint32_t       slices   = SVL_BYTES / bytes;
+    const bool           vertical = 0U != (instruction & 0x8000U);
+    const uint32_t       slice    = slice_index(sve, (instruction >> 13U) & 0x3U, offset, slices);
+    static const uint8_t ZEROS[SVL_BYTES] = { 0U };
+    uint8_t              vector[SVL_BYTES];
+    access_slice(sve, bytes, tile, slice, vertical, vector, NULL);
+    access_slice(sve, bytes, tile, slice, vertical, NULL, ZEROS);
+    (void)memcpy(sve->cpu->v[instruction & 0x1FU], vector, SVL_BYTES);
+    return SVE_OK;
+}
+
+/// MOVT between a general register and a doubleword of ZT0: 11000000 0100 11 D 0 off3 0011111
+/// Rt, from ZT0 with D clear.
+static sve_result_t
+move_table(sve_t *sve, const uint32_t instruction)
+{
+    if (false == is_enabled(sve, false))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t offset = 8U * ((instruction >> 12U) & 0x7U);
+    const uint32_t t      = instruction & 0x1FU;
+
+    if (0U != (instruction & 0x20000U))
+    {
+        write_za(&sve->cpu->zt0[offset], 8U, read_x(sve, t));
+    }
+    else
+    {
+        write_x(sve, t, read_za(&sve->cpu->zt0[offset], 8U));
+    }
+
+    return SVE_OK;
+}
+
+/// ZERO of ZA array vector groups (SME2.1): 11000000 00001 1 opc<2:1> opc<0> Rv 000 000000 0 off,
+/// zeroing `nvec` consecutive vectors in each of `groups` groups.
+static sve_result_t
+zero_vectors(sve_t *sve, const uint32_t instruction)
+{
+    static const uint8_t GROUPS[8]  = { 2U, 1U, 2U, 4U, 4U, 1U, 2U, 4U };
+    static const uint8_t VECTORS[8] = { 1U, 2U, 2U, 2U, 1U, 4U, 4U, 4U };
+    const uint32_t       opc = (((instruction >> 16U) & 0x3U) << 1U) | ((instruction >> 15U) & 1U);
+    const uint32_t       groups = GROUPS[opc];
+    const uint32_t       nvec   = VECTORS[opc];
+    // The offset field narrows as the groups grow: off3, off3:0, off2:0, o1:00 and so on.
+    const uint32_t field_bits
+        = 1U == nvec ? 3U : (2U == nvec ? (1U == groups ? 3U : 2U) : (1U == groups ? 2U : 1U));
+    const uint32_t field = instruction & 0x7U;
+
+    if (0U != (field >> field_bits))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t stride = SVL_BYTES / groups;
+    uint32_t       vector = array_vector(sve, (instruction >> 13U) & 0x3U, field * nvec, groups);
+    vector -= vector % nvec;
+
+    for (uint32_t r = 0U; r < groups; ++r)
+    {
+        for (uint32_t i = 0U; i < nvec; ++i)
+        {
+            (void)memset(sve->cpu->za[vector + i], 0, SVL_BYTES);
+        }
+
+        vector += stride;
+    }
+
+    return SVE_OK;
+}
+
+/// LUTI2 and LUTI4: elements of the 2-bit or 4-bit indexes in a segment of Zn look up words of
+/// ZT0, truncated to the element size, into one (11000000 11001 ...), two or four consecutive
+/// (11000000 10001 ...) or two or four strided (11000000 10011 ...) vectors.
+static sve_result_t
+table_lookup_zt0(sve_t *sve, const uint32_t instruction)
+{
+    const bool     is_single  = 0U != (instruction & 0x400000U);
+    const bool     is_strided = false == is_single && 0U != (instruction & 0x100000U);
+    const bool     is_two_bit = 0U != (instruction & 0x40000U);
+    const uint32_t isize      = true == is_two_bit ? 2U : 4U;
+    const uint32_t size       = (instruction >> 12U) & 0x3U;
+    // Bit 14 marks two registers and bits 15:14 = 10 four.
+    const uint32_t nreg = true == is_single ? 1U : (0U != (instruction & 0x4000U) ? 2U : 4U);
+    uint32_t       imm;
+
+    if (true == is_single)
+    {
+        imm = true == is_two_bit ? (instruction >> 14U) & 0xFU : (instruction >> 14U) & 0x7U;
+    }
+    else if (2U == nreg)
+    {
+        imm = true == is_two_bit ? (instruction >> 15U) & 0x7U : (instruction >> 15U) & 0x3U;
+    }
+    else
+    {
+        imm = true == is_two_bit ? (instruction >> 16U) & 0x3U : (instruction >> 16U) & 0x1U;
+    }
+
+    // The unallocated sizes: doublewords; for four registers of 4-bit indexes, bytes; and for
+    // the strided forms, all but bytes and halfwords, and all but halfwords for four of 4-bit.
+    const bool is_unallocated
+        = 3U == size || (4U == nreg && false == is_two_bit && 0U == size)
+          || (true == is_strided
+              && (2U == size || (4U == nreg && false == is_two_bit && 1U != size)));
+    const uint32_t misaligned_bits = true == is_strided ? (2U == nreg ? 0x8U : 0xCU) : nreg - 1U;
+    const bool     is_misaligned   = false == is_single && 0U != (instruction & misaligned_bits);
+
+    // The single register forms need bits 11:10 clear, like the others.
+    if (true == is_unallocated || true == is_misaligned || 0U != (instruction & 0xC00U)
+        || (false == is_single && 4U == nreg && 0U == (instruction & 0x8000U)))
+    {
+        return SVE_UNDEFINED;
+    }
+
+    if (false == is_enabled(sve, true))
+    {
+        return SVE_ILLEGAL;
+    }
+
+    const uint32_t esize    = 8U << size;
+    const uint32_t elements = VECTOR_BITS / esize;
+    const uint32_t segments = esize / (isize * nreg);
+    const uint32_t segment  = imm % segments;
+    const vector_t indexes  = read_z(sve, (instruction >> 5U) & 0x1FU);
+    const uint32_t field    = instruction & 0x1FU;
+    // Strided registers: D:0:Zd for two (stride 8) and D:00:Zd for four (stride 4).
+    uint32_t       d = true == is_strided ? (field & 0x10U) | (field & (2U == nreg ? 0x7U : 0x3U))
+                                          : (field & ~(nreg - 1U));
+    const uint32_t dstride = true == is_strided ? (2U == nreg ? 8U : 4U) : 1U;
+
+    for (uint32_t r = 0U; r < nreg; ++r)
+    {
+        const uint32_t base   = (segment * nreg + r) * elements;
+        vector_t       result = read_z(sve, d);
+
+        for (uint32_t e = 0U; e < elements; ++e)
+        {
+            const uint32_t index = (uint32_t)get_element(&indexes, base + e, isize);
+            set_element(&result, e, esize, read_za(&sve->cpu->zt0[4U * index], 4U));
+        }
+
+        write_z(sve, d, result);
+        d += dstride;
+    }
+
+    return SVE_OK;
+}
+
 // -----------------------------------------------------------------------------
 // Decoding
 // -----------------------------------------------------------------------------
@@ -810,6 +1128,13 @@ static const sve_pattern_t PATTERNS[] = {
     { 0xFFE0000EU, 0x81800008U, half_outer_product },
     { 0xFFE0000CU, 0x80800008U, bit_outer_product },
     { 0xFEE0000CU, 0xA0800008U, integer_outer_product_pairs },
+    { 0xFF3F1000U, 0xC0060000U, move_multiple },
+    { 0xFF3F1000U, 0xC0040000U, move_multiple },
+    { 0xFF3E1E00U, 0xC0020200U, move_zeroing },
+    { 0xFFFD8FE0U, 0xC04C03E0U, move_table },
+    { 0xFFFC1FF8U, 0xC00C0000U, zero_vectors },
+    { 0xFFF80000U, 0xC0C80000U, table_lookup_zt0 },
+    { 0xFFE80000U, 0xC0880000U, table_lookup_zt0 },
 };
 
 sve_result_t

@@ -212,6 +212,8 @@ static void emit_guest_exception(bal_tier1_compiler_t *compiler,
                                  bal_exception_t       exception,
                                  uint64_t              immediate);
 
+static bool is_undefined_at_el0(uint32_t instruction);
+
 static bool translate_exception(bal_tier1_compiler_t *compiler,
                                 uint32_t              instruction,
                                 bal_guest_address_t   guest_address);
@@ -619,7 +621,9 @@ translate_block(bal_tier1_compiler_t         *compiler,
             start_x86_instruction_offset = compiler->assembler.offset;
             compiler->pinned_registers   = 0U;
 
-            switch (metadata->ir_opcode)
+            // The encodings undefined at EL0 raise the exception like UDF does.
+            switch (true == is_undefined_at_el0(instruction) ? OPCODE_EXCEPTION
+                                                             : metadata->ir_opcode)
             {
                 case OPCODE_MOV:;
                     // ADR and ADRP: bits 28:24 = 10000.
@@ -5896,14 +5900,121 @@ translate_pointer_authentication(bal_tier1_compiler_t *BAL_RESTRICT         comp
     return true;
 }
 
+/// Returns true for the encodings the decoder table lists that an EL0 process on the guest CPU
+/// sees as undefined, besides UDF, HLT, HVC and SMC:
+///
+/// - the bitfield and extract encodings whose N bit differs from sf or whose immediates use bit
+///   5 with 32-bit registers,
+/// - the system instructions and registers of EL1 and above, op1 other than 3: MRS, MSR, MSR
+///   (immediate) other than CFINV, XAFLAG and AXFLAG, SYS and SYSL,
+/// - ERET, ERETAA, ERETAB, DRPS, DCPS1, DCPS2 and DCPS3,
+/// - MRRS, MSRR and SYSP, of FEAT_SYSREG128, which the CPU lacks,
+/// - TCOMMIT, which is undefined outside a transaction, as the PE always is since TSTART fails,
+/// - LDGM, STGM and STZGM, which only EL1 and above may execute,
+/// - LD64B, ST64B, ST64BV and ST64BV0, of FEAT_LS64, which the CPU lacks,
+/// - RCWCASP, RCWCLRP, RCWSWPP and RCWSETP and their RCWS forms, which need FEAT_D128, which the
+///   CPU lacks.
+static bool
+is_undefined_at_el0(const uint32_t instruction)
+{
+    const uint32_t sf  = instruction >> 31U;
+    const uint32_t n   = (instruction >> 22U) & 1U;
+    const uint32_t op1 = (instruction >> 16U) & 0x7U;
+
+    // Bitfield: sf opc 100110 N immr imms Rn Rd, with opc = 11 unallocated.
+    if (0x13000000U == (instruction & 0x1F800000U))
+    {
+        return sf != n || 0x60000000U == (instruction & 0x60000000U)
+               || (0U == sf && 0U != (instruction & 0x00208000U));
+    }
+
+    // Extract: sf 00 100111 N o0 Rm imms Rn Rd.
+    if (0x13800000U == (instruction & 0x7F800000U))
+    {
+        return sf != n || 0U != (instruction & 0x00200000U)
+               || (0U == sf && 0U != (instruction & 0x00008000U));
+    }
+
+    // MRS and MSR (register): 1101010100 L 1 o0 op1 CRn CRm op2 Rt.
+    if (0xD5100000U == (instruction & 0xFFD00000U))
+    {
+        return 3U != op1;
+    }
+
+    // MSR (immediate): 1101010100000 op1 0100 CRm op2 11111, where op1 = 000 with CRm = 0000
+    // and op2 = 000, 001 or 010 are CFINV, XAFLAG and AXFLAG.
+    if (0xD500401FU == (instruction & 0xFFF8F01FU))
+    {
+        const bool is_flag_format
+            = 0xD500401FU == (instruction & 0xFFFFFF9FU) && 0x60U != (instruction & 0x60U);
+        return 3U != op1 && false == is_flag_format;
+    }
+
+    // SYS and SYSL: 1101010100 L 01 op1 CRn CRm op2 Rt.
+    if (0xD5080000U == (instruction & 0xFFD80000U))
+    {
+        return 3U != op1;
+    }
+
+    // SYSP (1101010101 0 01 ...), and MRRS and MSRR (1101010101 L 1 ...).
+    if (0xD5480000U == (instruction & 0xFFF80000U) || 0xD5500000U == (instruction & 0xFFD00000U))
+    {
+        return true;
+    }
+
+    // DCPS1, DCPS2 and DCPS3: 11010100 101 imm16 000 LL, with LL other than 00.
+    if (0xD4A00000U == (instruction & 0xFFE0001CU) && 0U != (instruction & 0x3U))
+    {
+        return true;
+    }
+
+    switch (instruction & 0xFFFFFC00U)
+    {
+        case 0xD9E00000U: // LDGM
+        case 0xD9A00000U: // STGM
+        case 0xD9200000U: // STZGM
+        case 0xF83FD000U: // LD64B
+        case 0xF83F9000U: // ST64B
+            return true;
+        default:
+            break;
+    }
+
+    // ST64BV and ST64BV0: 11111000 001 Rs 1 01 1 00 Rn Rt and ... 1 01 0 00 ...
+    if (0xF820A000U == (instruction & 0xFFE0EC00U))
+    {
+        return true;
+    }
+
+    // RCWCASP (0 S 011001 A R 1 Rs 000011 Rn Rt), and RCWCLRP, RCWSWPP and RCWSETP (... Rt2 1 opc
+    // 00 ..., opc 001, 010 and 011).
+    switch (instruction & 0xBF20FC00U)
+    {
+        case 0x19200C00U:
+        case 0x19209000U:
+        case 0x1920A000U:
+        case 0x1920B000U:
+            return true;
+        default:
+            break;
+    }
+
+    return 0xD69F03E0U == instruction     // ERET
+           || 0xD69F0BFFU == instruction  // ERETAA
+           || 0xD69F0FFFU == instruction  // ERETAB
+           || 0xD6BF03E0U == instruction  // DRPS
+           || 0xD503307FU == instruction; // TCOMMIT
+}
+
 /// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception
 /// and exception_immediate set for the host, which bal_engine_run_thread() reports as
 /// BAL_ERROR_GUEST_EXCEPTION.
 ///
 /// SVC raises BAL_EXCEPTION_SUPERVISOR_CALL and leaves the PC after it, where the host resumes
 /// once it has handled the call. BRK raises BAL_EXCEPTION_BREAKPOINT, and UDF, HLT, HVC and SMC,
-/// which are undefined at EL0, raise BAL_EXCEPTION_UNDEFINED_INSTRUCTION; those leave the PC on
-/// the instruction. Returns true when the PC stays on the instruction.
+/// which are undefined at EL0, raise BAL_EXCEPTION_UNDEFINED_INSTRUCTION, as do the encodings
+/// is_undefined_at_el0() lists, with a zero immediate; those leave the PC on the instruction.
+/// Returns true when the PC stays on the instruction.
 static bool
 translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                     const uint32_t                     instruction,
@@ -5913,6 +6024,12 @@ translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     uint64_t        immediate      = (instruction >> 5U) & 0xFFFFU;
     bal_exception_t exception      = BAL_EXCEPTION_UNDEFINED_INSTRUCTION;
     bool            is_pc_retained = true;
+
+    if (true == is_undefined_at_el0(instruction))
+    {
+        emit_guest_exception(compiler, exception, 0U);
+        return true;
+    }
 
     // Exception generation: 11010100 opc imm16 op2 LL, with op2 = 000.
     switch (instruction & 0xFFE0001FU)

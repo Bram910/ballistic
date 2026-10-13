@@ -360,15 +360,41 @@ test_ClearCache_RetranslatesTheGuestCode(void)
 static void
 test_UnsupportedInstruction_RaisesWhenReached(void)
 {
-    // MOVZ X0, #1; AT S1E1R, X1 (EL1 only); MOVZ X0, #2.
-    const uint32_t program[] = { 0xD2800020U, 0xD5087801U, 0xD2800040U };
+    // MOVZ X0, #1; MRS X1, S3_3_C15_C15_7 (an implementation defined register); MOVZ X0, #2.
+    const uint32_t program[] = { 0xD2800020U, 0xD53BFFE1U, 0xD2800040U };
     load_program(program, 3U);
 
     TEST_ASSERT_EQUAL(BAL_ERROR_UNKNOWN_INSTRUCTION, run());
     TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
     TEST_ASSERT_EQUAL_UINT32(BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION, g_cpu.exception);
-    TEST_ASSERT_EQUAL_HEX64(0xD5087801U, g_cpu.exception_immediate);
+    TEST_ASSERT_EQUAL_HEX64(0xD53BFFE1U, g_cpu.exception_immediate);
     TEST_ASSERT_EQUAL_HEX64(4U, g_cpu.pc);
+}
+
+static void
+test_El1Instruction_RaisesUndefinedInstruction(void)
+{
+    // MOVZ X0, #1; AT S1E1R, X1, which EL0 cannot execute; MOVZ X0, #2.
+    const uint32_t program[] = { 0xD2800020U, 0xD5087801U, 0xD2800040U };
+    load_program(program, 3U);
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_GUEST_EXCEPTION, run());
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_UINT32(BAL_EXCEPTION_UNDEFINED_INSTRUCTION, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.exception_immediate);
+    TEST_ASSERT_EQUAL_HEX64(4U, g_cpu.pc);
+}
+
+static void
+test_ReservedBitfieldImmediate_RaisesUndefinedInstruction(void)
+{
+    // UBFM W0, W1, #32, #3: immr uses bit 5 of a 32-bit register.
+    const uint32_t program[] = { 0x53200C20U };
+    load_program(program, 1U);
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_GUEST_EXCEPTION, run());
+    TEST_ASSERT_EQUAL_UINT32(BAL_EXCEPTION_UNDEFINED_INSTRUCTION, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX64(0U, g_cpu.pc);
 }
 
 static void
@@ -1253,6 +1279,8 @@ main(void)
     RUN_TEST(test_IcIvauAndIsb_RunTheCodeTheGuestWrote);
     RUN_TEST(test_ClearCache_RetranslatesTheGuestCode);
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);
+    RUN_TEST(test_El1Instruction_RaisesUndefinedInstruction);
+    RUN_TEST(test_ReservedBitfieldImmediate_RaisesUndefinedInstruction);
     RUN_TEST(test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress);
     RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
     RUN_TEST(test_StopThread_LeavesChainedBlocks);

@@ -1124,35 +1124,6 @@ table_lookup_zt0(sve_t *sve, const uint32_t instruction)
     return SVE_OK;
 }
 
-/// CounterToPredicate(): the predicate a predicate-as-counter register describes, for four
-/// vectors, one 16-bit predicate per 16 bits of the result. The low set bit of bits 3:0 gives
-/// the element size, the bits above it up to bit 6 the number of leading active elements, and
-/// bit 15 inverts.
-static uint64_t
-counter_to_predicate(const uint16_t counter)
-{
-    if (0U == (counter & 0xFU))
-    {
-        return 0U;
-    }
-
-    const uint32_t shift  = (uint32_t)__builtin_ctz(counter & 0xFU);
-    const uint32_t psize  = 1U << shift;
-    const uint32_t count  = (counter >> (shift + 1U)) & ((1U << (6U - shift)) - 1U);
-    const bool     invert = 0U != (counter & 0x8000U);
-    uint64_t       result = 0U;
-
-    for (uint32_t e = 0U; e < 64U / psize; ++e)
-    {
-        if ((e < count) != invert)
-        {
-            result |= 1ULL << (e * psize);
-        }
-    }
-
-    return result;
-}
-
 /// The SME2 multi-vector contiguous loads and stores: LD1, LDNT1, ST1 and STNT1 of two or four
 /// consecutive (1010000 0 0 1 S imm4, or 0 0 S Rm, ...) or strided (1010000 1 ...) vectors,
 /// governed by a predicate-as-counter register PN8-PN15. Inactive elements load as zero.
@@ -1273,35 +1244,6 @@ static bool
 is_streaming(const sve_t *sve)
 {
     return 0U != (sve->cpu->svcr & SVCR_SM);
-}
-
-/// A BFloat16 value as the single precision value it equals.
-static uint64_t
-bfloat_to_single(const uint64_t value)
-{
-    return (value & 0xFFFFU) << 16U;
-}
-
-/// One floating-point maximum or minimum (`kind` 0 FMAX, 1 FMAXNM, 2 FMIN, 3 FMINNM) of
-/// `esize` bits, BFloat16 when `esize` is 0.
-static uint64_t
-float_extreme(
-    sve_t *sve, const uint32_t esize, const uint32_t kind, const uint64_t a, const uint64_t b)
-{
-    static const bal_float_operation_t OPERATIONS[4] = {
-        BAL_FLOAT_MAXIMUM,
-        BAL_FLOAT_MAXIMUM_NUMBER,
-        BAL_FLOAT_MINIMUM,
-        BAL_FLOAT_MINIMUM_NUMBER,
-    };
-
-    if (0U == esize)
-    {
-        // The result is one of the operands, or a NaN with the low half of a single clear.
-        return fp(sve, 32U, OPERATIONS[kind], bfloat_to_single(a), bfloat_to_single(b), 0U) >> 16U;
-    }
-
-    return fp(sve, esize, OPERATIONS[kind], a, b, 0U);
 }
 
 /// The SME2 multi-vector operations on two or four consecutive vectors, destructive, with one

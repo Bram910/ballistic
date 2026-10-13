@@ -4478,7 +4478,8 @@ float_multiply_indexed(sve_t *sve, const uint32_t instruction)
 }
 
 /// FMLALB, FMLALT, FMLSLB and FMLSLT (vectors, 01100100 101 Zm 10 S 00 T Zn Zda, and indexed,
-/// 01100100 101 i3h:i3l Zm 01 S 0 i3l T Zn Zda), and BFMLALB and BFMLALT (01100100 111 ...): the
+/// 01100100 101 i3h:i3l Zm 01 S 0 i3l T Zn Zda), and BFMLALB, BFMLALT, BFMLSLB and BFMLSLT
+/// (01100100 111 ...): the
 /// even or odd half precision or BFloat16 elements, widened and multiplied into single precision
 /// with one rounding.
 static sve_result_t
@@ -4488,12 +4489,6 @@ float_widening_multiply_add(sve_t *sve, const uint32_t instruction)
     const bool     is_indexed  = 0U == (instruction & 0x8000U);
     const bool     is_subtract = 0U != (instruction & 0x2000U);
     const uint32_t top         = (instruction >> 10U) & 1U;
-
-    // BFMLSLB and BFMLSLT are SVE2.1.
-    if (true == is_bfloat && true == is_subtract)
-    {
-        return SVE_UNDEFINED;
-    }
 
     const uint32_t zm     = (instruction >> 16U) & (true == is_indexed ? 0x7U : 0x1FU);
     const uint32_t index  = (((instruction >> 19U) & 0x3U) << 1U) | ((instruction >> 11U) & 1U);
@@ -6362,6 +6357,14 @@ execute(sve_t *sve, const uint32_t instruction)
     if (0x80000000U == (instruction & 0x9E000000U))
     {
         return sme_execute(sve, instruction);
+    }
+
+    // Some of the patterns below also match encodings SVE2.1 allocates.
+    const sve_result_t result = sve2p1_execute(sve, instruction);
+
+    if (SVE_UNDEFINED != result)
+    {
+        return result;
     }
 
     for (size_t i = 0U; i < sizeof(PATTERNS) / sizeof(PATTERNS[0]); ++i)

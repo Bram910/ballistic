@@ -608,6 +608,7 @@ is_newer_than_unicorn(const uint32_t instruction)
         { 0xFFE0001FU, 0xD4600000U }, // TCANCEL
         { 0xFFFFFFA0U, 0xD52B7720U }, // GCSPOPM, GCSSS2
         { 0xFFFFFFA0U, 0xD50B7700U }, // GCSPUSHM, GCSSS1
+        { 0xFFFFEC00U, 0xD91F0C00U }, // GCSSTR, GCSSTTR
         { 0xFFFFFFE0U, 0xD50B7460U }, // DC GVA
         { 0xFFFFFFE0U, 0xD50B7480U }, // DC GZVA
         { 0xFFFFFFE0U, 0xD50B7A60U }, // DC CGVAC

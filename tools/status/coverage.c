@@ -10,6 +10,7 @@
 //! where status is one of:
 //!
 //! - `verified`: tier 1 translated the samples and every result matched Unicorn,
+//! - `undefined`: every compared sample raised an undefined instruction exception in both,
 //! - `wrong`: at least one translated sample did not match Unicorn,
 //! - `unverified`: tier 1 translated the samples but Unicorn could not run any of them,
 //! - `todo`: tier 1 rejected every sample.
@@ -656,7 +657,7 @@ main(void)
     for (uint32_t index = 0U; index < BAL_DECODER_ARM64_INSTRUCTIONS_SIZE; ++index)
     {
         const bal_decoder_instruction_metadata_t *entry = &g_bal_decoder_arm64_instructions[index];
-        uint32_t samples = 0U, translated = 0U, compared = 0U, matched = 0U;
+        uint32_t samples = 0U, translated = 0U, compared = 0U, matched = 0U, undefined = 0U;
 
         for (uint32_t attempt = 0U; attempt < ATTEMPTS_PER_ENTRY && samples < SAMPLES_PER_ENTRY;
              ++attempt)
@@ -754,6 +755,10 @@ main(void)
                   && (RUN_MEMORY_FAULT == ballistic_result || RUN_EXCEPTION == ballistic_result
                       || 0 == memcmp(g_unicorn_memory, g_ballistic_memory, GUEST_MEMORY_SIZE));
             matched += is_match ? 1U : 0U;
+            undefined += is_match && RUN_EXCEPTION == ballistic_result
+                                 && BAL_EXCEPTION_UNDEFINED_INSTRUCTION == actual.exception
+                             ? 1U
+                             : 0U;
 
             if (0 == is_match && NULL != getenv("BAL_COVERAGE_REPORT"))
             {
@@ -779,7 +784,7 @@ main(void)
         }
         else if (compared > 0U)
         {
-            status = "verified";
+            status = undefined == matched ? "undefined" : "verified";
         }
         else if (translated > 0U)
         {

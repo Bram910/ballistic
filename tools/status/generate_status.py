@@ -13,6 +13,10 @@ Unicorn cannot run SVE or SME. Each QEMU_CSV, an output of tests/sve/run_sve_dif
 BAL_SVE_SPACE=sme for SME), gives the SVE or SME entries it covers their status against
 qemu-aarch64 instead; entries both Ballistic and qemu reject count as not started. A CSV made with
 BAL_SVE_SPACE=all also gives the other entries Unicorn cannot check the status qemu found.
+
+An entry is undefined, not verified, when every compared sample raised an undefined instruction
+exception in both Ballistic and the reference: encodings the guest CPU lacks or EL0 may not
+execute. Verified and undefined entries both count as checked.
 """
 
 import csv
@@ -32,9 +36,16 @@ README = ROOT / "README.md"
 MARK_BEGIN = "<!-- BALLISTIC-STATUS:BEGIN -->"
 MARK_END = "<!-- BALLISTIC-STATUS:END -->"
 
-VERIFIED, UNVERIFIED, WRONG, TODO = "verified", "unverified", "wrong", "todo"
-ORDER = {VERIFIED: 0, UNVERIFIED: 1, WRONG: 2, TODO: 3}
-COLORS = {VERIFIED: "#2ea043", UNVERIFIED: "#d29922", WRONG: "#f85149", TODO: "#6e7681"}
+VERIFIED, UNDEFINED, UNVERIFIED, WRONG, TODO = "verified", "undefined", "unverified", "wrong", "todo"
+ORDER = {VERIFIED: 0, UNDEFINED: 1, UNVERIFIED: 2, WRONG: 3, TODO: 4}
+COLORS = {
+    VERIFIED: "#2ea043",
+    UNDEFINED: "#388bfd",
+    UNVERIFIED: "#d29922",
+    WRONG: "#f85149",
+    TODO: "#6e7681",
+}
+CHECKED = (VERIFIED, UNDEFINED)
 BORDER = "#0d1117"
 
 SHORT_NAMES = {
@@ -99,7 +110,7 @@ def apply_qemu(entries, paths):
         lines = (line for line in Path(path).read_text().splitlines() if not line.startswith("#"))
         for row in csv.reader(lines):
             index = int(row[0])
-            status = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
+            status = {"verified": VERIFIED, "undefined": UNDEFINED, "wrong": WRONG}.get(row[4], TODO)
             # A later comparison with no compared samples keeps an earlier result.
             if status != TODO or index not in statuses:
                 statuses[index] = status
@@ -109,7 +120,7 @@ def apply_qemu(entries, paths):
             continue
         if entry["class"] in ("SVE", "SME"):
             entry["status"] = status
-        elif entry["status"] == UNVERIFIED and status in (VERIFIED, WRONG):
+        elif entry["status"] == UNVERIFIED and status != TODO:
             entry["status"] = status
 
 
@@ -242,11 +253,11 @@ def render(entries, commit):
         svg.append(f'<text x="{rx}" y="{y + 11:.1f}" class="txt">{html.escape(cls)}</text>')
         svg.append(
             f'<text x="{W}" y="{y + 11:.1f}" class="txt" text-anchor="end">'
-            f"{pct(c[VERIFIED], total)} ({c[VERIFIED]}/{total})</text>"
+            f"{pct(c[VERIFIED] + c[UNDEFINED], total)} ({c[VERIFIED] + c[UNDEFINED]}/{total})</text>"
         )
         bar_y, bar_h, bx = y + 16, 10, rx
         svg.append(f'<rect x="{rx}" y="{bar_y:.1f}" width="{rw}" height="{bar_h}" rx="3" fill="#21262d"/>')
-        for status in (VERIFIED, UNVERIFIED, WRONG):
+        for status in (VERIFIED, UNDEFINED, UNVERIFIED, WRONG):
             width = rw * c[status] / total
             if width > 0:
                 svg.append(
@@ -259,6 +270,7 @@ def render(entries, commit):
     lx = 0
     for status, text in (
         (VERIFIED, "matches Unicorn (qemu for SVE, SME)"),
+        (UNDEFINED, "undefined in both"),
         (UNVERIFIED, "translated, not checkable"),
         (WRONG, "differs from the reference"),
         (TODO, "not started"),
@@ -328,8 +340,8 @@ def main():
     (OUT_DIR / "status.svg").write_text(render(entries, commit), encoding="utf-8")
 
     integer = [e for e in entries if e["class"].startswith(("Data processing", "Branches"))]
-    integer_done = sum(e["status"] == VERIFIED for e in integer) / len(integer)
-    all_done = sum(e["status"] == VERIFIED for e in entries) / len(entries)
+    integer_done = sum(e["status"] in CHECKED for e in integer) / len(integer)
+    all_done = sum(e["status"] in CHECKED for e in entries) / len(entries)
     (OUT_DIR / "badge_integer.svg").write_text(
         badge("integer + branches", f"{100 * integer_done:.1f}%", badge_color(integer_done)), encoding="utf-8"
     )
@@ -342,14 +354,17 @@ def main():
     for name in CLASS_ORDER:
         members = [e for e in entries if e["class"] == name]
         if members:
-            done = sum(e["status"] == VERIFIED for e in members) / len(members)
+            done = sum(e["status"] in CHECKED for e in members) / len(members)
             groups.append(f"{name} {100 * done:.1f}%")
     reference = "Unicorn, and SVE, SME and the instructions Unicorn cannot run against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
-        f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "
-        f"checkable (Unicorn cannot run the random samples or has a known bug for them), "
-        f"{counts[WRONG]} wrong and {counts[TODO]} not started. Verified by group: {', '.join(groups)}."
+        f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNDEFINED]} undefined in both "
+        f"(every sample raises an undefined instruction exception in Ballistic and the reference, as for "
+        f"the encodings the guest CPU lacks or EL0 may not execute), {counts[UNVERIFIED]} translated but "
+        f"not checkable (the reference cannot run the random samples or has a known bug for them), "
+        f"{counts[WRONG]} wrong and {counts[TODO]} not started. Checked (verified or undefined) by "
+        f"group: {', '.join(groups)}."
     )
     update_readme(summary)
     print(summary)

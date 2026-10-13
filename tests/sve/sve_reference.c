@@ -35,6 +35,10 @@ memset(void *destination, int value, size_t size)
 #define SIGILL  4
 #define SIGBUS  7
 #define SIGSEGV 11
+#define SIGALRM 14
+
+/// The seconds a test may run before the reference gives up on it, such as a branch to itself.
+#define TEST_SECONDS 5
 
 static long
 syscall6(long number, long a, long b, long c, long d, long e, long f)
@@ -292,9 +296,9 @@ handler(int signal, void *info, void *context)
     // sigcontext: fault_address, regs[31], sp, pc.
     uint64_t *pc = (uint64_t *)((char *)context + 176 + 8 + 31 * 8 + 8);
 
-    // A fault in the epilogue would come back here forever; give up instead, which the driver
-    // reports as a reference crash on this test.
-    if (*pc >= g_epilogue)
+    // A fault in the epilogue would come back here forever, and a test past its time may never
+    // end; give up instead, which the driver reports as a reference crash on this test.
+    if (SIGALRM == signal || *pc >= g_epilogue)
     {
         syscall6(94, 3, 0, 0, 0, 0, 0); // exit_group
     }
@@ -335,9 +339,9 @@ _start(void)
 
     // SA_SIGINFO | SA_ONSTACK | SA_NODEFER; the kernel provides the return to the program.
     kernel_sigaction_t action     = { handler, 0x4U | 0x08000000U | 0x40000000U, 0, 0U };
-    const int          signals[3] = { SIGILL, SIGBUS, SIGSEGV };
+    const int          signals[4] = { SIGILL, SIGBUS, SIGSEGV, SIGALRM };
 
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         result = syscall4(134, signals[i], (long)&action, 0, 8);
 
@@ -357,7 +361,13 @@ _start(void)
         const uint32_t r        = sve_base_register(test.instruction);
         g_context.base_register = r;
         build(&test, r);
+
+        // setitimer(ITIMER_REAL): SIGALRM after TEST_SECONDS, cleared once the test returns.
+        long timer[4] = { 0, 0, TEST_SECONDS, 0 };
+        syscall6(103, 0, (long)timer, 0, 0, 0, 0);
         ((void (*)(sve_state_t *))(uintptr_t)g_code)(&g_context);
+        timer[2] = 0;
+        syscall6(103, 0, (long)timer, 0, 0, 0, 0);
         g_context.data_hash = sve_hash_data((const uint8_t *)SVE_DATA_BASE);
         g_context.pad[0] = g_context.pad[1] = g_context.pad[2] = 0U;
         write_all(&g_context, sizeof(g_context));

@@ -37,13 +37,17 @@ extern "C"
         /// `exception_immediate` its immediate.
         BAL_EXCEPTION_UNDEFINED_INSTRUCTION = 4,
 
-        /// An instruction tier 1 does not translate: one that is undefined for an EL0 process on
-        /// the guest CPU, such as an EL1 system instruction or an extension the CPU lacks, or one
-        /// Ballistic does not implement yet. The guest should see an undefined instruction
-        /// exception. It is raised when the instruction is reached, after the ones before it
-        /// have run; `pc` is the instruction and `exception_immediate` its encoding, and
-        /// bal_engine_run_thread() returns BAL_ERROR_UNKNOWN_INSTRUCTION.
+        /// An instruction tier 1 does not translate: one Ballistic does not implement yet, such as
+        /// an access to an unknown system register. The guest should see an undefined
+        /// instruction exception. It is raised when the instruction is reached, after the ones
+        /// before it have run; `pc` is the instruction and `exception_immediate` its encoding,
+        /// and bal_engine_run_thread() returns BAL_ERROR_UNKNOWN_INSTRUCTION.
         BAL_EXCEPTION_UNSUPPORTED_INSTRUCTION = 5,
+
+        /// A guarded control stack exception: GCSSTR or GCSSTTR, while the guarded control stack
+        /// stores are disabled at EL0 (GCSCRE0_EL1.STREn = 0), as they always are here. Linux
+        /// reports it as SIGSEGV. `pc` is the instruction and `exception_immediate` zero.
+        BAL_EXCEPTION_GUARDED_CONTROL_STACK = 6,
     } bal_exception_t;
 
     /// The pointer authentication keys in bal_cpu_t::pac_keys.

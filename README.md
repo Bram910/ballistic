@@ -144,7 +144,7 @@ allocator.free(allocator.context, guest_memory, guest_memory_size);
 
 ![Status](docs/status/status.svg)
 
-Each of the 3770 reachable A64 encodings in the decoder table is tested with random operands against Unicorn, and SVE, SME and the instructions Unicorn cannot run against qemu-aarch64 with 128-bit vectors: 3681 verified, 87 translated but not checkable (Unicorn cannot run the random samples or has a known bug for them), 0 wrong and 2 not started. Verified by group: Data processing (register) 89.0%, Data processing (immediate) 85.3%, Branches and system 88.9%, Loads and stores 96.0%, SIMD and floating point 98.3%, SVE 100.0%, SME 100.0%.
+Each of the 3770 reachable A64 encodings in the decoder table is tested with random operands against Unicorn, and SVE, SME and the instructions Unicorn cannot run against qemu-aarch64 with 128-bit vectors: 3731 verified, 39 translated but not checkable (Unicorn cannot run the random samples or has a known bug for them), 0 wrong and 0 not started. Verified by group: Data processing (register) 100.0%, Data processing (immediate) 100.0%, Branches and system 93.5%, Loads and stores 96.3%, SIMD and floating point 100.0%, SVE 100.0%, SME 100.0%.
 
 Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv`,
 `BAL_SVE_SPACE=sme BAL_SVE_QEMU=<qemu 10.1 or later> tests/sve/run_sve_diff.sh > sme.csv` and

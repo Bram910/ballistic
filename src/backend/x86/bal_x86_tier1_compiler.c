@@ -214,6 +214,8 @@ static void emit_guest_exception(bal_tier1_compiler_t *compiler,
 
 static bool is_undefined_at_el0(uint32_t instruction);
 
+static bool is_guarded_control_stack_store(uint32_t instruction);
+
 static bool translate_exception(bal_tier1_compiler_t *compiler,
                                 uint32_t              instruction,
                                 bal_guest_address_t   guest_address);
@@ -621,9 +623,12 @@ translate_block(bal_tier1_compiler_t         *compiler,
             start_x86_instruction_offset = compiler->assembler.offset;
             compiler->pinned_registers   = 0U;
 
-            // The encodings undefined at EL0 raise the exception like UDF does.
-            switch (true == is_undefined_at_el0(instruction) ? OPCODE_EXCEPTION
-                                                             : metadata->ir_opcode)
+            // The encodings undefined at EL0, and the guarded control stack stores, raise their
+            // exception like UDF does.
+            const bool is_exception = true == is_undefined_at_el0(instruction)
+                                      || true == is_guarded_control_stack_store(instruction);
+
+            switch (true == is_exception ? OPCODE_EXCEPTION : metadata->ir_opcode)
             {
                 case OPCODE_MOV:;
                     // ADR and ADRP: bits 28:24 = 10000.
@@ -6006,6 +6011,13 @@ is_undefined_at_el0(const uint32_t instruction)
            || 0xD503307FU == instruction; // TCOMMIT
 }
 
+/// GCSSTR and GCSSTTR: 11011001 000 11111 000 opc 11 Rn Rt, with opc 000 and 001.
+static bool
+is_guarded_control_stack_store(const uint32_t instruction)
+{
+    return 0xD91F0C00U == (instruction & 0xFFFFEC00U);
+}
+
 /// Translates the exception-generating instructions. The block ends with bal_cpu_t::exception
 /// and exception_immediate set for the host, which bal_engine_run_thread() reports as
 /// BAL_ERROR_GUEST_EXCEPTION.
@@ -6014,7 +6026,8 @@ is_undefined_at_el0(const uint32_t instruction)
 /// once it has handled the call. BRK raises BAL_EXCEPTION_BREAKPOINT, and UDF, HLT, HVC and SMC,
 /// which are undefined at EL0, raise BAL_EXCEPTION_UNDEFINED_INSTRUCTION, as do the encodings
 /// is_undefined_at_el0() lists, with a zero immediate; those leave the PC on the instruction.
-/// Returns true when the PC stays on the instruction.
+/// GCSSTR and GCSSTTR raise BAL_EXCEPTION_GUARDED_CONTROL_STACK, as the disabled stores do at EL0,
+/// before checking their address. Returns true when the PC stays on the instruction.
 static bool
 translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
                     const uint32_t                     instruction,
@@ -6028,6 +6041,12 @@ translate_exception(bal_tier1_compiler_t *BAL_RESTRICT compiler,
     if (true == is_undefined_at_el0(instruction))
     {
         emit_guest_exception(compiler, exception, 0U);
+        return true;
+    }
+
+    if (true == is_guarded_control_stack_store(instruction))
+    {
+        emit_guest_exception(compiler, BAL_EXCEPTION_GUARDED_CONTROL_STACK, 0U);
         return true;
     }
 

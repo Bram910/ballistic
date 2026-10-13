@@ -223,8 +223,11 @@ run_ballistic(const sve_test_t *test, sve_state_t *out)
     out->data_hash  = sve_hash_data(g_memory);
     out->status     = 0U;
 
+    // Linux reports a guarded control stack exception as SIGSEGV too.
     if (BAL_ERROR_MEMORY_FAULT == status
-        || (BAL_ERROR_GUEST_EXCEPTION == status && BAL_EXCEPTION_DATA_ABORT == cpu.exception))
+        || (BAL_ERROR_GUEST_EXCEPTION == status
+            && (BAL_EXCEPTION_DATA_ABORT == cpu.exception
+                || BAL_EXCEPTION_GUARDED_CONTROL_STACK == cpu.exception)))
     {
         out->status = STATUS_SIGSEGV;
     }

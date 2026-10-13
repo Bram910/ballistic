@@ -386,6 +386,19 @@ test_El1Instruction_RaisesUndefinedInstruction(void)
 }
 
 static void
+test_GuardedControlStackStore_RaisesGcsException(void)
+{
+    // MOVZ X0, #1; GCSSTR X1, [X2], whose stores are disabled at EL0.
+    const uint32_t program[] = { 0xD2800020U, 0xD91F0C41U };
+    load_program(program, 2U);
+
+    TEST_ASSERT_EQUAL(BAL_ERROR_GUEST_EXCEPTION, run());
+    TEST_ASSERT_EQUAL_UINT64(1U, g_cpu.x[0]);
+    TEST_ASSERT_EQUAL_UINT32(BAL_EXCEPTION_GUARDED_CONTROL_STACK, g_cpu.exception);
+    TEST_ASSERT_EQUAL_HEX64(4U, g_cpu.pc);
+}
+
+static void
 test_ReservedBitfieldImmediate_RaisesUndefinedInstruction(void)
 {
     // UBFM W0, W1, #32, #3: immr uses bit 5 of a 32-bit register.
@@ -1281,6 +1294,7 @@ main(void)
     RUN_TEST(test_UnsupportedInstruction_RaisesWhenReached);
     RUN_TEST(test_El1Instruction_RaisesUndefinedInstruction);
     RUN_TEST(test_ReservedBitfieldImmediate_RaisesUndefinedInstruction);
+    RUN_TEST(test_GuardedControlStackStore_RaisesGcsException);
     RUN_TEST(test_FetchPastMappedMemory_FaultsAtTheUnmappedAddress);
     RUN_TEST(test_DitAndSsbs_ReadBackWhatWasWritten);
     RUN_TEST(test_StopThread_LeavesChainedBlocks);

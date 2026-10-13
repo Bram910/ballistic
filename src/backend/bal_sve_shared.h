@@ -17,7 +17,8 @@ typedef enum
     SVE_UNDEFINED,
     /// An access was not mapped.
     SVE_FAULT,
-    /// An SME instruction needs streaming mode or ZA storage, which is off.
+    /// An SME instruction needs streaming mode or ZA storage, which is off, or is undefined at the
+    /// 128-bit vector length.
     SVE_ILLEGAL,
 } sve_result_t;
 
@@ -286,6 +287,35 @@ fp_is_nan(const uint64_t value, const uint32_t esize)
     return ((value >> fraction) & exponent) == exponent && 0U != (value & mask_of(fraction));
 }
 
+/// A BFloat16 value as the single precision value it equals.
+static inline uint64_t
+bfloat_to_single(const uint64_t value)
+{
+    return (value & 0xFFFFU) << 16U;
+}
+
+/// One floating-point maximum or minimum (`kind` 0 FMAX, 1 FMAXNM, 2 FMIN, 3 FMINNM) of
+/// `esize` bits, BFloat16 when `esize` is 0.
+static inline uint64_t
+float_extreme(
+    sve_t *sve, const uint32_t esize, const uint32_t kind, const uint64_t a, const uint64_t b)
+{
+    static const bal_float_operation_t OPERATIONS[4] = {
+        BAL_FLOAT_MAXIMUM,
+        BAL_FLOAT_MAXIMUM_NUMBER,
+        BAL_FLOAT_MINIMUM,
+        BAL_FLOAT_MINIMUM_NUMBER,
+    };
+
+    if (0U == esize)
+    {
+        // The result is one of the operands, or a NaN with the low half of a single clear.
+        return fp(sve, 32U, OPERATIONS[kind], bfloat_to_single(a), bfloat_to_single(b), 0U) >> 16U;
+    }
+
+    return fp(sve, esize, OPERATIONS[kind], a, b, 0U);
+}
+
 /// The FP element size of a size field: 1, 2 and 3 are half, single and double precision.
 static inline uint32_t
 fp_esize(const uint32_t size)
@@ -381,12 +411,45 @@ doubling_multiply_high(const uint64_t a,
     return narrow_to(doubled_high(product, esize, is_rounding), esize, SATURATE_SIGNED);
 }
 
+/// CounterToPredicate(): the predicate a predicate-as-counter register describes, for four
+/// vectors, one 16-bit predicate per 16 bits of the result. The low set bit of bits 3:0 gives
+/// the element size, the bits above it up to bit 6 the number of leading active elements, and
+/// bit 15 inverts.
+static inline uint64_t
+counter_to_predicate(const uint16_t counter)
+{
+    if (0U == (counter & 0xFU))
+    {
+        return 0U;
+    }
+
+    const uint32_t shift  = (uint32_t)__builtin_ctz(counter & 0xFU);
+    const uint32_t psize  = 1U << shift;
+    const uint32_t count  = (counter >> (shift + 1U)) & ((1U << (6U - shift)) - 1U);
+    const bool     invert = 0U != (counter & 0x8000U);
+    uint64_t       result = 0U;
+
+    for (uint32_t e = 0U; e < 64U / psize; ++e)
+    {
+        if ((e < count) != invert)
+        {
+            result |= 1ULL << (e * psize);
+        }
+    }
+
+    return result;
+}
+
 /// PSTATE.SM and PSTATE.ZA in bal_cpu_t::svcr.
 #define SVCR_SM 1U
 #define SVCR_ZA 2U
 
 /// Executes an instruction of the SME encoding space (bal_sme.c).
 sve_result_t sme_execute(sve_t *sve, uint32_t instruction);
+
+/// Executes an SVE2.1 instruction, or one of the SVE encoding space that SME and SME2 add
+/// (bal_sve2p1.c). Returns SVE_UNDEFINED for the other encodings.
+sve_result_t sve2p1_execute(sve_t *sve, uint32_t instruction);
 
 #endif /* BALLISTIC_BAL_SVE_SHARED_H */
 

@@ -135,6 +135,7 @@ add_library(Ballistic STATIC
         src/backend/bal_simd.c
         src/backend/bal_sve.c
         src/backend/bal_sme.c
+        src/backend/bal_sve2p1.c
         src/backend/bal_pointer_authentication.c
         src/backend/bal_system.c
         src/backend/x86/bal_x86_assembler.c

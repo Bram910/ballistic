@@ -16,8 +16,9 @@
 //!
 //!     index,mnemonic,mask,expected,status,translated,matched,samples
 //!
-//! where status is `verified` (every compared sample matched), `wrong`, `todo` (Ballistic rejects
-//! the encodings qemu runs), `undefined` (both reject them) or `unchecked` (qemu rejects what
+//! where status is `verified` (every compared sample matched, an undefined instruction exception
+//! in both included), `wrong`, `todo` (Ballistic rejects the encodings qemu runs), `undefined`
+//! (Ballistic cannot translate the encodings qemu rejects) or `unchecked` (qemu rejects what
 //! Ballistic runs, an extension it lacks). Mismatch reports start with `#`.
 // mkdtemp() and the other POSIX functions.
 #define _DEFAULT_SOURCE
@@ -73,7 +74,7 @@ random_register(void)
 }
 
 static void
-random_state(sve_state_t *state)
+random_state(sve_state_t *state, const bool is_sme)
 {
     memset(state, 0, sizeof(*state));
 
@@ -106,7 +107,7 @@ random_state(sve_state_t *state)
 
     state->ffr = 0U == next_random() % 2U ? 0xFFFFU : (uint16_t)next_random();
 
-    if (true == g_is_sme)
+    if (true == is_sme)
     {
         // Mostly streaming mode with ZA on, which most SME instructions need.
         state->svcr       = 0U == next_random() % 4U ? next_random() % 3U : 3U;
@@ -389,6 +390,10 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
 ///   active one unchanged instead of zeroing them.
 /// - It raises an undefined instruction exception for LDCLRP, LDSETP and SWPP with Rt equal to
 ///   Rt2, which later versions of the architecture make CONSTRAINED UNPREDICTABLE.
+/// - It runs FMMLA of doublewords and ZIP1, ZIP2, UZP1, UZP2, TRN1 and TRN2 of quadwords (qemu
+///   6.2), which need 256-bit vectors, at 128 bits.
+/// - qemu-user emulates the reads of the ID registers (MRS with op0 = 3, op1 = 0 and CRn = 0) that
+///   Linux traps at EL0, where Ballistic's CPU raises an undefined instruction exception.
 /// - For an instruction qemu lacks, the reference runs an equivalent one without its alignment
 ///   checks, so a fault only Ballistic raises is not compared.
 /// - qemu-user turns a guest address into a host one without checking the guest mapped it, so a
@@ -412,6 +417,20 @@ is_known_qemu_difference(const sve_test_t  *test,
         return true;
     }
 
+    if (0xD5380000U == (instruction & 0xFFFFF000U) && STATUS_SIGILL == ballistic->status)
+    {
+        return true;
+    }
+
+    const bool is_long_vector_only
+        = 0x64E0E400U == (instruction & 0xFFE0FC00U) || 0x05A00000U == (instruction & 0xFFE0E000U);
+
+    if (true == is_long_vector_only && STATUS_SIGILL == ballistic->status
+        && 0U == reference->status)
+    {
+        return true;
+    }
+
     if (0U != test->substitute && STATUS_SIGSEGV == ballistic->status && 0U == reference->status)
     {
         return true;
@@ -420,8 +439,7 @@ is_known_qemu_difference(const sve_test_t  *test,
     const bool is_narrowing_shift
         = 0xC1E0D400U == (instruction & 0xFFE0FC00U) || 0xC120D800U == (instruction & 0xFF20F800U);
 
-    if (true == is_narrowing_shift && 0U == (test->state.svcr & 1U)
-        && 0U != (test->flags & SVE_TEST_SME))
+    if (true == is_narrowing_shift && 0U == (test->state.svcr & 1U))
     {
         return true;
     }
@@ -535,7 +553,8 @@ run_reference(record_t *records, const uint32_t count, const char *reference, co
              sizeof(command),
              "%s -cpu max,sve-default-vector-length=16%s %s < %s > %s 2> /dev/null",
              qemu,
-             true == g_is_sme ? ",sme-default-vector-length=16,sme_fa64=on" : "",
+             true == g_is_sme || true == g_is_all ? ",sme-default-vector-length=16,sme_fa64=on"
+                                                  : "",
              reference,
              tests_path,
              results_path);
@@ -716,16 +735,26 @@ rcpc3_substitute(uint32_t *instruction)
     return 0U;
 }
 
+/// Whether `instruction` is SMSTART, SMSTOP, or an MRS or MSR of SVCR or TPIDR2_EL0, which are
+/// SME tests in every space.
+static bool
+is_sme_system(const uint32_t instruction)
+{
+    return 0xD503407FU == (instruction & 0xFFFFF8FFU) || 0xD51B4240U == (instruction & 0xFFDFFFE0U)
+           || 0xD51BD0A0U == (instruction & 0xFFDFFFE0U);
+}
+
 /// Fills `record` with a random test of `instruction` and runs it in Ballistic.
 static void
 add_record(record_t *record, const uint32_t entry, const uint32_t instruction)
 {
-    uint32_t stage_shift     = 0U;
+    const bool is_sme        = true == g_is_sme || true == is_sme_system(instruction);
+    uint32_t   stage_shift   = 0U;
     record->entry            = entry;
     record->test.instruction = instruction;
-    record->test.flags       = true == g_is_sme ? SVE_TEST_SME : 0U;
+    record->test.flags       = true == is_sme ? SVE_TEST_SME : 0U;
     record->test.seed        = next_random();
-    random_state(&record->test.state);
+    random_state(&record->test.state, is_sme);
 
     if (true == g_is_all && true == is_memory_operation(instruction, &stage_shift))
     {
@@ -853,8 +882,8 @@ main(int argc, char **argv)
     run_reference(records, count, reference, qemu);
 
     // Per entry, and for the system forms last: compared, matched, samples, samples the reference
-    // ran.
-    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U][4];
+    // ran, samples Ballistic ran.
+    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U][5];
     long            reported = 0;
 
     for (uint32_t i = 0U; i < count; ++i)
@@ -864,13 +893,16 @@ main(int argc, char **argv)
 
         if (NULL != getenv("BAL_SVE_TRACE"))
         {
-            printf("#T %08X ballistic %u/%llu reference %llu\n", record->test.instruction,
-                   record->ballistic_ok, (unsigned long long)record->ballistic.status,
+            printf("#T %08X ballistic %u/%llu reference %llu\n",
+                   record->test.instruction,
+                   record->ballistic_ok,
+                   (unsigned long long)record->ballistic.status,
                    (unsigned long long)record->reference.status);
         }
-        const uint64_t  status = record->reference.status;
+        const uint64_t status = record->reference.status;
         ++t[2];
         t[3] += STATUS_SIGILL != status && STATUS_CRASHED != status ? 1U : 0U;
+        t[4] += 0U != record->ballistic_ok && STATUS_SIGILL != record->ballistic.status ? 1U : 0U;
 
         if (0U == record->ballistic_ok || STATUS_CRASHED == status
             || true
@@ -914,7 +946,7 @@ main(int argc, char **argv)
 
         const char *status = "todo";
 
-        if (0U == t[3] && t[0] > 0U)
+        if (0U == t[3] && t[4] > 0U)
         {
             // The reference rejects every sample Ballistic runs: an extension qemu lacks.
             status = "unchecked";

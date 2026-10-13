@@ -38,13 +38,13 @@ BAL_SVE_SPACE=sme BAL_SVE_QEMU=/path/to/qemu-aarch64 tests/sve/run_sve_diff.sh >
 
 Each entry gets one CSV line, `index,mnemonic,mask,expected,status,translated,matched,samples`, the
 format of the status tracker's coverage tool. The status is one of:
-- `verified`: every compared sample matched;
+- `verified`: every compared sample matched, including samples where both raise an undefined
+  instruction exception;
 - `wrong`;
 - `todo`: Ballistic rejects encodings qemu runs;
-- `undefined`: both reject them; these are mostly SVE2.1 and SME2 instructions newer than the
-  reference's qemu;
-- `unchecked`: qemu rejects every sample Ballistic runs, an extension qemu lacks (FEAT_LSE128
-  and FEAT_THE in qemu 11.1).
+- `undefined`: Ballistic cannot translate the encodings qemu rejects;
+- `unchecked`: qemu rejects every sample Ballistic runs, an extension qemu lacks (SVE2.1 in qemu
+  6.2, FEAT_THE in qemu 11.1).
 
 With `$BAL_SVE_SPACE` set to `all`, it tests the decoder entries listed in `MNEMONICS` from any
 encoding space. This checks the loads and stores newer than Unicorn against qemu (10.1 or later):

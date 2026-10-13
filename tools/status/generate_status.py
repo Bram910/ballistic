@@ -98,7 +98,11 @@ def apply_qemu(entries, paths):
     for path in paths:
         lines = (line for line in Path(path).read_text().splitlines() if not line.startswith("#"))
         for row in csv.reader(lines):
-            statuses[int(row[0])] = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
+            index = int(row[0])
+            status = {"verified": VERIFIED, "wrong": WRONG}.get(row[4], TODO)
+            # A later comparison with no compared samples keeps an earlier result.
+            if status != TODO or index not in statuses:
+                statuses[index] = status
     for entry in entries:
         status = statuses.get(entry["index"])
         if status is None:
@@ -340,7 +344,7 @@ def main():
         if members:
             done = sum(e["status"] == VERIFIED for e in members) / len(members)
             groups.append(f"{name} {100 * done:.1f}%")
-    reference = "Unicorn, and SVE, SME and the loads and stores newer than Unicorn against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
+    reference = "Unicorn, and SVE, SME and the instructions Unicorn cannot run against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
         f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "

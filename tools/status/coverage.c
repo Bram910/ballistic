@@ -539,6 +539,23 @@ is_ordered_access(const uint32_t instruction)
            || 0x19000000U == (instruction & 0x3F200C00U);
 }
 
+/// Returns true for the instructions of EL1 and above, which Unicorn runs at the EL1 it runs the
+/// guest at and Ballistic's EL0 guest finds undefined: the system instructions and registers with
+/// op1 other than 3 (but CFINV, XAFLAG and AXFLAG), MRRS, MSRR and SYSP, ERET, ERETAA, ERETAB,
+/// DRPS, HVC, SMC, DCPS1, DCPS2 and DCPS3. qemu-user checks them instead.
+static bool
+is_above_el0(const uint32_t instruction)
+{
+    const bool is_flag_format
+        = 0xD500401FU == (instruction & 0xFFFFFF9FU) && 0x60U != (instruction & 0x60U);
+    const bool is_system = 0xD5000000U == (instruction & 0xFFC00000U)
+                           && 3U != ((instruction >> 16U) & 0x7U) && false == is_flag_format;
+    return true == is_system || 0xD5400000U == (instruction & 0xFFC00000U)
+           || 0xD69F03E0U == instruction || 0xD69F0BFFU == instruction || 0xD69F0FFFU == instruction
+           || 0xD6BF03E0U == instruction || 0xD4000002U == (instruction & 0xFFE0001EU)
+           || (0xD4A00000U == (instruction & 0xFFE0001CU) && 0U != (instruction & 0x3U));
+}
+
 static bool
 is_newer_than_unicorn(const uint32_t instruction)
 {
@@ -687,7 +704,8 @@ main(void)
                   || (OPCODE_POINTER_AUTHENTICATION == entry->ir_opcode
                       && true == is_unverifiable_pac(instruction, &initial))
                   || true == is_dit_or_ssbs(instruction)
-                  || true == is_newer_than_unicorn(instruction);
+                  || true == is_newer_than_unicorn(instruction)
+                  || true == is_above_el0(instruction);
 
             if (true == is_known_unicorn_bug)
             {

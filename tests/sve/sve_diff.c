@@ -16,10 +16,11 @@
 //!
 //!     index,mnemonic,mask,expected,status,translated,matched,samples
 //!
-//! where status is `verified` (every compared sample matched, an undefined instruction exception
-//! in both included), `wrong`, `todo` (Ballistic rejects the encodings qemu runs), `undefined`
-//! (Ballistic cannot translate the encodings qemu rejects) or `unchecked` (qemu rejects what
-//! Ballistic runs, an extension it lacks). Mismatch reports start with `#`.
+//! where status is `verified` (every compared sample matched), `undefined` (every compared sample
+//! raised an undefined instruction exception in both), `wrong`, `todo` (Ballistic rejects the
+//! encodings qemu runs), `rejected` (Ballistic cannot translate the encodings qemu rejects) or
+//! `unchecked` (qemu rejects what Ballistic runs, an extension it lacks). Mismatch reports start
+//! with `#`.
 // mkdtemp() and the other POSIX functions.
 #define _DEFAULT_SOURCE
 
@@ -895,8 +896,9 @@ main(int argc, char **argv)
     run_reference(records, count, reference, qemu);
 
     // Per entry, and for the system forms last: compared, matched, samples, samples the reference
-    // ran, samples Ballistic ran.
-    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U][5];
+    // ran, samples Ballistic ran, matched samples where both raised an undefined instruction
+    // exception.
+    static uint32_t tally[BAL_DECODER_ARM64_INSTRUCTIONS_SIZE + 1U][6];
     long            reported = 0;
 
     for (uint32_t i = 0U; i < count; ++i)
@@ -940,6 +942,7 @@ main(int argc, char **argv)
         if (true == same_state(&record->ballistic, &compared, why, sizeof(why)))
         {
             ++t[1];
+            t[5] += STATUS_SIGILL == record->ballistic.status ? 1U : 0U;
         }
         else if (reported < reports)
         {
@@ -970,11 +973,11 @@ main(int argc, char **argv)
         }
         else if (t[0] > 0U)
         {
-            status = "verified";
+            status = t[5] == t[1] ? "undefined" : "verified";
         }
         else if (0U == t[3])
         {
-            status = "undefined";
+            status = "rejected";
         }
 
         const bal_decoder_instruction_metadata_t *entry = &g_bal_decoder_arm64_instructions[e];

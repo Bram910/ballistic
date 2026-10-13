@@ -395,6 +395,8 @@ read_x(const sve_state_t *state, const uint32_t index, const bool is_sp)
 ///   Rt2, which later versions of the architecture make CONSTRAINED UNPREDICTABLE.
 /// - It runs FMMLA of doublewords and ZIP1, ZIP2, UZP1, UZP2, TRN1 and TRN2 of quadwords (qemu
 ///   6.2), which need 256-bit vectors, at 128 bits.
+/// - Its max CPU zeroes 512-byte blocks with DC ZVA and DC GZVA (DCZID_EL0 = 7), where
+///   Ballistic's zeroes 64 bytes (DCZID_EL0 = 4); both sizes are the implementation's choice.
 /// - qemu-user emulates the reads of the ID registers (MRS with op0 = 3, op1 = 0 and CRn = 0) that
 ///   Linux traps at EL0, where Ballistic's CPU raises an undefined instruction exception.
 /// - For an instruction qemu lacks, the reference runs an equivalent one without its alignment
@@ -430,6 +432,14 @@ is_known_qemu_difference(const sve_test_t  *test,
 
     if (true == is_long_vector_only && STATUS_SIGILL == ballistic->status
         && 0U == reference->status)
+    {
+        return true;
+    }
+
+    // DC ZVA, DC GZVA and MRS DCZID_EL0.
+    const uint32_t operation = instruction & 0xFFFFFFE0U;
+
+    if (0xD50B7420U == operation || 0xD50B7480U == operation || 0xD53B00E0U == operation)
     {
         return true;
     }

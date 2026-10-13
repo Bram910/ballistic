@@ -38,11 +38,12 @@ BAL_SVE_SPACE=sme BAL_SVE_QEMU=/path/to/qemu-aarch64 tests/sve/run_sve_diff.sh >
 
 Each entry gets one CSV line, `index,mnemonic,mask,expected,status,translated,matched,samples`, the
 format of the status tracker's coverage tool. The status is one of:
-- `verified`: every compared sample matched, including samples where both raise an undefined
-  instruction exception;
+- `verified`: every compared sample matched;
+- `undefined`: every compared sample raised an undefined instruction exception in both, as the
+  encodings the guest CPU lacks or EL0 may not execute do;
 - `wrong`;
 - `todo`: Ballistic rejects encodings qemu runs;
-- `undefined`: Ballistic cannot translate the encodings qemu rejects;
+- `rejected`: Ballistic cannot translate the encodings qemu rejects;
 - `unchecked`: qemu rejects every sample Ballistic runs, an extension qemu lacks (SVE2.1 in qemu
   6.2, FEAT_THE in qemu 11.1).
 

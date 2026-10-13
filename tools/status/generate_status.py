@@ -300,7 +300,7 @@ def update_readme(summary):
 
 Regenerate after a debug build with `tests/sve/run_sve_diff.sh > sve.csv`,
 `BAL_SVE_SPACE=sme BAL_SVE_QEMU=<qemu 10.1 or later> tests/sve/run_sve_diff.sh > sme.csv` and
-`BAL_SVE_SPACE=all BAL_SVE_QEMU=<qemu> tests/sve/run_sve_diff.sh 24 <unverified mnemonics> > all.csv` and
+`BAL_SVE_SPACE=all BAL_SVE_QEMU=<qemu> tests/sve/run_sve_diff.sh 32 <unverified mnemonics> > all.csv` and
 `python3 tools/status/generate_status.py build/debug/bin/linux/bal_status_coverage sve.csv sme.csv all.csv`.
 {MARK_END}"""
     text = README.read_text(encoding="utf-8")
@@ -340,7 +340,7 @@ def main():
         if members:
             done = sum(e["status"] == VERIFIED for e in members) / len(members)
             groups.append(f"{name} {100 * done:.1f}%")
-    reference = "Unicorn, and SVE and SME against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
+    reference = "Unicorn, and SVE, SME and the loads and stores newer than Unicorn against qemu-aarch64 with 128-bit vectors" if len(sys.argv) > 2 else "Unicorn"
     summary = (
         f"Each of the {len(entries)} reachable A64 encodings in the decoder table is tested with random "
         f"operands against {reference}: {counts[VERIFIED]} verified, {counts[UNVERIFIED]} translated but not "

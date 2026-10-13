@@ -17,7 +17,8 @@ typedef enum
     SVE_UNDEFINED,
     /// An access was not mapped.
     SVE_FAULT,
-    /// An SME instruction needs streaming mode or ZA storage, which is off.
+    /// An SME instruction needs streaming mode or ZA storage, which is off, or is undefined at the
+    /// 128-bit vector length.
     SVE_ILLEGAL,
 } sve_result_t;
 

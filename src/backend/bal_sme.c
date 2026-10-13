@@ -864,13 +864,13 @@ move_multiple(sve_t *sve, const uint32_t instruction)
     if ((true == is_array && (0U != size || 0U != (instruction & 0x8000U)))
         || (true == to_vector && 0U != (instruction & 0x100U)) || 0U != vector_bits
         || (false == to_vector && 0U != (instruction & 0x38U))
-        || (false == is_array && 3U != width && 0U != (field & 0x4U))
-        || (false == is_array && 4U == nreg && 8U == bytes))
+        || (false == is_array && 3U != width && 0U != (field & 0x4U)))
     {
         return SVE_UNDEFINED;
     }
 
-    if (false == is_enabled(sve, true))
+    // A doubleword tile has two slices at this vector length, too few for four registers.
+    if (false == is_enabled(sve, true) || (false == is_array && 4U == nreg && 8U == bytes))
     {
         return SVE_ILLEGAL;
     }
@@ -1696,12 +1696,7 @@ multi_vector_permute(sve_t *sve, const uint32_t instruction)
     }
 
     // The elements of one register must split into the groups.
-    if (VECTOR_BITS < esize * nreg)
-    {
-        return SVE_UNDEFINED;
-    }
-
-    if (false == is_streaming(sve))
+    if (false == is_streaming(sve) || VECTOR_BITS < esize * nreg)
     {
         return SVE_ILLEGAL;
     }

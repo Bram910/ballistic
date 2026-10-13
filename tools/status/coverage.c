@@ -14,6 +14,8 @@
 //! - `unverified`: tier 1 translated the samples but Unicorn could not run any of them,
 //! - `todo`: tier 1 rejected every sample.
 //!
+//! With BAL_COVERAGE_REPORT set, each mismatch is described on stderr, Unicorn's values first.
+//!
 //! Pointer authentication runs with random keys, key enables (SCTLR_EL1) and address layouts
 //! (TCR_EL1), set in both engines.
 //!
@@ -222,7 +224,13 @@ run_unicorn(uint32_t instruction, state_t *state)
             break;
     }
 
-    return UC_ERR_OK == error && UNICORN_EXCEPTION_NONE == exception_number ? RUN_OK : RUN_REJECTED;
+    // A branch to unmapped memory has run when Unicorn fails to fetch the instruction after it,
+    // which Ballistic leaves for the next block.
+    const bool is_branched_away = UC_ERR_FETCH_UNMAPPED == error && state->pc != 0U;
+    return (UC_ERR_OK == error || true == is_branched_away)
+                   && UNICORN_EXCEPTION_NONE == exception_number
+               ? RUN_OK
+               : RUN_REJECTED;
 }
 
 static run_result_t
@@ -726,6 +734,15 @@ main(void)
                 continue;
             }
 
+            // Unicorn drops the high bits of a branch target it cannot fetch, such as the pointer
+            // a failed authentication leaves non-canonical.
+            const uint64_t pc_top = actual.pc >> 47U;
+
+            if (RUN_OK == ballistic_result && 0U != pc_top && 0x1FFFFU != pc_top)
+            {
+                continue;
+            }
+
             ++compared;
             const int is_match
                 = ballistic_result == unicorn_result && expected.exception == actual.exception
@@ -736,6 +753,21 @@ main(void)
                   && (RUN_MEMORY_FAULT == ballistic_result || RUN_EXCEPTION == ballistic_result
                       || 0 == memcmp(g_unicorn_memory, g_ballistic_memory, GUEST_MEMORY_SIZE));
             matched += is_match ? 1U : 0U;
+
+            if (0 == is_match && NULL != getenv("BAL_COVERAGE_REPORT"))
+            {
+                (void)fprintf(stderr,
+                              "%08X: result %d/%d, exception %u/%u, pc %llx/%llx, x30 %llx/%llx\n",
+                              instruction,
+                              (int)unicorn_result,
+                              (int)ballistic_result,
+                              (unsigned)expected.exception,
+                              (unsigned)actual.exception,
+                              (unsigned long long)expected.pc,
+                              (unsigned long long)actual.pc,
+                              (unsigned long long)expected.x[30],
+                              (unsigned long long)actual.x[30]);
+            }
         }
 
         const char *status = "todo";
